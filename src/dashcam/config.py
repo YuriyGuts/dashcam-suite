@@ -77,7 +77,10 @@ def get_platform_defaults() -> Config:
     """Return the default settings for the current platform."""
     common_settings: dict[str, t.Any] = {
         "ffmpeg_executable": "ffmpeg",
-        "video_codec_options": "-c:v libx265 -crf 30 -preset fast",
+        # Closed GOPs make every keyframe an IDR frame. Firefox only seeks efficiently to IDR
+        # frames: with x265's default open GOPs, it decodes from the start of the video on every
+        # seek, which takes up to a minute in a long trip.
+        "video_codec_options": "-c:v libx265 -crf 30 -preset fast -x265-params open-gop=0",
         "audio_codec_options": "-c:a aac -b:a 128k",
         "job_count": 2,
         "min_trip_gap_hours": 3,
