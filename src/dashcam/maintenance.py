@@ -55,7 +55,7 @@ class LibraryScan:
         return self.fingerprints_by_stem[stem]
 
 
-def scan_library(video_dir: Path, store: metadata.MetadataStore) -> LibraryScan:
+def scan_library(library_dir: Path, store: metadata.MetadataStore) -> LibraryScan:
     """Load all tracks and list all videos."""
     tracks_by_stem = {}
     unreadable_tracks = {}
@@ -66,7 +66,7 @@ def scan_library(video_dir: Path, store: metadata.MetadataStore) -> LibraryScan:
             unreadable_tracks[path.stem] = str(exc)
 
     video_paths = (
-        extract.find_videos(video_dir, include=[], exclude=[]) if video_dir.is_dir() else []
+        extract.find_videos(library_dir, include=[], exclude=[]) if library_dir.is_dir() else []
     )
     return LibraryScan(
         tracks_by_stem=tracks_by_stem,
@@ -98,10 +98,10 @@ def print_section_title(title: str, count: int) -> None:
     terminal.print_line((title, "bold"), (f" ({count})", "dim"))
 
 
-def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: float) -> None:
+def print_status(library_dir: Path, metadata_dir: Path) -> None:
     """Print the trips, unprocessed videos, videos without an overlay, and unreachable tracks."""
     store = metadata.MetadataStore(metadata_dir)
-    scan = scan_library(video_dir, store)
+    scan = scan_library(library_dir, store)
 
     trip_rows = []
     no_overlay_names = []
@@ -112,7 +112,7 @@ def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: f
         if track.extraction_status == metadata.EXTRACTION_NO_OVERLAY:
             no_overlay_names.append(track.video_filename)
             continue
-        stats = metadata.compute_trip_stats(track, max_interpolation_gap_s)
+        stats = metadata.compute_trip_stats(track)
         coverage_percent = stats["coverage"] * 100
         trip_rows.append(
             (
@@ -138,7 +138,7 @@ def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: f
     sections = [
         ("Videos not extracted yet (run `dashcam extract`)", unprocessed_names),
         ("Videos without an overlay (skipped)", no_overlay_names),
-        (f"Tracks whose video is not in '{video_dir}'", unreachable_names),
+        (f"Tracks whose video is not in '{library_dir}'", unreachable_names),
         ("Unreadable tracks (run `dashcam doctor`)", sorted(scan.unreadable_tracks)),
     ]
     for title, names in sections:
@@ -157,7 +157,7 @@ def resolve_stem(name: str) -> str:
     return path.name
 
 
-def forget_trips(names: list[str], metadata_dir: Path, max_interpolation_gap_s: float) -> int:
+def forget_trips(names: list[str], metadata_dir: Path) -> int:
     """
     Move the tracks and previews of the given videos to the trash and rebuild the index.
 
@@ -177,7 +177,7 @@ def forget_trips(names: list[str], metadata_dir: Path, max_interpolation_gap_s: 
             continue
         for moved_path in moved_paths:
             LOGGER.info(f"Moved to trash: {moved_path}")
-    store.rebuild_index(max_interpolation_gap_s)
+    store.rebuild_index()
     return missing_count
 
 
@@ -257,7 +257,7 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
 
 
 def check_videos(
-    scan: LibraryScan, store: metadata.MetadataStore, video_dir: Path
+    scan: LibraryScan, store: metadata.MetadataStore, library_dir: Path
 ) -> list[Finding]:
     """Match videos and tracks: missing tracks, renames, changed content, unreachable videos."""
     findings = []
@@ -314,16 +314,18 @@ def check_videos(
 
     for stem in sorted(orphan_track_stems - renamed_track_stems):
         findings.append(
-            Finding(SEVERITY_INFO, f"Video of track '{stem}' is not in '{video_dir}' (unreachable)")
+            Finding(
+                SEVERITY_INFO, f"Video of track '{stem}' is not in '{library_dir}' (unreachable)"
+            )
         )
     return findings
 
 
-def check_files(store: metadata.MetadataStore, max_interpolation_gap_s: float) -> list[Finding]:
+def check_files(store: metadata.MetadataStore) -> list[Finding]:
     """Check the index, previews, and leftover temporary files."""
     findings = []
 
-    expected_index = store.build_index(max_interpolation_gap_s)
+    expected_index = store.build_index()
     try:
         current_index = json.loads(store.index_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -334,7 +336,7 @@ def check_files(store: metadata.MetadataStore, max_interpolation_gap_s: float) -
     if not is_index_current:
 
         def rebuild_index() -> None:
-            store.rebuild_index(max_interpolation_gap_s)
+            store.rebuild_index()
 
         findings.append(
             Finding(
@@ -373,9 +375,8 @@ def check_files(store: metadata.MetadataStore, max_interpolation_gap_s: float) -
 
 
 def run_doctor(
-    video_dir: Path,
+    library_dir: Path,
     metadata_dir: Path,
-    max_interpolation_gap_s: float,
     apply_fixes: bool,
 ) -> int:
     """
@@ -387,8 +388,8 @@ def run_doctor(
         The number of errors left unfixed.
     """
     store = metadata.MetadataStore(metadata_dir)
-    scan = scan_library(video_dir, store)
-    findings = check_tracks(scan, store) + check_videos(scan, store, video_dir)
+    scan = scan_library(library_dir, store)
+    findings = check_tracks(scan, store) + check_videos(scan, store, library_dir)
 
     fixable_findings = [finding for finding in findings if finding.fix is not None]
     if apply_fixes:
@@ -400,7 +401,7 @@ def run_doctor(
             )
 
     # File checks run last, so that the index reflects any renames made above.
-    file_findings = check_files(store, max_interpolation_gap_s)
+    file_findings = check_files(store)
     if apply_fixes:
         for finding in file_findings:
             if finding.fix is not None:

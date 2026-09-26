@@ -4,8 +4,11 @@ Command-line entry point of the `dashcam` tool.
 Usage examples:
 ---------------
 
-Encode all raw video files in the default location (see `dashcam.config`), group them into
-trips, and save each trip as a separate output video file in the current directory:
+The raw video directory, the library directory, and the metadata directory default to the
+values in the config file (see `dashcam.config` and `dashcam config`).
+
+Encode all raw video files in the default raw video directory, group them into trips, and save
+each trip as a separate video file in the default library directory:
 > dashcam encode trips
 
 Encode all raw video files in the specified location, group them into trips
@@ -13,27 +16,31 @@ where trips should be at least 8 hours apart, encode 3 trips in parallel:
 > dashcam encode trips --raw-video-dir "/media/me/DASHCAM/DCIM/Movie" \
     --min-trip-gap-hours 8 --job-count 3
 
-Encode raw video files labeled from #15 to #319 and save them as a single output video file
-named "Road Trip.mp4" in the specified directory:
-> dashcam encode range 15 319 --output-name "Road Trip" --output-dir ~/Videos/Dashcam
+Encode raw video files labeled from #15 to #319 and save them as a single video file named
+"Road Trip.mp4" in the specified library directory:
+> dashcam encode range 15 319 --output-name "Road Trip" --library-dir ~/Videos/Dashcam
 
-Download the OpenStreetMap data, then match all tracks in the default metadata directory
-(see `dashcam.config`) to streets:
+Download the OpenStreetMap data, then match all tracks in the library to streets:
 > dashcam enrich --update-osm
 
 Suggest street-based names for the trips in ~/Videos/Dashcam still named "Trip HH-MM", and
 rename them after confirmation:
-> dashcam rename ~/Videos/Dashcam --suggest
+> dashcam rename -d ~/Videos/Dashcam --suggest
 
-Import new trips from the SD card into ~/Videos/Dashcam: encode, extract, match streets, and
+Import new trips from the SD card into the library: encode, extract, match streets, and
 suggest names:
-> dashcam import --out ~/Videos/Dashcam
+> dashcam import
 
-Browse the trips in ~/Videos/Dashcam on a map at http://127.0.0.1:8765/:
-> dashcam serve ~/Videos/Dashcam
+Browse the trips in the library on a map at http://127.0.0.1:8765/:
+> dashcam serve
+
+Show the config file path and the effective settings:
+> dashcam config
 """
 
 import argparse
+import dataclasses
+import json
 import logging
 import sys
 from pathlib import Path
@@ -47,10 +54,16 @@ from dashcam import rename
 from dashcam import serve
 from dashcam import terminal
 from dashcam.config import Config
+from dashcam.config import get_config_path
+from dashcam.config import get_platform_defaults
 from dashcam.config import load_config
+from dashcam.config import read_config_file
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
+
+# Commands that work without a library directory when the metadata directory is known.
+METADATA_ONLY_COMMANDS = {"enrich", "forget"}
 
 
 def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config) -> None:
@@ -160,42 +173,41 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
 
     for subparser in [parser_trips_cmd, parser_range_cmd]:
         add_raw_video_arguments(subparser, config)
-        subparser.add_argument(
-            "--output-dir",
-            metavar="PATH",
-            help="Directory to save the encoded videos to (default: current directory).",
-            type=Path,
-            required=False,
-            default=Path.cwd(),
-        )
+        add_library_dir_argument(subparser, config)
 
 
 def add_metadata_dir_argument(parser: argparse.ArgumentParser, config: Config) -> None:
     """Add the `--metadata-dir` option."""
+    if Path(config.metadata_dir).is_absolute():
+        default_text = f"'{config.metadata_dir}'"
+    else:
+        default_text = f"'{config.metadata_dir}' inside the library directory"
     parser.add_argument(
         "--metadata-dir",
         metavar="PATH",
-        help=f"Directory for tracks and the trip index (default: '{config.metadata_dir}').",
+        help=f"Metadata directory for tracks and the trip index (default: {default_text}).",
         type=Path,
-        default=Path(config.metadata_dir),
     )
 
 
-def add_video_dir_argument(parser: argparse.ArgumentParser) -> None:
-    """Add the optional video directory argument."""
+def add_library_dir_argument(parser: argparse.ArgumentParser, config: Config) -> None:
+    """Add the `--library-dir` option."""
+    if config.library_dir is None:
+        default_text = "set `library_dir` in the config to omit this option"
+    else:
+        default_text = f"default: '{config.library_dir}'"
     parser.add_argument(
-        "video_dir",
-        metavar="DIR",
-        help="Directory with trip videos (default: current directory).",
+        "-d",
+        "--library-dir",
+        metavar="PATH",
+        help=f"Library directory with the trip videos ({default_text}).",
         type=Path,
-        nargs="?",
-        default=Path.cwd(),
     )
 
 
 def add_extract_arguments(extract_parser: argparse.ArgumentParser, config: Config) -> None:
     """Add the arguments of the `extract` command."""
-    add_video_dir_argument(extract_parser)
+    add_library_dir_argument(extract_parser, config)
     add_metadata_dir_argument(extract_parser, config)
     extract_parser.add_argument(
         "--include",
@@ -262,6 +274,7 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         name="enrich",
         help="Match tracks to named roads and find where trips start and end.",
     )
+    add_library_dir_argument(enrich_parser, config)
     add_metadata_dir_argument(enrich_parser, config)
     enrich_parser.add_argument(
         "--update-osm",
@@ -287,7 +300,7 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         name="rename",
         help="Name trips after the streets they follow.",
     )
-    add_video_dir_argument(rename_parser)
+    add_library_dir_argument(rename_parser, config)
     add_metadata_dir_argument(rename_parser, config)
     rename_parser.add_argument(
         "--suggest",
@@ -315,22 +328,8 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
     )
     add_trip_grouping_arguments(import_parser, config)
     add_raw_video_arguments(import_parser, config)
-    import_parser.add_argument(
-        "--out",
-        metavar="DIR",
-        help="Trip video directory to import into (default: current directory).",
-        type=Path,
-        default=Path.cwd(),
-    )
-    import_parser.add_argument(
-        "--metadata-dir",
-        metavar="PATH",
-        help=(
-            f"Directory for tracks and the trip index (default: '{config.metadata_dir}', "
-            f"relative to the --out directory)."
-        ),
-        type=Path,
-    )
+    add_library_dir_argument(import_parser, config)
+    add_metadata_dir_argument(import_parser, config)
     import_parser.add_argument(
         "--no-rename",
         action="store_true",
@@ -341,7 +340,7 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         name="status",
         help="List trips, unprocessed videos, and unreachable tracks.",
     )
-    add_video_dir_argument(status_parser)
+    add_library_dir_argument(status_parser, config)
     add_metadata_dir_argument(status_parser, config)
 
     forget_parser = subparsers.add_parser(
@@ -354,13 +353,14 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Video filename or name without extension.",
         nargs="+",
     )
+    add_library_dir_argument(forget_parser, config)
     add_metadata_dir_argument(forget_parser, config)
 
     doctor_parser = subparsers.add_parser(
         name="doctor",
         help="Check the metadata for problems and optionally fix the safe ones.",
     )
-    add_video_dir_argument(doctor_parser)
+    add_library_dir_argument(doctor_parser, config)
     add_metadata_dir_argument(doctor_parser, config)
     doctor_parser.add_argument(
         "--fix",
@@ -372,7 +372,7 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         name="serve",
         help="Browse the trips on a map with synchronized video playback.",
     )
-    add_video_dir_argument(serve_parser)
+    add_library_dir_argument(serve_parser, config)
     add_metadata_dir_argument(serve_parser, config)
     serve_parser.add_argument(
         "--host",
@@ -391,19 +391,100 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         default=serve.DEFAULT_PORT,
     )
 
+    subparsers.add_parser(
+        name="config",
+        help="Show the config file path and the effective settings.",
+    )
+
     parsed_args = parser.parse_args(args)
+    try:
+        resolve_directories(parsed_args, config)
+    except MissingLibraryDirError as exc:
+        parser.error(str(exc))
     return parsed_args
+
+
+class MissingLibraryDirError(Exception):
+    """Neither the command line nor the config gives the library directory."""
+
+
+def get_library_dir(parsed_args: argparse.Namespace, config: Config) -> Path:
+    """
+    Return the library directory from the command line, falling back to the config.
+
+    Raises
+    ------
+    MissingLibraryDirError
+        If neither sets it.
+    """
+    if parsed_args.library_dir is not None:
+        return parsed_args.library_dir
+    if config.library_dir is not None:
+        return Path(config.library_dir)
+    raise MissingLibraryDirError(
+        f"No library directory: pass `--library-dir` or set `library_dir` in '{get_config_path()}'"
+    )
+
+
+def get_metadata_dir(parsed_args: argparse.Namespace, config: Config) -> Path:
+    """
+    Return the metadata directory from the command line, falling back to the config.
+
+    Raises
+    ------
+    MissingLibraryDirError
+        If the configured metadata directory is relative and there is no library directory.
+    """
+    if parsed_args.metadata_dir is not None:
+        return parsed_args.metadata_dir
+    configured_metadata_dir = Path(config.metadata_dir)
+    if configured_metadata_dir.is_absolute():
+        return configured_metadata_dir
+    return get_library_dir(parsed_args, config) / configured_metadata_dir
+
+
+def resolve_directories(parsed_args: argparse.Namespace, config: Config) -> None:
+    """
+    Replace the library and metadata directory options with the paths the command uses.
+
+    A command that does not need the library directory keeps the option as given.
+
+    Raises
+    ------
+    MissingLibraryDirError
+        If a command needs the library directory and it is not set.
+    """
+    is_metadata_only = parsed_args.command in METADATA_ONLY_COMMANDS or (
+        parsed_args.command == "extract" and parsed_args.reclean
+    )
+    if hasattr(parsed_args, "metadata_dir"):
+        parsed_args.metadata_dir = get_metadata_dir(parsed_args, config)
+    if hasattr(parsed_args, "library_dir") and not is_metadata_only:
+        parsed_args.library_dir = get_library_dir(parsed_args, config)
+
+
+def run_config_command(config_path: Path) -> None:
+    """Print the config file path and the effective settings, marking the overridden ones."""
+    overrides = read_config_file(config_path)
+    config = dataclasses.replace(get_platform_defaults(), **overrides)
+    file_state = "" if config_path.is_file() else " (not found)"
+    terminal.print_line(("Config file: ", "bold"), f"'{config_path}'", (file_state, "dim"))
+    for field in dataclasses.fields(Config):
+        value = getattr(config, field.name)
+        value_text = "(not set)" if value is None else json.dumps(value, ensure_ascii=False)
+        source_note = ("  # from the config file", "green") if field.name in overrides else ""
+        terminal.print_line(f"  {field.name} = {value_text}", source_note)
 
 
 def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
     """Entry point for the `encode` command."""
     check_readability = not parsed_args.skip_raw_video_validation
-    parsed_args.output_dir.mkdir(parents=True, exist_ok=True)
+    parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
 
     if parsed_args.encode_mode == "trips":
         return encode.encode_trips(
             raw_video_dir=parsed_args.raw_video_dir,
-            output_dir=parsed_args.output_dir,
+            library_dir=parsed_args.library_dir,
             config=config,
             min_trip_gap_hours=parsed_args.min_trip_gap_hours,
             job_count=parsed_args.job_count,
@@ -413,7 +494,7 @@ def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
 
     return encode.encode_range(
         raw_video_dir=parsed_args.raw_video_dir,
-        output_dir=parsed_args.output_dir,
+        library_dir=parsed_args.library_dir,
         config=config,
         start_index=parsed_args.start_index,
         end_index=parsed_args.end_index,
@@ -429,7 +510,7 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
         return extract.reclean_tracks(parsed_args.metadata_dir, config)
 
     return extract.extract_videos(
-        video_dir=parsed_args.video_dir,
+        library_dir=parsed_args.library_dir,
         metadata_dir=parsed_args.metadata_dir,
         config=config,
         include=parsed_args.include,
@@ -442,12 +523,11 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
 
 def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
     """Entry point for the `import` command."""
-    metadata_dir = parsed_args.metadata_dir or parsed_args.out / config.metadata_dir
-    parsed_args.out.mkdir(parents=True, exist_ok=True)
+    parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
     return importer.import_trips(
         raw_video_dir=parsed_args.raw_video_dir,
-        output_dir=parsed_args.out,
-        metadata_dir=metadata_dir,
+        library_dir=parsed_args.library_dir,
+        metadata_dir=parsed_args.metadata_dir,
         config=config,
         min_trip_gap_hours=parsed_args.min_trip_gap_hours,
         job_count=parsed_args.job_count,
@@ -483,7 +563,7 @@ def main() -> None:
             )
         elif parsed_args.command == "rename":
             failed_count = rename.rename_trips(
-                video_dir=parsed_args.video_dir,
+                library_dir=parsed_args.library_dir,
                 metadata_dir=parsed_args.metadata_dir,
                 config=config,
                 include_all=parsed_args.include_all,
@@ -493,25 +573,21 @@ def main() -> None:
         elif parsed_args.command == "import":
             failed_count = run_import_command(parsed_args, config)
         elif parsed_args.command == "status":
-            maintenance.print_status(
-                parsed_args.video_dir, parsed_args.metadata_dir, config.max_interpolation_gap_s
-            )
+            maintenance.print_status(parsed_args.library_dir, parsed_args.metadata_dir)
         elif parsed_args.command == "forget":
-            failed_count = maintenance.forget_trips(
-                parsed_args.names, parsed_args.metadata_dir, config.max_interpolation_gap_s
-            )
+            failed_count = maintenance.forget_trips(parsed_args.names, parsed_args.metadata_dir)
         elif parsed_args.command == "doctor":
             failed_count = maintenance.run_doctor(
-                video_dir=parsed_args.video_dir,
+                library_dir=parsed_args.library_dir,
                 metadata_dir=parsed_args.metadata_dir,
-                max_interpolation_gap_s=config.max_interpolation_gap_s,
                 apply_fixes=parsed_args.fix,
             )
+        elif parsed_args.command == "config":
+            run_config_command(get_config_path())
         elif parsed_args.command == "serve":
             serve.serve(
-                video_dir=parsed_args.video_dir,
+                library_dir=parsed_args.library_dir,
                 metadata_dir=parsed_args.metadata_dir,
-                max_interpolation_gap_s=config.max_interpolation_gap_s,
                 host=parsed_args.host,
                 port=parsed_args.port,
                 car_model=config.car_model,

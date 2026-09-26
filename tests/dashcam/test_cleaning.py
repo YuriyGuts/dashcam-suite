@@ -21,10 +21,6 @@ def settings():
     return cleaning.CleaningSettings(
         trip_date=TRIP_DATE,
         timezone="Europe/Kyiv",
-        max_speed_kmh=250,
-        max_clock_date_diff_days=1,
-        max_merge_gap_hours=12,
-        max_interpolation_gap_s=60,
     )
 
 

@@ -426,7 +426,7 @@ def find_taken_stems(
 
 
 def load_trip(
-    video_dir: Path, store: metadata.MetadataStore, stem: str
+    library_dir: Path, store: metadata.MetadataStore, stem: str
 ) -> tuple[Path, metadata.Track]:
     """
     Load the track of a trip and find its video.
@@ -434,7 +434,7 @@ def load_trip(
     Raises
     ------
     RenameError
-        If the track is missing or unreadable, or the video is not in the video directory.
+        If the track is missing or unreadable, or the video is not in the library directory.
     """
     try:
         track = store.load_track(stem)
@@ -442,14 +442,14 @@ def load_trip(
         raise RenameError(f"No track for '{stem}'") from exc
     except (OSError, metadata.TrackFormatError) as exc:
         raise RenameError(f"Cannot read the track of '{stem}': {exc}") from exc
-    video_path = video_dir / track.video_filename
+    video_path = library_dir / track.video_filename
     if not video_path.is_file():
-        raise RenameError(f"'{track.video_filename}' is not in the video directory")
+        raise RenameError(f"'{track.video_filename}' is not in the library directory")
     return video_path, track
 
 
 def suggest_trip_filename(
-    video_dir: Path, store: metadata.MetadataStore, stem: str, car_model: str
+    library_dir: Path, store: metadata.MetadataStore, stem: str, car_model: str
 ) -> str:
     """
     Suggest a new filename for one trip.
@@ -459,12 +459,12 @@ def suggest_trip_filename(
     RenameError
         If the trip cannot be named: no video, no date, or an outdated street list.
     """
-    video_path, track = load_trip(video_dir, store, stem)
+    video_path, track = load_trip(library_dir, store, stem)
     if metadata.parse_trip_name(video_path.name).date is None:
         raise RenameError("The current name does not start with a date")
     if not has_usable_street_list(track):
         raise RenameError("The street list is outdated (run `dashcam enrich`)")
-    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
     taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
     return suggest_filename(
         track, car_model, extension=video_path.suffix, taken_stems=taken_stems - {stem.lower()}
@@ -472,7 +472,7 @@ def suggest_trip_filename(
 
 
 def rename_trip(
-    video_dir: Path, store: metadata.MetadataStore, stem: str, new_filename: str
+    library_dir: Path, store: metadata.MetadataStore, stem: str, new_filename: str
 ) -> str:
     """
     Rename one trip to a filename chosen by the user.
@@ -487,12 +487,12 @@ def rename_trip(
     RenameError
         If the filename is invalid or taken, or the trip cannot be renamed.
     """
-    video_path, _ = load_trip(video_dir, store, stem)
+    video_path, _ = load_trip(library_dir, store, stem)
     problem = validate_filename(new_filename, video_path.suffix)
     if problem is not None:
         raise RenameError(f"Invalid name: {problem}")
     new_stem = Path(new_filename).stem
-    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
     taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
     if new_stem.lower() in taken_stems - {stem.lower()}:
         raise RenameError(f"'{new_stem}' is already taken by another video or track")
@@ -506,15 +506,15 @@ def rename_trip(
 
 
 def plan_renames(
-    video_dir: Path, store: metadata.MetadataStore, car_model: str, include_all: bool
+    library_dir: Path, store: metadata.MetadataStore, car_model: str, include_all: bool
 ) -> list[RenamePlan]:
     """
-    Suggest new names for the trips in the video directory, in the order of their dates.
+    Suggest new names for the trips in the library directory, in the order of their dates.
 
     Trips without a dated name, without a track, or with an outdated street list are skipped.
     """
     tracks_by_stem = extract.load_tracks_by_stem(store)
-    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
     taken_stems = find_taken_stems(video_paths, tracks_by_stem)
 
     candidates = []
@@ -668,7 +668,7 @@ def ask_for_confirmed_plans(
 
 
 def rename_trips(
-    video_dir: Path,
+    library_dir: Path,
     metadata_dir: Path,
     config: Config,
     include_all: bool,
@@ -687,7 +687,7 @@ def rename_trips(
         The number of failed renames.
     """
     store = metadata.MetadataStore(metadata_dir)
-    plans = plan_renames(video_dir, store, config.car_model, include_all)
+    plans = plan_renames(library_dir, store, config.car_model, include_all)
     if not plans:
         LOGGER.info("No trips to rename")
         return 0
@@ -717,6 +717,6 @@ def rename_trips(
         )
 
     if renamed_count:
-        store.rebuild_index(config.max_interpolation_gap_s)
+        store.rebuild_index()
     LOGGER.info(f"Renamed {renamed_count} of {len(plans)} trips")
     return failed_count

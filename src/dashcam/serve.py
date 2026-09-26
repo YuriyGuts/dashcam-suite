@@ -10,7 +10,7 @@ Routes:
     POST /api/rename         Rename a trip: `{"id": ID, "filename": NEW_FILENAME}`.
     /tracks/<stem>.json      Track files.
     /previews/<stem>.mp4     Previews.
-    /videos/<filename>       Trip videos from the video directory.
+    /videos/<filename>       Trip videos from the library directory.
 
 Files are served with HTTP range requests (`206 Partial Content`), which browsers need to seek
 in videos.
@@ -321,15 +321,13 @@ class VisualizerApp:
 
     def __init__(
         self,
-        video_dir: Path,
+        library_dir: Path,
         metadata_dir: Path,
-        max_interpolation_gap_s: float,
         car_model: str = "",
         allow_rename: bool = False,
     ):
-        self.video_dir = video_dir
+        self.library_dir = library_dir
         self.store = metadata.MetadataStore(metadata_dir)
-        self.max_interpolation_gap_s = max_interpolation_gap_s
         self.car_model = car_model
         self.allow_rename = allow_rename
         self.summaries = TrackSummaryCache(self.store)
@@ -340,24 +338,24 @@ class VisualizerApp:
         with self.index_lock:
             if is_index_stale(self.store):
                 LOGGER.info(f"Rebuilding the trip index '{self.store.index_path}'")
-                return self.store.rebuild_index(self.max_interpolation_gap_s)
+                return self.store.rebuild_index()
             return json.loads(self.store.index_path.read_text(encoding="utf-8"))
 
     def video_path(self, video_filename: str) -> Path | None:
-        """Return the path of a trip video in the video directory, if the name is acceptable."""
+        """Return the path of a trip video in the library directory, if the name is acceptable."""
         if Path(video_filename).suffix.lower() not in extract.VIDEO_EXTENSIONS:
             return None
-        return safe_join(self.video_dir, video_filename)
+        return safe_join(self.library_dir, video_filename)
 
     def get_trips(self) -> dict[str, t.Any]:
         """
         Return the trip index with the URLs of the playable videos of each trip.
 
         `video_url` and `preview_url` are null when the file is not available. `streets` lists
-        the street names of the trip in travel order. `video_dir` is where videos are looked up.
+        the street names of the trip in travel order. `library_dir` is where videos are looked up.
         """
         index = self.load_index()
-        index["video_dir"] = str(self.video_dir.resolve())
+        index["library_dir"] = str(self.library_dir.resolve())
         index["can_rename"] = self.allow_rename
         for trip in index["trips"]:
             video_path = self.video_path(trip["video_filename"])
@@ -400,7 +398,9 @@ class VisualizerApp:
             If the trip cannot be named.
         """
         with self.index_lock:
-            return rename.suggest_trip_filename(self.video_dir, self.store, trip_id, self.car_model)
+            return rename.suggest_trip_filename(
+                self.library_dir, self.store, trip_id, self.car_model
+            )
 
     def rename_trip(self, trip_id: str, new_filename: str) -> str:
         """
@@ -417,19 +417,19 @@ class VisualizerApp:
             If the trip cannot be renamed to this filename.
         """
         with self.index_lock:
-            new_id = rename.rename_trip(self.video_dir, self.store, trip_id, new_filename)
-            self.store.rebuild_index(self.max_interpolation_gap_s)
+            new_id = rename.rename_trip(self.library_dir, self.store, trip_id, new_filename)
+            self.store.rebuild_index()
         return new_id
 
     def warn_about_library(self) -> None:
         """Run the cheap consistency checks and log what the user may want to fix."""
         track_stems = {path.stem for path in self.store.list_track_paths()}
         video_stems = set()
-        if self.video_dir.is_dir():
-            video_paths = extract.find_videos(self.video_dir, include=[], exclude=[])
+        if self.library_dir.is_dir():
+            video_paths = extract.find_videos(self.library_dir, include=[], exclude=[])
             video_stems = {path.stem for path in video_paths}
         else:
-            LOGGER.warning(f"Video directory not found: '{self.video_dir}'")
+            LOGGER.warning(f"Library directory not found: '{self.library_dir}'")
 
         if not track_stems:
             LOGGER.warning(f"No tracks in '{self.store.tracks_dir}' (run `dashcam extract`)")
@@ -442,11 +442,12 @@ class VisualizerApp:
         if track_stems and tracks_without_videos == track_stems:
             LOGGER.warning(
                 f"None of the {len(track_stems)} tracks has its video in "
-                f"'{self.video_dir.resolve()}'. Pass the video directory: `dashcam serve DIR`"
+                f"'{self.library_dir.resolve()}'. "
+                f"Pass the library directory: `dashcam serve --library-dir DIR`"
             )
         elif tracks_without_videos:
             LOGGER.info(
-                f"{len(tracks_without_videos)} tracks have no video in '{self.video_dir}'; "
+                f"{len(tracks_without_videos)} tracks have no video in '{self.library_dir}'; "
                 f"their video panel is disabled unless a preview exists"
             )
 
@@ -658,9 +659,8 @@ def format_server_url(host: str, port: int) -> str:
 
 
 def serve(
-    video_dir: Path,
+    library_dir: Path,
     metadata_dir: Path,
-    max_interpolation_gap_s: float,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     car_model: str = "",
@@ -668,9 +668,8 @@ def serve(
     """Run the visualizer server until interrupted."""
     allow_rename = is_loopback_host(host)
     app = VisualizerApp(
-        video_dir,
+        library_dir,
         metadata_dir,
-        max_interpolation_gap_s,
         car_model=car_model,
         allow_rename=allow_rename,
     )

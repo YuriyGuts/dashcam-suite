@@ -1,8 +1,24 @@
+import dataclasses
 from pathlib import Path
 
 import pytest
 
 from dashcam import cli
+
+
+@pytest.fixture
+def library_dir(tmp_path):
+    return tmp_path / "Library"
+
+
+@pytest.fixture
+def config(config, library_dir):
+    return dataclasses.replace(config, library_dir=str(library_dir))
+
+
+@pytest.fixture
+def config_without_library_dir(config):
+    return dataclasses.replace(config, library_dir=None)
 
 
 @pytest.fixture
@@ -22,7 +38,7 @@ def encode_calls(monkeypatch):
     return calls
 
 
-def test_parse_command_line_args_encode_trips_uses_config_defaults(config):
+def test_parse_command_line_args_encode_trips_uses_config_defaults(config, library_dir):
     # GIVEN no options
 
     # WHEN parsing `encode trips`
@@ -33,7 +49,139 @@ def test_parse_command_line_args_encode_trips_uses_config_defaults(config):
     assert parsed_args.raw_video_dir == Path(config.raw_video_dir)
     assert parsed_args.min_trip_gap_hours == config.min_trip_gap_hours
     assert parsed_args.job_count == config.job_count
-    assert parsed_args.output_dir == Path.cwd()
+    assert parsed_args.library_dir == library_dir
+
+
+def test_parse_command_line_args_encode_range_with_short_library_dir_option(config):
+    # GIVEN a library directory passed with `-d`
+
+    # WHEN parsing `encode range`
+    parsed_args = cli.parse_command_line_args(["encode", "range", "1", "2", "-d", "out"], config)
+
+    # THEN the option overrides the config
+    assert parsed_args.library_dir == Path("out")
+
+
+def test_parse_command_line_args_without_library_dir(config_without_library_dir, capsys):
+    # GIVEN no library directory in the config or on the command line
+
+    # WHEN parsing `serve`
+    # THEN argparse exits with an error that points to both ways of setting it
+    with pytest.raises(SystemExit) as exc_info:
+        cli.parse_command_line_args(["serve"], config_without_library_dir)
+    error_text = capsys.readouterr().err
+    assert exc_info.value.code == 2
+    assert "--library-dir" in error_text
+    assert "library_dir" in error_text
+    assert str(cli.get_config_path()) in error_text
+
+
+def test_parse_command_line_args_encode_without_library_dir(config_without_library_dir):
+    # GIVEN no library directory in the config or on the command line
+
+    # WHEN parsing `encode trips`
+    # THEN argparse exits with an error
+    with pytest.raises(SystemExit):
+        cli.parse_command_line_args(["encode", "trips"], config_without_library_dir)
+
+
+def test_parse_command_line_args_metadata_dir_inside_library_dir(config, library_dir):
+    # GIVEN a relative metadata directory in the config
+
+    # WHEN parsing `status`
+    parsed_args = cli.parse_command_line_args(["status"], config)
+
+    # THEN the metadata directory is inside the library directory
+    assert parsed_args.library_dir == library_dir
+    assert parsed_args.metadata_dir == library_dir / config.metadata_dir
+
+
+def test_parse_command_line_args_metadata_dir_inside_given_library_dir(config):
+    # GIVEN a library directory on the command line
+
+    # WHEN parsing `doctor`
+    parsed_args = cli.parse_command_line_args(["doctor", "--library-dir", "videos"], config)
+
+    # THEN the metadata directory is inside that library directory
+    assert parsed_args.metadata_dir == Path("videos") / config.metadata_dir
+
+
+def test_parse_command_line_args_absolute_metadata_dir_in_config(config, tmp_path):
+    # GIVEN an absolute metadata directory in the config
+    config = dataclasses.replace(config, metadata_dir=str(tmp_path / "meta"))
+
+    # WHEN parsing `serve`
+    parsed_args = cli.parse_command_line_args(["serve"], config)
+
+    # THEN it is used as it is
+    assert parsed_args.metadata_dir == tmp_path / "meta"
+
+
+def test_parse_command_line_args_relative_metadata_dir_option(config):
+    # GIVEN a relative metadata directory on the command line
+
+    # WHEN parsing `rename`
+    parsed_args = cli.parse_command_line_args(["rename", "--metadata-dir", "meta"], config)
+
+    # THEN it stays relative to the current directory
+    assert parsed_args.metadata_dir == Path("meta")
+
+
+def test_parse_command_line_args_enrich_with_metadata_dir_only(config_without_library_dir):
+    # GIVEN no library directory, but a metadata directory on the command line
+
+    # WHEN parsing `enrich`
+    parsed_args = cli.parse_command_line_args(
+        ["enrich", "--metadata-dir", "meta"], config_without_library_dir
+    )
+
+    # THEN no library directory is needed
+    assert parsed_args.metadata_dir == Path("meta")
+    assert parsed_args.library_dir is None
+
+
+def test_parse_command_line_args_forget_with_metadata_dir_only(config_without_library_dir):
+    # GIVEN no library directory, but a metadata directory on the command line
+
+    # WHEN parsing `forget`
+    parsed_args = cli.parse_command_line_args(
+        ["forget", "a.mp4", "--metadata-dir", "meta"], config_without_library_dir
+    )
+
+    # THEN no library directory is needed
+    assert parsed_args.metadata_dir == Path("meta")
+
+
+def test_parse_command_line_args_reclean_with_metadata_dir_only(config_without_library_dir):
+    # GIVEN no library directory, but a metadata directory on the command line
+
+    # WHEN parsing `extract --reclean`
+    parsed_args = cli.parse_command_line_args(
+        ["extract", "--reclean", "--metadata-dir", "meta"], config_without_library_dir
+    )
+
+    # THEN no library directory is needed
+    assert parsed_args.metadata_dir == Path("meta")
+
+
+def test_parse_command_line_args_extract_with_metadata_dir_only(config_without_library_dir):
+    # GIVEN no library directory, but a metadata directory on the command line
+
+    # WHEN parsing `extract`, which reads the videos
+    # THEN argparse exits with an error
+    with pytest.raises(SystemExit):
+        cli.parse_command_line_args(
+            ["extract", "--metadata-dir", "meta"], config_without_library_dir
+        )
+
+
+def test_parse_command_line_args_enrich_without_any_directory(config_without_library_dir):
+    # GIVEN no library directory and a relative metadata directory in the config
+
+    # WHEN parsing `enrich`
+    # THEN argparse exits with an error, since the metadata directory cannot be located
+    with pytest.raises(SystemExit):
+        cli.parse_command_line_args(["enrich"], config_without_library_dir)
 
 
 def test_parse_command_line_args_encode_range(config):
@@ -58,11 +206,11 @@ def test_parse_command_line_args_without_command(config):
         cli.parse_command_line_args([], config)
 
 
-def test_run_encode_command_trips_creates_output_dir(config, tmp_path, encode_calls):
-    # GIVEN an output directory that does not exist
-    output_dir = tmp_path / "new" / "dir"
+def test_run_encode_command_trips_creates_library_dir(config, tmp_path, encode_calls):
+    # GIVEN a library directory that does not exist
+    library_dir = tmp_path / "new" / "dir"
     parsed_args = cli.parse_command_line_args(
-        ["encode", "trips", "--output-dir", str(output_dir), "--skip-raw-video-validation"],
+        ["encode", "trips", "--library-dir", str(library_dir), "--skip-raw-video-validation"],
         config,
     )
 
@@ -70,7 +218,7 @@ def test_run_encode_command_trips_creates_output_dir(config, tmp_path, encode_ca
     cli.run_encode_command(parsed_args, config)
 
     # THEN the directory is created and the readability check is disabled
-    assert output_dir.is_dir()
+    assert library_dir.is_dir()
     mode, kwargs = encode_calls[0]
     assert mode == "trips"
     assert kwargs["check_readability"] is False
@@ -79,7 +227,7 @@ def test_run_encode_command_trips_creates_output_dir(config, tmp_path, encode_ca
 def test_run_encode_command_range(config, tmp_path, encode_calls):
     # GIVEN `encode range` arguments
     parsed_args = cli.parse_command_line_args(
-        ["encode", "range", "2", "3", "--output-dir", str(tmp_path)], config
+        ["encode", "range", "2", "3", "--library-dir", str(tmp_path)], config
     )
 
     # WHEN running the command
@@ -169,15 +317,15 @@ def run_main(monkeypatch, config, argv):
     return exc_info.value.code
 
 
-def test_parse_command_line_args_extract_defaults(config):
+def test_parse_command_line_args_extract_defaults(config, library_dir):
     # GIVEN no options
 
     # WHEN parsing `extract`
     parsed_args = cli.parse_command_line_args(["extract"], config)
 
-    # THEN the current directory and the configured metadata directory are used
-    assert parsed_args.video_dir == Path.cwd()
-    assert parsed_args.metadata_dir == Path(config.metadata_dir)
+    # THEN the configured library and metadata directories are used
+    assert parsed_args.library_dir == library_dir
+    assert parsed_args.metadata_dir == library_dir / config.metadata_dir
     assert parsed_args.include == []
     assert not parsed_args.reclean
 
@@ -191,6 +339,7 @@ def test_main_runs_extract_with_patterns(monkeypatch, config, recorded_calls):
         config,
         [
             "extract",
+            "-d",
             "videos",
             "--include",
             "2026-*",
@@ -206,7 +355,7 @@ def test_main_runs_extract_with_patterns(monkeypatch, config, recorded_calls):
     name, _, kwargs = recorded_calls[0]
     assert exit_code == 0
     assert name == "extract_videos"
-    assert kwargs["video_dir"] == Path("videos")
+    assert kwargs["library_dir"] == Path("videos")
     assert kwargs["include"] == ["2026-*", "2025-*"]
     assert kwargs["exclude"] == ["*old*"]
     assert kwargs["make_previews"] is True
@@ -227,7 +376,7 @@ def test_main_runs_status(monkeypatch, config, recorded_calls):
     # GIVEN `status` with a directory
 
     # WHEN running the tool
-    exit_code = run_main(monkeypatch, config, ["status", "videos"])
+    exit_code = run_main(monkeypatch, config, ["status", "--library-dir", "videos"])
 
     # THEN the status is printed for that directory
     assert exit_code == 0
@@ -257,7 +406,7 @@ def test_main_runs_doctor_with_fix(monkeypatch, config, recorded_calls):
     assert recorded_calls[0][2]["apply_fixes"] is True
 
 
-def test_main_runs_enrich_with_update_osm(monkeypatch, config, recorded_calls):
+def test_main_runs_enrich_with_update_osm(monkeypatch, config, recorded_calls, library_dir):
     # GIVEN `enrich --update-osm`
 
     # WHEN running the tool
@@ -270,7 +419,7 @@ def test_main_runs_enrich_with_update_osm(monkeypatch, config, recorded_calls):
     assert kwargs["update_osm"] is True
     assert kwargs["osm_file"] is None
     assert kwargs["force"] is False
-    assert kwargs["metadata_dir"] == Path(config.metadata_dir)
+    assert kwargs["metadata_dir"] == library_dir / config.metadata_dir
 
 
 def test_main_runs_enrich_with_osm_file_and_force(monkeypatch, config, recorded_calls):
@@ -290,13 +439,13 @@ def test_main_runs_rename_suggest_all(monkeypatch, config, recorded_calls):
     # GIVEN `rename --suggest --all` with a directory
 
     # WHEN running the tool
-    exit_code = run_main(monkeypatch, config, ["rename", "videos", "--suggest", "--all"])
+    exit_code = run_main(monkeypatch, config, ["rename", "-d", "videos", "--suggest", "--all"])
 
     # THEN all trips are offered for renaming interactively
     name, _, kwargs = recorded_calls[0]
     assert exit_code == 0
     assert name == "rename_trips"
-    assert kwargs["video_dir"] == Path("videos")
+    assert kwargs["library_dir"] == Path("videos")
     assert kwargs["include_all"] is True
     assert kwargs["interactive"] is True
     assert kwargs["assume_yes"] is False
@@ -321,26 +470,26 @@ def test_main_runs_rename_with_yes(monkeypatch, config, recorded_calls):
     assert recorded_calls[0][2]["assume_yes"] is True
 
 
-def test_main_runs_import_with_metadata_under_out_dir(
+def test_main_runs_import_with_metadata_inside_library_dir(
     monkeypatch, config, recorded_calls, tmp_path
 ):
-    # GIVEN `import` into a new directory, with encode options
-    out_dir = tmp_path / "Dashcam"
+    # GIVEN `import` into a new library directory, with encode options
+    library_dir = tmp_path / "Dashcam"
 
     # WHEN running the tool
     exit_code = run_main(
         monkeypatch,
         config,
-        ["import", "--out", str(out_dir), "--raw-video-dir", "sd", "--job-count", "3"],
+        ["import", "-d", str(library_dir), "--raw-video-dir", "sd", "--job-count", "3"],
     )
 
     # THEN the directory is created and the metadata lives inside it
     name, _, kwargs = recorded_calls[0]
     assert exit_code == 0
     assert name == "import_trips"
-    assert out_dir.is_dir()
-    assert kwargs["output_dir"] == out_dir
-    assert kwargs["metadata_dir"] == out_dir / config.metadata_dir
+    assert library_dir.is_dir()
+    assert kwargs["library_dir"] == library_dir
+    assert kwargs["metadata_dir"] == library_dir / config.metadata_dir
     assert kwargs["raw_video_dir"] == Path("sd")
     assert kwargs["job_count"] == 3
     assert kwargs["suggest_names"] is True
@@ -356,7 +505,7 @@ def test_main_runs_import_with_options(monkeypatch, config, recorded_calls, tmp_
         config,
         [
             "import",
-            "--out",
+            "--library-dir",
             str(tmp_path),
             "--metadata-dir",
             "meta",
@@ -395,7 +544,7 @@ def test_main_exits_with_error_when_doctor_finds_errors(monkeypatch, config):
     assert exit_code == 1
 
 
-def test_main_runs_serve_with_defaults(monkeypatch, config, recorded_calls):
+def test_main_runs_serve_with_defaults(monkeypatch, config, recorded_calls, library_dir):
     # GIVEN `serve` without options
 
     # WHEN running the tool
@@ -405,8 +554,8 @@ def test_main_runs_serve_with_defaults(monkeypatch, config, recorded_calls):
     name, _, kwargs = recorded_calls[0]
     assert exit_code == 0
     assert name == "serve"
-    assert kwargs["video_dir"] == Path.cwd()
-    assert kwargs["metadata_dir"] == Path(config.metadata_dir)
+    assert kwargs["library_dir"] == library_dir
+    assert kwargs["metadata_dir"] == library_dir / config.metadata_dir
     assert (kwargs["host"], kwargs["port"]) == ("127.0.0.1", 8765)
 
 
@@ -414,11 +563,11 @@ def test_main_runs_serve_with_options(monkeypatch, config, recorded_calls):
     # GIVEN `serve` with a directory, address, and port
 
     # WHEN running the tool
-    run_main(monkeypatch, config, ["serve", "videos", "--host", "0.0.0.0", "--port", "9000"])
+    run_main(monkeypatch, config, ["serve", "-d", "videos", "--host", "0.0.0.0", "--port", "9000"])
 
     # THEN the options are passed on
     kwargs = recorded_calls[0][2]
-    assert kwargs["video_dir"] == Path("videos")
+    assert kwargs["library_dir"] == Path("videos")
     assert (kwargs["host"], kwargs["port"]) == ("0.0.0.0", 9000)
 
 
@@ -435,3 +584,39 @@ def test_main_exits_with_error_when_port_is_taken(monkeypatch, config, caplog):
     # THEN the error is reported
     assert exit_code == 1
     assert "Address already in use" in caplog.text
+
+
+def test_main_runs_config_without_file(monkeypatch, config, tmp_path, capsys):
+    # GIVEN a config path that does not exist
+    config_path = tmp_path / "missing.toml"
+    monkeypatch.setenv("DASHCAM_CONFIG", str(config_path))
+
+    # WHEN running `dashcam config`
+    exit_code = run_main(monkeypatch, config, ["config"])
+
+    # THEN the path and the default settings are printed
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert str(config_path) in output
+    assert "(not found)" in output
+    assert "library_dir = (not set)" in output
+    assert 'metadata_dir = ".metadata"' in output
+    assert "from the config file" not in output
+
+
+def test_main_runs_config_with_file(monkeypatch, config, tmp_path, capsys):
+    # GIVEN a config file overriding the library directory
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('library_dir = "/srv/dashcam"\n')
+    monkeypatch.setenv("DASHCAM_CONFIG", str(config_path))
+
+    # WHEN running `dashcam config`
+    run_main(monkeypatch, config, ["config"])
+
+    # THEN the overridden setting is marked
+    output_lines = capsys.readouterr().out.splitlines()
+    library_dir_line = next(line for line in output_lines if "library_dir" in line)
+    job_count_line = next(line for line in output_lines if "job_count" in line)
+    assert '"/srv/dashcam"' in library_dir_line
+    assert "from the config file" in library_dir_line
+    assert "from the config file" not in job_count_line

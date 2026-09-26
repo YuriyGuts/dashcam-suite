@@ -98,7 +98,7 @@ const ICON_PATHS = {
 const state = {
   trips: [],
   tripsById: new Map(),
-  videoDir: "",
+  libraryDir: "",
   // Whether the server allows renaming trips (only when it listens on localhost).
   canRename: false,
   // First and last trip dates, as ISO dates and as day numbers. Null without dated trips.
@@ -1099,7 +1099,7 @@ function renderSummary(visibleTrips) {
   ];
   if (!state.trips.length) {
     children.push(
-      el("p", {className: "hint"}, "No trips yet. Run ", el("code", {}, "dashcam extract"), " in the video directory."),
+      el("p", {className: "hint"}, "No trips yet. Run ", el("code", {}, "dashcam extract"), "."),
     );
   } else if (!visibleTrips.length) {
     children.push(el("p", {className: "hint"}, "No trips match the filters."));
@@ -1468,7 +1468,7 @@ function renderDetail() {
         "p",
         {className: "detail-note"},
         `${trip.video_filename} is not in `,
-        el("code", {}, state.videoDir || "the video directory"),
+        el("code", {}, state.libraryDir || "the library directory"),
         ".",
       );
   const localitiesText = formatLocalities(trip);
@@ -1983,7 +1983,7 @@ function applyIndex(index) {
     (b.start_time ?? b.date ?? "").localeCompare(a.start_time ?? a.date ?? ""),
   );
   state.tripsById = new Map(state.trips.map((trip) => [trip.id, trip]));
-  state.videoDir = index.video_dir ?? "";
+  state.libraryDir = index.library_dir ?? "";
   state.canRename = Boolean(index.can_rename);
   state.dateBounds = computeDateBounds(state.trips);
 }

@@ -23,7 +23,7 @@ LOGGER = logging.getLogger(__name__)
 
 def import_trips(
     raw_video_dir: Path,
-    output_dir: Path,
+    library_dir: Path,
     metadata_dir: Path,
     config: Config,
     min_trip_gap_hours: float,
@@ -43,7 +43,7 @@ def import_trips(
     LOGGER.info("Step 1/4: encoding trips", extra=terminal.HEADING)
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
-        output_dir=output_dir,
+        library_dir=library_dir,
         config=config,
         min_trip_gap_hours=min_trip_gap_hours,
         job_count=job_count,
@@ -55,7 +55,7 @@ def import_trips(
 
     LOGGER.info("Step 2/4: extracting GPS tracks", extra=terminal.HEADING)
     failed_count += extract.extract_videos(
-        video_dir=output_dir,
+        library_dir=library_dir,
         metadata_dir=metadata_dir,
         config=config,
         include=[],
@@ -85,7 +85,7 @@ def import_trips(
         return failed_count
     LOGGER.info("Step 4/4: naming trips", extra=terminal.HEADING)
     failed_count += rename.rename_trips(
-        video_dir=output_dir,
+        library_dir=library_dir,
         metadata_dir=metadata_dir,
         config=config,
         include_all=False,

@@ -103,3 +103,64 @@ def test_get_config_path_default(monkeypatch):
     # THEN it is inside the user config directory
     assert config_path.name == "config.toml"
     assert config_path.parent.name == "dashcam"
+
+
+def test_load_config_expands_home_in_paths(monkeypatch, tmp_path):
+    # GIVEN a config file with paths under the home directory
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        'library_dir = "~/Videos"\nraw_video_dir = "~/SD"\nmetadata_dir = "~/meta"\n'
+    )
+
+    # WHEN loading the config
+    loaded_config = config_module.load_config(config_path)
+
+    # THEN `~` is expanded in every path
+    assert loaded_config.library_dir == str(tmp_path / "Videos")
+    assert loaded_config.raw_video_dir == str(tmp_path / "SD")
+    assert loaded_config.metadata_dir == str(tmp_path / "meta")
+
+
+def test_load_config_with_relative_library_dir(tmp_path):
+    # GIVEN a config file with a relative library directory
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('library_dir = "Videos"\n')
+
+    # WHEN loading the config
+    # THEN it fails and names the setting
+    with pytest.raises(ValueError, match="'library_dir'.*absolute"):
+        config_module.load_config(config_path)
+
+
+def test_load_config_with_relative_raw_video_dir(tmp_path):
+    # GIVEN a config file with a relative raw video directory
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('raw_video_dir = "DCIM/Movie"\n')
+
+    # WHEN loading the config
+    # THEN it fails and names the setting
+    with pytest.raises(ValueError, match="'raw_video_dir'.*absolute"):
+        config_module.load_config(config_path)
+
+
+def test_load_config_keeps_relative_metadata_dir(tmp_path):
+    # GIVEN a config file with a relative metadata directory
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('metadata_dir = "meta"\n')
+
+    # WHEN loading the config
+    loaded_config = config_module.load_config(config_path)
+
+    # THEN it stays relative, to be resolved against the library directory
+    assert loaded_config.metadata_dir == "meta"
+
+
+def test_get_platform_defaults_without_library_dir():
+    # GIVEN no config file
+
+    # WHEN getting the defaults
+    defaults = config_module.get_platform_defaults()
+
+    # THEN the library directory is not set
+    assert defaults.library_dir is None

@@ -216,19 +216,19 @@ def test_suggest_filename_stays_within_length_limit(make_named_track):
 
 @pytest.fixture
 def library(tmp_path):
-    video_dir = tmp_path / "videos"
-    video_dir.mkdir()
+    library_dir = tmp_path / "videos"
+    library_dir.mkdir()
     store = metadata.MetadataStore(tmp_path / ".metadata")
     store.ensure_dirs()
-    return video_dir, store
+    return library_dir, store
 
 
 @pytest.fixture
 def add_named_trip(library, make_named_track):
-    video_dir, store = library
+    library_dir, store = library
 
     def _add_named_trip(video_filename, streets, start_hour=11):
-        video_path = video_dir / video_filename
+        video_path = library_dir / video_filename
         video_path.write_bytes(b"video")
         track = make_named_track(video_filename, streets, start_hour)
         store.save_track(track)
@@ -239,12 +239,12 @@ def add_named_trip(library, make_named_track):
 
 def test_plan_renames_targets_placeholders_only(library, add_named_trip):
     # GIVEN a trip with a placeholder name and one with a real name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     add_named_trip("2026-09-25 Trip with Bad GPS.mp4", [FRANKA])
 
     # WHEN planning renames
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=False)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=False)
 
     # THEN only the placeholder is renamed
     assert [(plan.video_path.name, plan.new_filename) for plan in plans] == [
@@ -254,11 +254,11 @@ def test_plan_renames_targets_placeholders_only(library, add_named_trip):
 
 def test_plan_renames_with_all(library, add_named_trip):
     # GIVEN a trip with a real name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip with Bad GPS.mp4", [FRANKA])
 
     # WHEN planning renames of all trips
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=True)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=True)
 
     # THEN it is renamed too
     assert [plan.new_filename for plan in plans] == ["2026-09-25 Ivana Franka (CX-5).mp4"]
@@ -266,12 +266,12 @@ def test_plan_renames_with_all(library, add_named_trip):
 
 def test_plan_renames_numbers_same_route_in_time_order(library, add_named_trip):
     # GIVEN two trips on the same day along the same street, listed out of time order by name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 18-00.mp4", [STUSA], start_hour=18)
     add_named_trip("2026-09-25 Trip 09-00.mp4", [STUSA], start_hour=9)
 
     # WHEN planning renames
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=False)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=False)
 
     # THEN the earlier trip keeps the plain name
     assert {plan.video_path.name: plan.new_filename for plan in plans} == {
@@ -284,13 +284,13 @@ def test_plan_renames_avoids_names_of_existing_files_and_tracks(
     library, add_named_trip, make_named_track
 ):
     # GIVEN an existing video and an unreachable track that already use the suggested name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
-    (video_dir / "2026-09-25 Vasylia Stusa (CX-5).mp4").write_bytes(b"other video")
+    (library_dir / "2026-09-25 Vasylia Stusa (CX-5).mp4").write_bytes(b"other video")
     store.save_track(make_named_track("2026-09-25 Vasylia Stusa (1) (CX-5).mp4", [STUSA]))
 
     # WHEN planning renames
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=False)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=False)
 
     # THEN the suggestion avoids both names
     assert [plan.new_filename for plan in plans] == ["2026-09-25 Vasylia Stusa (2) (CX-5).mp4"]
@@ -298,13 +298,13 @@ def test_plan_renames_avoids_names_of_existing_files_and_tracks(
 
 def test_plan_renames_skips_outdated_street_list(library, add_named_trip, caplog):
     # GIVEN a trip whose samples changed after enrichment
-    video_dir, store = library
+    library_dir, store = library
     _, track = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     track.clean_samples[0].status = cleaning.STATUS_SPOOFED
     store.save_track(track)
 
     # WHEN planning renames
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=False)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=False)
 
     # THEN the trip is skipped with a hint
     assert plans == []
@@ -313,11 +313,11 @@ def test_plan_renames_skips_outdated_street_list(library, add_named_trip, caplog
 
 def test_plan_renames_skips_trips_without_changes(library, add_named_trip):
     # GIVEN a trip that already has its suggested name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Vasylia Stusa (CX-5).mp4", [STUSA])
 
     # WHEN planning renames of all trips
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=True)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=True)
 
     # THEN nothing is planned
     assert plans == []
@@ -325,15 +325,15 @@ def test_plan_renames_skips_trips_without_changes(library, add_named_trip):
 
 def test_plan_renames_names_trip_without_gps(library, make_track):
     # GIVEN a trip that was never enriched because it has no located samples
-    video_dir, store = library
-    (video_dir / "2026-09-25 Trip 11-17.mp4").write_bytes(b"video")
+    library_dir, store = library
+    (library_dir / "2026-09-25 Trip 11-17.mp4").write_bytes(b"video")
     track = make_track(video_filename="2026-09-25 Trip 11-17.mp4")
     for sample in track.clean_samples:
         sample.status = cleaning.STATUS_NO_FIX
     store.save_track(track)
 
     # WHEN planning renames
-    plans = rename.plan_renames(video_dir, store, "CX-5", include_all=False)
+    plans = rename.plan_renames(library_dir, store, "CX-5", include_all=False)
 
     # THEN it gets the fallback name
     assert [plan.new_filename for plan in plans] == ["2026-09-25 Trip 11-17 (CX-5).mp4"]
@@ -362,7 +362,7 @@ def test_validate_filename(filename, problem):
 
 def test_apply_rename_moves_video_track_and_preview(library, add_named_trip):
     # GIVEN a trip with a preview
-    video_dir, store = library
+    library_dir, store = library
     video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     store.previews_dir.mkdir()
     store.preview_path(video_path.stem).write_bytes(b"preview")
@@ -373,7 +373,7 @@ def test_apply_rename_moves_video_track_and_preview(library, add_named_trip):
 
     # THEN the video, track, and preview all have the new name
     new_stem = "2026-09-25 Vasylia Stusa (CX-5)"
-    assert sorted(path.name for path in video_dir.iterdir()) == [f"{new_stem}.mp4"]
+    assert sorted(path.name for path in library_dir.iterdir()) == [f"{new_stem}.mp4"]
     assert store.load_track(new_stem).video_filename == f"{new_stem}.mp4"
     assert not store.track_path(video_path.stem).exists()
     assert store.preview_path(new_stem).read_bytes() == b"preview"
@@ -381,21 +381,21 @@ def test_apply_rename_moves_video_track_and_preview(library, add_named_trip):
 
 def test_apply_rename_refuses_to_overwrite(library, add_named_trip):
     # GIVEN a video that already has the new name
-    video_dir, store = library
+    library_dir, store = library
     video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
-    (video_dir / "2026-09-25 Stusa.mp4").write_bytes(b"other video")
+    (library_dir / "2026-09-25 Stusa.mp4").write_bytes(b"other video")
 
     # WHEN renaming
     # THEN it fails and nothing changes
     with pytest.raises(FileExistsError):
         rename.apply_rename(rename.RenamePlan(video_path, "2026-09-25 Stusa.mp4"), store)
-    assert (video_dir / "2026-09-25 Stusa.mp4").read_bytes() == b"other video"
+    assert (library_dir / "2026-09-25 Stusa.mp4").read_bytes() == b"other video"
     assert video_path.exists()
 
 
 def test_apply_rename_restores_video_when_track_rename_fails(library, add_named_trip, monkeypatch):
     # GIVEN a track that cannot be renamed
-    video_dir, store = library
+    library_dir, store = library
     video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
 
     def failing_rename_trip(old_stem, new_video_filename):
@@ -408,7 +408,7 @@ def test_apply_rename_restores_video_when_track_rename_fails(library, add_named_
         rename.apply_rename(rename.RenamePlan(video_path, "2026-09-25 Stusa.mp4"), store)
 
     # THEN the video keeps its old name
-    assert sorted(path.name for path in video_dir.iterdir()) == [video_path.name]
+    assert sorted(path.name for path in library_dir.iterdir()) == [video_path.name]
 
 
 class ScriptedAnswers:
@@ -484,9 +484,9 @@ def test_confirm_plans_with_edit_accepting_suggestion(two_plans):
 
 
 def run_rename_trips(library, config, interactive=False, assume_yes=False, ask=None):
-    video_dir, store = library
+    library_dir, store = library
     return rename.rename_trips(
-        video_dir=video_dir,
+        library_dir=library_dir,
         metadata_dir=store.root,
         config=config,
         include_all=False,
@@ -498,7 +498,7 @@ def run_rename_trips(library, config, interactive=False, assume_yes=False, ask=N
 
 def test_rename_trips_without_confirmation_only_prints(library, add_named_trip, config, capsys):
     # GIVEN a trip to rename
-    video_dir, _ = library
+    library_dir, _ = library
     video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
 
     # WHEN running without `--suggest` or `--yes`
@@ -512,7 +512,7 @@ def test_rename_trips_without_confirmation_only_prints(library, add_named_trip, 
 
 def test_rename_trips_with_yes_renames_and_rebuilds_index(library, add_named_trip, config):
     # GIVEN a trip to rename
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
 
     # WHEN running with `--yes`
@@ -520,7 +520,7 @@ def test_rename_trips_with_yes_renames_and_rebuilds_index(library, add_named_tri
 
     # THEN the trip is renamed and the index lists the new name
     assert failed_count == 0
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 Vasylia Stusa (CX-5).mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Vasylia Stusa (CX-5).mp4"]
     index = json.loads(store.index_path.read_text(encoding="utf-8"))
     assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Vasylia Stusa (CX-5)"]
 
@@ -559,23 +559,23 @@ def test_rename_trips_with_nothing_to_rename(library, config, caplog):
 
 def test_suggest_trip_filename(library, add_named_trip):
     # GIVEN a trip and another video that already has the plain suggested name
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
-    (video_dir / "2026-09-25 Vasylia Stusa (CX-5).mp4").write_bytes(b"other video")
+    (library_dir / "2026-09-25 Vasylia Stusa (CX-5).mp4").write_bytes(b"other video")
 
     # WHEN suggesting a name for the trip
-    filename = rename.suggest_trip_filename(video_dir, store, "2026-09-25 Trip 11-17", "CX-5")
+    filename = rename.suggest_trip_filename(library_dir, store, "2026-09-25 Trip 11-17", "CX-5")
 
     # THEN the suggestion avoids the taken name
     assert filename == "2026-09-25 Vasylia Stusa (1) (CX-5).mp4"
 
 
 def test_suggest_trip_filename_ignores_own_name(library, add_named_trip):
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Vasylia Stusa (CX-5).mp4", [STUSA])
 
     filename = rename.suggest_trip_filename(
-        video_dir, store, "2026-09-25 Vasylia Stusa (CX-5)", "CX-5"
+        library_dir, store, "2026-09-25 Vasylia Stusa (CX-5)", "CX-5"
     )
 
     assert filename == "2026-09-25 Vasylia Stusa (CX-5).mp4"
@@ -583,7 +583,7 @@ def test_suggest_trip_filename_ignores_own_name(library, add_named_trip):
 
 def test_suggest_trip_filename_with_outdated_street_list(library, add_named_trip):
     # GIVEN a trip whose samples changed after enrichment
-    video_dir, store = library
+    library_dir, store = library
     _, track = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     track.clean_samples[0].status = cleaning.STATUS_SPOOFED
     store.save_track(track)
@@ -591,86 +591,88 @@ def test_suggest_trip_filename_with_outdated_street_list(library, add_named_trip
     # WHEN suggesting a name
     # THEN enriching is suggested instead
     with pytest.raises(rename.RenameError, match="dashcam enrich"):
-        rename.suggest_trip_filename(video_dir, store, "2026-09-25 Trip 11-17", "CX-5")
+        rename.suggest_trip_filename(library_dir, store, "2026-09-25 Trip 11-17", "CX-5")
 
 
 def test_suggest_trip_filename_without_track(library):
-    video_dir, store = library
+    library_dir, store = library
 
     with pytest.raises(rename.RenameError, match="No track"):
-        rename.suggest_trip_filename(video_dir, store, "2026-09-25 Missing", "CX-5")
+        rename.suggest_trip_filename(library_dir, store, "2026-09-25 Missing", "CX-5")
 
 
 def test_suggest_trip_filename_without_video(library, add_named_trip):
-    # GIVEN a trip whose video is not in the video directory
-    video_dir, store = library
+    # GIVEN a trip whose video is not in the library directory
+    library_dir, store = library
     video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     video_path.unlink()
 
     # WHEN suggesting a name
     # THEN the missing video is reported
-    with pytest.raises(rename.RenameError, match="not in the video directory"):
-        rename.suggest_trip_filename(video_dir, store, "2026-09-25 Trip 11-17", "CX-5")
+    with pytest.raises(rename.RenameError, match="not in the library directory"):
+        rename.suggest_trip_filename(library_dir, store, "2026-09-25 Trip 11-17", "CX-5")
 
 
 def test_rename_trip_to_chosen_name(library, add_named_trip):
     # GIVEN a trip
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
 
     # WHEN renaming it to a name chosen by the user
     new_stem = rename.rename_trip(
-        video_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4"
+        library_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4"
     )
 
     # THEN the video and track have the new name
     assert new_stem == "2026-09-25 To Work"
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
     assert store.load_track(new_stem).video_filename == "2026-09-25 To Work.mp4"
 
 
 def test_rename_trip_changing_only_letter_case(library, add_named_trip):
     # GIVEN a trip (the test directory may be on a case-insensitive file system)
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 to work.mp4", [STUSA])
 
     # WHEN changing only the letter case of its name
-    rename.rename_trip(video_dir, store, "2026-09-25 to work", "2026-09-25 To Work.mp4")
+    rename.rename_trip(library_dir, store, "2026-09-25 to work", "2026-09-25 To Work.mp4")
 
     # THEN the video and track exist once, under the new name
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
     assert [path.name for path in store.list_track_paths()] == ["2026-09-25 To Work.json"]
     assert store.load_track("2026-09-25 To Work").video_filename == "2026-09-25 To Work.mp4"
 
 
 def test_rename_trip_to_taken_name(library, add_named_trip):
     # GIVEN two trips
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     add_named_trip("2026-09-25 To Work.mp4", [STUSA])
 
     # WHEN renaming one to the name of the other, in another letter case
     # THEN it is refused
     with pytest.raises(rename.RenameError, match="already taken"):
-        rename.rename_trip(video_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 to work.mp4")
+        rename.rename_trip(library_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 to work.mp4")
 
 
 def test_rename_trip_to_invalid_name(library, add_named_trip):
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
 
     with pytest.raises(rename.RenameError, match="Invalid name: use ASCII"):
-        rename.rename_trip(video_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 Стуса.mp4")
+        rename.rename_trip(library_dir, store, "2026-09-25 Trip 11-17", "2026-09-25 Стуса.mp4")
 
 
 def test_rename_trip_to_same_name(library, add_named_trip):
-    video_dir, store = library
+    library_dir, store = library
     add_named_trip("2026-09-25 To Work.mp4", [STUSA])
 
-    new_stem = rename.rename_trip(video_dir, store, "2026-09-25 To Work", "2026-09-25 To Work.mp4")
+    new_stem = rename.rename_trip(
+        library_dir, store, "2026-09-25 To Work", "2026-09-25 To Work.mp4"
+    )
 
     assert new_stem == "2026-09-25 To Work"
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
 
 
 def test_print_plans_shows_old_and_new_names(two_plans, capsys):

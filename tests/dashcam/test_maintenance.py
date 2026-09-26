@@ -18,10 +18,10 @@ def info_logs(caplog):
 
 
 @pytest.fixture
-def video_dir(tmp_path):
-    video_dir = tmp_path / "videos"
-    video_dir.mkdir()
-    return video_dir
+def library_dir(tmp_path):
+    library_dir = tmp_path / "videos"
+    library_dir.mkdir()
+    return library_dir
 
 
 @pytest.fixture
@@ -32,11 +32,11 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def add_trip(video_dir, store, make_track):
+def add_trip(library_dir, store, make_track):
     """Create a video file and a matching track."""
 
     def _add_trip(name, content=b"video"):
-        video_path = video_dir / name
+        video_path = library_dir / name
         video_path.write_bytes(content)
         stat = video_path.stat()
         track = make_track(video_filename=name)
@@ -49,44 +49,42 @@ def add_trip(video_dir, store, make_track):
     return _add_trip
 
 
-def run_doctor(video_dir, store, apply_fixes=False):
-    return maintenance.run_doctor(
-        video_dir, store.root, max_interpolation_gap_s=60, apply_fixes=apply_fixes
-    )
+def run_doctor(library_dir, store, apply_fixes=False):
+    return maintenance.run_doctor(library_dir, store.root, apply_fixes=apply_fixes)
 
 
-def test_run_doctor_with_healthy_library(video_dir, store, add_trip, caplog):
+def test_run_doctor_with_healthy_library(library_dir, store, add_trip, caplog):
     # GIVEN a video with a matching track and a current index
     add_trip("2026-09-25 Trip.mp4")
-    store.rebuild_index(60)
+    store.rebuild_index()
 
     # WHEN running the doctor
-    error_count = run_doctor(video_dir, store)
+    error_count = run_doctor(library_dir, store)
 
     # THEN no problems are found
     assert error_count == 0
     assert "No problems found" in caplog.text
 
 
-def test_run_doctor_reports_unreadable_track(video_dir, store, caplog):
+def test_run_doctor_reports_unreadable_track(library_dir, store, caplog):
     # GIVEN a broken track file
     store.track_path("2026-09-25 Trip").write_text("{\n  oops\n}", encoding="utf-8")
 
     # WHEN running the doctor
-    error_count = run_doctor(video_dir, store)
+    error_count = run_doctor(library_dir, store)
 
     # THEN the error is reported with its line
     assert error_count == 1
     assert "line 2" in caplog.text
 
 
-def test_run_doctor_fixes_track_filename(video_dir, store, add_trip):
+def test_run_doctor_fixes_track_filename(library_dir, store, add_trip):
     # GIVEN a track file renamed by hand so that it no longer matches its video
     add_trip("2026-09-25 Trip.mp4")
     store.track_path("2026-09-25 Trip").rename(store.track_path("wrong name"))
 
     # WHEN running the doctor with fixes
-    error_count = run_doctor(video_dir, store, apply_fixes=True)
+    error_count = run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN the track file gets its proper name back
     assert error_count == 0
@@ -94,13 +92,13 @@ def test_run_doctor_fixes_track_filename(video_dir, store, add_trip):
     assert not store.track_path("wrong name").exists()
 
 
-def test_run_doctor_reconnects_renamed_video(video_dir, store, add_trip):
+def test_run_doctor_reconnects_renamed_video(library_dir, store, add_trip):
     # GIVEN a video renamed by hand
     video_path, _ = add_trip("2026-09-25 Trip.mp4")
-    video_path.rename(video_dir / "2026-09-25 Horodotska (CX-5).mp4")
+    video_path.rename(library_dir / "2026-09-25 Horodotska (CX-5).mp4")
 
     # WHEN running the doctor with fixes
-    run_doctor(video_dir, store, apply_fixes=True)
+    run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN the track follows the video and the index is rebuilt
     assert store.load_track("2026-09-25 Horodotska (CX-5)").video_filename == (
@@ -110,13 +108,13 @@ def test_run_doctor_reconnects_renamed_video(video_dir, store, add_trip):
     assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Horodotska (CX-5)"]
 
 
-def test_run_doctor_without_fix_changes_nothing(video_dir, store, add_trip, caplog):
+def test_run_doctor_without_fix_changes_nothing(library_dir, store, add_trip, caplog):
     # GIVEN a video renamed by hand
     video_path, _ = add_trip("2026-09-25 Trip.mp4")
-    video_path.rename(video_dir / "2026-09-25 Renamed.mp4")
+    video_path.rename(library_dir / "2026-09-25 Renamed.mp4")
 
     # WHEN running the doctor without fixes
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN the rename is reported as fixable but not applied
     assert store.track_path("2026-09-25 Trip").exists()
@@ -124,47 +122,47 @@ def test_run_doctor_without_fix_changes_nothing(video_dir, store, add_trip, capl
     assert "doctor --fix" in caplog.text
 
 
-def test_run_doctor_reports_changed_video(video_dir, store, add_trip, caplog):
+def test_run_doctor_reports_changed_video(library_dir, store, add_trip, caplog):
     # GIVEN a video whose content changed after extraction
     video_path, _ = add_trip("2026-09-25 Trip.mp4")
     video_path.write_bytes(b"new content")
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN re-extraction is suggested
     assert "changed since extraction" in caplog.text
 
 
 def test_run_doctor_reports_video_without_track_and_unreachable_track(
-    video_dir, store, add_trip, caplog
+    library_dir, store, add_trip, caplog
 ):
     # GIVEN a new video, and a track whose video was deleted
-    (video_dir / "2026-09-26 New.mp4").write_bytes(b"new")
+    (library_dir / "2026-09-26 New.mp4").write_bytes(b"new")
     old_path, _ = add_trip("2026-09-25 Trip.mp4")
     old_path.unlink()
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN both are reported
     assert "has no track" in caplog.text
     assert "unreachable" in caplog.text
 
 
-def test_run_doctor_reports_duplicate_fingerprints(video_dir, store, add_trip, caplog):
+def test_run_doctor_reports_duplicate_fingerprints(library_dir, store, add_trip, caplog):
     # GIVEN two tracks of the same video content
     add_trip("2026-09-25 Trip.mp4", content=b"same")
     add_trip("2026-09-25 Copy.mp4", content=b"same")
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN the duplicate is reported
     assert "share the same video content" in caplog.text
 
 
-def test_run_doctor_warns_about_track_without_accepted_fix(video_dir, store, add_trip, caplog):
+def test_run_doctor_warns_about_track_without_accepted_fix(library_dir, store, add_trip, caplog):
     # GIVEN a track with GPS text in which every fix was rejected
     _, track = add_trip("2024-02-11 Night.mp4")
     for sample in track.clean_samples:
@@ -172,26 +170,26 @@ def test_run_doctor_warns_about_track_without_accepted_fix(video_dir, store, add
     store.save_track(track)
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN the filename date is mentioned as a possible cause
     assert "check the filename" in caplog.text
 
 
-def test_run_doctor_reports_outdated_track(video_dir, store, add_trip, caplog):
+def test_run_doctor_reports_outdated_track(library_dir, store, add_trip, caplog):
     # GIVEN a track made by an older cleaning version
     _, track = add_trip("2026-09-25 Trip.mp4")
     track.cleaning_version = 0
     store.save_track(track)
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN recleaning is suggested
     assert "--reclean" in caplog.text
 
 
-def test_run_doctor_deletes_leftover_files(video_dir, store, add_trip):
+def test_run_doctor_deletes_leftover_files(library_dir, store, add_trip):
     # GIVEN a preview without a track and a temporary file from an interrupted run
     add_trip("2026-09-25 Trip.mp4")
     store.previews_dir.mkdir()
@@ -201,14 +199,14 @@ def test_run_doctor_deletes_leftover_files(video_dir, store, add_trip):
     partial_path.write_text("{", encoding="utf-8")
 
     # WHEN running the doctor with fixes
-    run_doctor(video_dir, store, apply_fixes=True)
+    run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN both are deleted
     assert not orphan_preview_path.exists()
     assert not partial_path.exists()
 
 
-def test_run_doctor_deletes_leftover_osm_download(video_dir, store, add_trip):
+def test_run_doctor_deletes_leftover_osm_download(library_dir, store, add_trip):
     # GIVEN a partial OSM download from an interrupted `enrich --update-osm`
     add_trip("2026-09-25 Trip.mp4")
     osm_dir = store.root / osm.OSM_DIR_NAME
@@ -217,27 +215,27 @@ def test_run_doctor_deletes_leftover_osm_download(video_dir, store, add_trip):
     download_path.write_bytes(b"pbf")
 
     # WHEN running the doctor with fixes
-    run_doctor(video_dir, store, apply_fixes=True)
+    run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN the download is deleted
     assert not download_path.exists()
 
 
 def test_run_doctor_reports_missing_street_list(
-    video_dir, store, add_trip, osm_metadata_dir, caplog
+    library_dir, store, add_trip, osm_metadata_dir, caplog
 ):
     # GIVEN OSM data and a track that was never enriched
     add_trip("2026-09-25 Trip.mp4")
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN enriching is suggested
     assert "has no street list (run `dashcam enrich`)" in caplog.text
 
 
 def test_run_doctor_reports_street_list_from_older_osm_data(
-    video_dir, store, add_trip, osm_metadata_dir, road_database, caplog
+    library_dir, store, add_trip, osm_metadata_dir, road_database, caplog
 ):
     # GIVEN a track enriched against OSM data other than the current one
     _, track = add_trip("2026-09-25 Trip.mp4")
@@ -246,36 +244,36 @@ def test_run_doctor_reports_street_list_from_older_osm_data(
     store.save_track(track)
 
     # WHEN running the doctor
-    run_doctor(video_dir, store)
+    run_doctor(library_dir, store)
 
     # THEN enriching is suggested
     assert "has an outdated street list (run `dashcam enrich`)" in caplog.text
 
 
 def test_run_doctor_accepts_current_street_list(
-    video_dir, store, add_trip, osm_metadata_dir, road_database, caplog
+    library_dir, store, add_trip, osm_metadata_dir, road_database, caplog
 ):
     # GIVEN a track enriched against the current OSM data
     _, track = add_trip("2026-09-25 Trip.mp4")
     enrich.enrich_track(track, road_database)
     store.save_track(track)
-    store.rebuild_index(60)
+    store.rebuild_index()
 
     # WHEN running the doctor
-    error_count = run_doctor(video_dir, store)
+    error_count = run_doctor(library_dir, store)
 
     # THEN no problems are found
     assert error_count == 0
     assert "No problems found" in caplog.text
 
 
-def test_run_doctor_rebuilds_stale_index(video_dir, store, add_trip):
+def test_run_doctor_rebuilds_stale_index(library_dir, store, add_trip):
     # GIVEN an index that does not list an existing track
     add_trip("2026-09-25 Trip.mp4")
     store.index_path.write_text('{"trips": []}', encoding="utf-8")
 
     # WHEN running the doctor with fixes
-    run_doctor(video_dir, store, apply_fixes=True)
+    run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN the index lists the track
     index = json.loads(store.index_path.read_text(encoding="utf-8"))
@@ -287,9 +285,7 @@ def test_forget_trips(store, add_trip):
     add_trip("2026-09-25 Trip.mp4")
 
     # WHEN forgetting it by video filename, along with an unknown name
-    missing_count = maintenance.forget_trips(
-        ["2026-09-25 Trip.mp4", "unknown"], store.root, max_interpolation_gap_s=60
-    )
+    missing_count = maintenance.forget_trips(["2026-09-25 Trip.mp4", "unknown"], store.root)
 
     # THEN its track is in the trash and the unknown name is reported
     assert missing_count == 1
@@ -317,17 +313,17 @@ def test_resolve_stem(name, expected):
     assert stem == expected
 
 
-def test_print_status(video_dir, store, add_trip, make_track, capsys):
+def test_print_status(library_dir, store, add_trip, make_track, capsys):
     # GIVEN a trip, an unprocessed video, a video without an overlay, and an unreachable track
     add_trip("2026-09-25 Trip.mp4")
-    (video_dir / "2026-09-26 New.mp4").write_bytes(b"new")
+    (library_dir / "2026-09-26 New.mp4").write_bytes(b"new")
     _, no_overlay_track = add_trip("2019-01-01 Old Camera.mp4")
     no_overlay_track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
     store.save_track(no_overlay_track)
     store.save_track(make_track(video_filename="2026-01-01 Deleted.mp4"))
 
     # WHEN printing the status
-    maintenance.print_status(video_dir, store.root, max_interpolation_gap_s=60)
+    maintenance.print_status(library_dir, store.root)
 
     # THEN every group is listed
     output = capsys.readouterr().out

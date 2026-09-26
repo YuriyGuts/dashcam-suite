@@ -276,7 +276,7 @@ def load_track_text(text: str) -> Track:
         raise TrackFormatError(str(exc)) from exc
 
 
-def compute_trip_stats(track: Track, max_interpolation_gap_s: float) -> dict[str, t.Any]:
+def compute_trip_stats(track: Track) -> dict[str, t.Any]:
     """Compute the trip summary shown in the visualizer."""
     samples = track.clean_samples
     located_statuses = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
@@ -295,7 +295,7 @@ def compute_trip_stats(track: Track, max_interpolation_gap_s: float) -> dict[str
         distance_m += geo.haversine_m(previous.lat, previous.lon, current.lat, current.lon)
         if previous.time is not None and current.time is not None:
             step_s = (current.time - previous.time).total_seconds()
-            if 0 < step_s <= max_interpolation_gap_s:
+            if 0 < step_s <= cleaning.MAX_INTERPOLATION_GAP_S:
                 moving_duration_s += step_s
 
     located_samples = [
@@ -408,7 +408,7 @@ class MetadataStore:
             if old_preview_path.exists():
                 old_preview_path.rename(self.preview_path(track.stem))
 
-    def build_index(self, max_interpolation_gap_s: float) -> dict[str, t.Any]:
+    def build_index(self) -> dict[str, t.Any]:
         """
         Summarize all tracks. Unreadable tracks are skipped.
 
@@ -436,7 +436,7 @@ class MetadataStore:
                 "end_locality": get_locality_name(track, "end"),
             }
             if track.extraction_status == EXTRACTION_OK:
-                trip.update(compute_trip_stats(track, max_interpolation_gap_s))
+                trip.update(compute_trip_stats(track))
             trips.append(trip)
 
         return {
@@ -444,9 +444,9 @@ class MetadataStore:
             "trips": trips,
         }
 
-    def rebuild_index(self, max_interpolation_gap_s: float) -> dict[str, t.Any]:
+    def rebuild_index(self) -> dict[str, t.Any]:
         """Rebuild `index.json` from the tracks."""
-        index = self.build_index(max_interpolation_gap_s)
+        index = self.build_index()
         self.root.mkdir(parents=True, exist_ok=True)
         partial_path = self.index_path.with_name(f".{self.index_path.name}.partial")
         partial_path.write_text(

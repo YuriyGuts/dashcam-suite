@@ -413,7 +413,7 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
 
 def plan_encode_jobs(
     segment_groups: list[tuple[str, list[RawVideoSegment]]],
-    output_dir: Path,
+    library_dir: Path,
     config: Config,
 ) -> list[EncodeJobDefinition]:
     """
@@ -426,7 +426,7 @@ def plan_encode_jobs(
     """
     job_defs = []
     for output_name, segments in segment_groups:
-        output_path = output_dir / f"{output_name}.{OUTPUT_FORMAT}"
+        output_path = library_dir / f"{output_name}.{OUTPUT_FORMAT}"
         if output_path.exists():
             LOGGER.warning(f"Output video '{output_path}' already exists; skipping")
             continue
@@ -470,7 +470,7 @@ def run_encode_jobs(job_defs: list[EncodeJobDefinition], job_count: int) -> int:
 
 def encode_trips(
     raw_video_dir: Path,
-    output_dir: Path,
+    library_dir: Path,
     config: Config,
     min_trip_gap_hours: float,
     job_count: int,
@@ -497,7 +497,7 @@ def encode_trips(
         LOGGER.info(f"  {trip}")
 
     segment_groups = [(trip.get_placeholder_name(), trip.raw_segments) for trip in trips]
-    job_defs = plan_encode_jobs(segment_groups, output_dir, config)
+    job_defs = plan_encode_jobs(segment_groups, library_dir, config)
 
     if dry_run:
         LOGGER.warning("Dry run mode enabled. Not running any encoding jobs.")
@@ -508,7 +508,7 @@ def encode_trips(
 
 def encode_range(
     raw_video_dir: Path,
-    output_dir: Path,
+    library_dir: Path,
     config: Config,
     start_index: int,
     end_index: int,
@@ -535,7 +535,7 @@ def encode_range(
         output_name = get_placeholder_video_name(segments[0].start_time)
     LOGGER.info(f"Output video: {output_name} ({len(segments)} files)")
 
-    job_defs = plan_encode_jobs([(output_name, segments)], output_dir, config)
+    job_defs = plan_encode_jobs([(output_name, segments)], library_dir, config)
 
     if dry_run:
         LOGGER.warning("Dry run mode enabled. Not running any encoding jobs.")

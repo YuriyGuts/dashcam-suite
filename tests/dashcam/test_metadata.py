@@ -192,7 +192,7 @@ def test_compute_trip_stats(make_track):
     track = make_track(sample_count=3)
 
     # WHEN computing the stats
-    stats = metadata.compute_trip_stats(track, max_interpolation_gap_s=60)
+    stats = metadata.compute_trip_stats(track)
 
     # THEN distance, duration, speed, and coverage are summarized
     assert stats["distance_km"] == pytest.approx(0.07, abs=0.005)
@@ -217,7 +217,7 @@ def test_compute_trip_stats_skips_gaps(make_track):
     )
 
     # WHEN computing the stats
-    stats = metadata.compute_trip_stats(track, max_interpolation_gap_s=60)
+    stats = metadata.compute_trip_stats(track)
 
     # THEN no distance is counted across the gap
     assert stats["distance_km"] == 0
@@ -229,7 +229,7 @@ def test_compute_trip_stats_without_samples(make_track):
     track = make_track(sample_count=0)
 
     # WHEN computing the stats
-    stats = metadata.compute_trip_stats(track, max_interpolation_gap_s=60)
+    stats = metadata.compute_trip_stats(track)
 
     # THEN the stats are empty
     assert stats["start_time"] is None
@@ -309,7 +309,7 @@ def test_metadata_store_rebuild_index(make_track, store):
     store.track_path("broken").write_text("{", encoding="utf-8")
 
     # WHEN rebuilding the index
-    index = store.rebuild_index(max_interpolation_gap_s=60)
+    index = store.rebuild_index()
 
     # THEN readable tracks are listed, with stats for extracted trips only
     trips_by_id = {trip["id"]: trip for trip in index["trips"]}
@@ -328,7 +328,7 @@ def test_metadata_store_rebuild_index_with_localities(make_track, store):
     store.save_track(track)
 
     # WHEN rebuilding the index
-    index = store.rebuild_index(60)
+    index = store.rebuild_index()
 
     # THEN the trip has the locality names
     assert index["trips"][0]["start_locality"] == "Львів"

@@ -501,6 +501,6 @@ def enrich_tracks(
 
     if not enriched_count:
         LOGGER.info("All street lists are up to date", extra=terminal.SUCCESS)
-    index = store.rebuild_index(config.max_interpolation_gap_s)
+    index = store.rebuild_index()
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")
     return failed_count

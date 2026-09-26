@@ -1,7 +1,7 @@
 """
 Extract GPS tracks from the overlay of trip videos.
 
-For every video in the video directory:
+For every video in the library directory:
 
 * A video whose track is up to date is skipped. The size and modification time are compared
   first, and the content fingerprint only when they differ.
@@ -90,10 +90,10 @@ class ExtractJobResult:
     elapsed_s: float = 0.0
 
 
-def find_videos(video_dir: Path, include: list[str], exclude: list[str]) -> list[Path]:
+def find_videos(library_dir: Path, include: list[str], exclude: list[str]) -> list[Path]:
     """List trip videos in the directory whose names match the include and exclude patterns."""
     video_paths = []
-    for path in sorted(video_dir.iterdir()):
+    for path in sorted(library_dir.iterdir()):
         if not path.is_file() or path.name.startswith("."):
             continue
         if path.suffix.lower() not in VIDEO_EXTENSIONS:
@@ -415,7 +415,7 @@ def make_extract_job(
 
 
 def extract_videos(
-    video_dir: Path,
+    library_dir: Path,
     metadata_dir: Path,
     config: Config,
     include: list[str],
@@ -434,15 +434,15 @@ def extract_videos(
     """
     store = metadata.MetadataStore(metadata_dir)
     store.ensure_dirs()
-    video_paths = find_videos(video_dir, include, exclude)
+    video_paths = find_videos(library_dir, include, exclude)
     if only:
         only_names = {Path(name).name for name in only}
         video_paths = [path for path in video_paths if path.name in only_names]
         missing_names = only_names - {path.name for path in video_paths}
         for name in sorted(missing_names):
-            LOGGER.warning(f"Video not found in '{video_dir}': {name}")
+            LOGGER.warning(f"Video not found in '{library_dir}': {name}")
         force = True
-    LOGGER.info(f"Found {len(video_paths)} videos in '{video_dir}'")
+    LOGGER.info(f"Found {len(video_paths)} videos in '{library_dir}'")
 
     to_extract = plan_extraction(video_paths, store, force)
     job_defs = [
@@ -467,7 +467,7 @@ def extract_videos(
     else:
         LOGGER.info("All tracks are up to date", extra=terminal.SUCCESS)
 
-    index = store.rebuild_index(config.max_interpolation_gap_s)
+    index = store.rebuild_index()
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")
     return failed_count
 
@@ -523,6 +523,6 @@ def reclean_tracks(metadata_dir: Path, config: Config) -> int:
         store.save_track(track)
         LOGGER.info(f"Recleaned: {track.video_filename}", extra=terminal.SUCCESS)
 
-    index = store.rebuild_index(config.max_interpolation_gap_s)
+    index = store.rebuild_index()
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")
     return failed_count

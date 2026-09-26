@@ -2,6 +2,12 @@
 
 One command-line tool that covers the whole dashcam workflow: merge raw SD card segments into trip videos, extract GPS tracks from the video overlay, match them to named roads, name the trips, and browse them on a map with synchronized video playback.
 
+## Terms
+
+- **Raw video directory**: the movie directory on the SD card, with the raw segments (config: `raw_video_dir`, option: `--raw-video-dir`).
+- **Library directory**: the directory with the trip videos and the metadata directory (config: `library_dir`, option: `--library-dir` / `-d`).
+- **Metadata directory**: tracks, the trip index, previews, and OSM data; `.metadata` inside the library directory by default (config: `metadata_dir`, option: `--metadata-dir`).
+
 ## Background
 
 - Camera: VIOFO A119 V3. Raw segments on the SD card are named `YYYYMMDDhhmmss_NNNNNN.MP4` (start time, 6-digit index), 60 s, H.264.
@@ -22,7 +28,12 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Python project managed by `uv` with a local `.venv`. External requirement: `ffmpeg` in `PATH`.
 - `src/` layout, pytest, ruff (isort with one import per line), type annotations, `ty` type checking.
 - Code style follows the original `dashcam-encode` script.
-- Per-machine TOML config overrides defaults: SD card path, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job count, car model, cleaning thresholds.
+- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job count, trip gap, car model, camera time zone. `dashcam config` prints the config file path and the effective settings.
+- Directories:
+  - `library_dir` and `raw_video_dir` in the config expand `~` and must be absolute. A relative `metadata_dir` in the config is relative to the library directory.
+  - Paths given as options are ordinary shell paths, relative to the current directory.
+  - A command that needs the library directory fails when neither `--library-dir` nor `library_dir` in the config sets it; the error names both. `enrich`, `forget`, and `extract --reclean` only need the metadata directory.
+- Cleaning thresholds are constants, so tracks do not depend on the machine that extracted them.
 - Long-running commands (`encode`, `extract`) prevent OS sleep and run jobs in parallel.
 
 ## Commands
@@ -33,13 +44,13 @@ Port of `dashcam-encode`.
 
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
 - `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
-- Options: `--raw-video-dir`, `--output-dir`, `--min-trip-gap-hours`, `--job-count`, `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
+- Options: `--raw-video-dir`, `--library-dir`, `--min-trip-gap-hours`, `--job-count`, `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
 - Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). Existing outputs are skipped with a warning and never overwritten. Incomplete outputs never appear under the final name.
 
-### `dashcam extract [DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
+### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
 
-- `DIR` defaults to the current directory. Glob patterns match filenames and may be repeated.
+- Glob patterns match filenames and may be repeated.
 - Probe: 10 frames spread over each new video are checked for a readable date/time field; at least 3 must have it. Videos without it are recorded as `no_overlay` and skipped until `--force`.
 - OCR:
   - Frames are sampled at 2 fps from the bottom 64 px strip, decoded with `ffmpeg` (hardware acceleration from the config), and collapsed to one sample per camera clock tick.
@@ -58,10 +69,9 @@ Port of `dashcam-encode`.
   - Times are stored as ISO-8601 with offset in `Europe/Kyiv`.
 - Incremental and resumable: only videos without a track, or whose content changed, are processed. Each track is written when its video is done.
 - `--only` re-extracts the named videos and keeps their manual overrides.
-- `--metadata-dir` defaults to `.metadata` in the current directory (config: `metadata_dir`).
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
 
-### `dashcam enrich [--metadata-dir PATH] [--update-osm] [--osm-file PBF] [--force]`
+### `dashcam enrich [-d DIR] [--metadata-dir PATH] [--update-osm] [--osm-file PBF] [--force]`
 
 - `--update-osm` downloads the Geofabrik Ukraine extract (config: `osm_extract_url`), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
 - Storage: SQLite with R*Tree indexes. OSM ways are cut into chunks of up to 8 nodes so that index boxes stay small. Tags kept: `name`, `name:en`, `ref`, `highway`; localities also keep `place` and `population`.
@@ -70,7 +80,7 @@ Port of `dashcam-encode`.
 - Localities: the place with the smallest distance relative to its radius (by place type, growing with population); none if the point is outside all radii.
 - Incremental: a track is re-enriched when it has no street list, its located samples changed, the OSM data changed, or the enricher version increased. `--force` re-enriches all tracks. `extract --reclean` and `--only` keep the street list; `enrich` and `doctor` detect whether it is outdated.
 
-### `dashcam rename [DIR] [--metadata-dir PATH] [--suggest] [--all] [--yes]`
+### `dashcam rename [-d DIR] [--metadata-dir PATH] [--suggest] [--all] [--yes]`
 
 - Pattern: `YYYY-mm-dd <streets> (<car model>).mp4`, streets separated by `, `. Car model defaults to `CX-5` (config override). The extension of the video is kept.
 - ASCII only. Whole filename (including extension) at most 140 characters.
@@ -89,25 +99,25 @@ Port of `dashcam-encode`.
 
 ### `dashcam import`
 
-Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode trips` options plus `--out DIR` (default: current directory), `--metadata-dir` (default: `.metadata` inside `--out`), and `--no-rename`.
+Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode trips` options plus `--metadata-dir` and `--no-rename`.
 
 - `--dry-run` only prints the encoding plan.
 - Without OSM data, `enrich` and `rename` are skipped with a hint to run `enrich --update-osm`; the large download is never started implicitly.
 
-### `dashcam status [DIR]` and `dashcam forget VIDEO|STEM`
+### `dashcam status [-d DIR]` and `dashcam forget VIDEO|STEM`
 
 - `status` lists trips, unprocessed videos, `no_overlay` videos, and unreachable tracks.
 - `forget` moves a track (and its preview) to `.metadata/trash/`.
 
-### `dashcam doctor [DIR] [--fix]`
+### `dashcam doctor [-d DIR] [--fix]`
 
 | Check | `--fix` |
 |---|---|
 | Track JSON parses, schema valid, overrides well-formed | Report line and field |
 | Track filename differs from its `video_filename` field | Rename the track file |
 | Two tracks share a fingerprint | Report both |
-| Video in `DIR` without a track | Suggest `extract` |
-| Track whose video is not in `DIR` | Reconnect renames via fingerprint; report the rest as unreachable |
+| Video in the library without a track | Suggest `extract` |
+| Track whose video is not in the library | Reconnect renames via fingerprint; report the rest as unreachable |
 | Same stem, fingerprint mismatch | Suggest `extract --only` |
 | `index.json` stale or missing | Rebuild |
 | Track from an older extractor or cleaning version | Suggest `--reclean` |
@@ -116,9 +126,9 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 
 `--fix` never deletes a track; it moves it to `.metadata/trash/`. `extract` and `serve` run the cheap checks at startup and warn.
 
-### `dashcam serve [DIR]`
+### `dashcam serve [-d DIR]`
 
-Local HTTP server for the static web app, `.metadata/`, and the videos in `DIR`.
+Local HTTP server for the static web app, the metadata directory, and the videos in the library directory.
 
 - Leaflet (vendored) with OpenStreetMap tiles. Main browser: Firefox; secondary: Brave.
 - Sidebar: date range, trip name search, street filter, trip list with stats (date, start/end time, distance, duration, average/max speed, GPS coverage badge), aggregate stats for the selection. Filter state lives in the URL hash.

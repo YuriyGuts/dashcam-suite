@@ -7,7 +7,7 @@ the video again. The steps are:
 1. Parse every reading. Blank GPS text means no fix. GPS text that cannot be trusted or parsed
    is unreadable. The rest are candidate fixes.
 2. Split the candidate fixes into segments in which consecutive points are physically
-   reachable from each other (implied speed at most `max_speed_kmh`).
+   reachable from each other (implied speed at most `MAX_SPEED_KMH`).
 3. Reject segments whose camera clock shows a date too far from the date in the filename, and
    segments whose displayed speed does not match the speed implied by their coordinates.
 4. Keep the heaviest time-ordered chain of the remaining segments in which every segment is
@@ -15,9 +15,9 @@ the video again. The steps are:
    which the fake points agree with each other.
 5. Assign times. The camera clock is trusted on good fixes. Elsewhere, time is derived from the
    video offset, anchored to the nearest good fix. Forward jumps of the camera clock (up to
-   `max_merge_gap_hours`) mark gaps between merged segments and are added to derived times.
+   `MAX_MERGE_GAP_HOURS`) mark gaps between merged segments and are added to derived times.
    Derived times that cross samples without a trustworthy clock are flagged as estimated.
-6. Fill gaps of at most `max_interpolation_gap_s` between good fixes by linear interpolation.
+6. Fill gaps of at most `MAX_INTERPOLATION_GAP_S` between good fixes by linear interpolation.
 
 Manual overrides from the track are applied on top: bad ranges are excluded before step 2,
 and good ranges are accepted after step 4.
@@ -52,6 +52,18 @@ CLOCK_JITTER_S = 1.5
 SPEED_CHECK_SPAN_S = 5
 MIN_SPEED_CHECK_COUNT = 5
 MAX_MEDIAN_SPEED_MISMATCH_KMH = 30
+
+# The highest plausible speed.
+MAX_SPEED_KMH = 250
+
+# How far the camera clock date may be from the date in the video filename.
+MAX_CLOCK_DATE_DIFF_DAYS = 1
+
+# The longest gap between merged segments inside one trip video.
+MAX_MERGE_GAP_HOURS = 12
+
+# The longest gap in GPS data that is filled in by linear interpolation.
+MAX_INTERPOLATION_GAP_S = 60
 
 
 @dataclasses.dataclass(frozen=True)
@@ -89,25 +101,14 @@ class Overrides:
 
 @dataclasses.dataclass(frozen=True)
 class CleaningSettings:
-    """Thresholds and context for cleaning one track."""
+    """Context for cleaning one track."""
 
     trip_date: datetime.date | None
     timezone: str
-    max_speed_kmh: float
-    max_clock_date_diff_days: float
-    max_merge_gap_hours: float
-    max_interpolation_gap_s: float
 
     @classmethod
     def from_config(cls, config: Config, trip_date: datetime.date | None) -> "CleaningSettings":
-        return cls(
-            trip_date=trip_date,
-            timezone=config.timezone,
-            max_speed_kmh=config.max_speed_kmh,
-            max_clock_date_diff_days=config.max_clock_date_diff_days,
-            max_merge_gap_hours=config.max_merge_gap_hours,
-            max_interpolation_gap_s=config.max_interpolation_gap_s,
-        )
+        return cls(trip_date=trip_date, timezone=config.timezone)
 
 
 @dataclasses.dataclass
@@ -186,13 +187,10 @@ def is_clock_plausible(clock: datetime.datetime | None, settings: CleaningSettin
     if settings.trip_date is None:
         return True
     date_diff_days = abs((clock.date() - settings.trip_date).days)
-    return date_diff_days <= settings.max_clock_date_diff_days
+    return date_diff_days <= MAX_CLOCK_DATE_DIFF_DAYS
 
 
-def split_into_segments(
-    parsed_samples: list[ParsedSample],
-    settings: CleaningSettings,
-) -> list[list[int]]:
+def split_into_segments(parsed_samples: list[ParsedSample]) -> list[list[int]]:
     """
     Split the candidate fixes into segments of physically reachable consecutive points.
 
@@ -218,7 +216,7 @@ def split_into_segments(
         )
         # GPS updates once per second, so allow at least one second between readings.
         duration_s = max(1.0, sample.t - previous.t)
-        if geo.implied_speed_kmh(distance_m, duration_s) > settings.max_speed_kmh:
+        if geo.implied_speed_kmh(distance_m, duration_s) > MAX_SPEED_KMH:
             segments.append([index])
         else:
             segments[-1].append(index)
@@ -269,15 +267,11 @@ def has_speed_mismatch(segment: list[int], parsed_samples: list[ParsedSample]) -
     return statistics.median(mismatches) > MAX_MEDIAN_SPEED_MISMATCH_KMH
 
 
-def is_reachable(
-    from_sample: ParsedSample,
-    to_sample: ParsedSample,
-    settings: CleaningSettings,
-) -> bool:
+def is_reachable(from_sample: ParsedSample, to_sample: ParsedSample) -> bool:
     """
     Check whether the car could get from one fix to a later one.
 
-    If both clocks are trusted and show a forward jump of up to `max_merge_gap_hours`, the
+    If both clocks are trusted and show a forward jump of up to `MAX_MERGE_GAP_HOURS`, the
     time between the fixes includes that gap (e.g. the car was parked between two merged
     segments). Otherwise, the time between the fixes is taken from the video offsets.
     """
@@ -290,20 +284,18 @@ def is_reachable(
         and to_sample.clock is not None
     ):
         clock_duration_s = (to_sample.clock - from_sample.clock).total_seconds()
-        max_merge_gap_s = settings.max_merge_gap_hours * 3600
+        max_merge_gap_s = MAX_MERGE_GAP_HOURS * 3600
         if duration_s - CLOCK_JITTER_S <= clock_duration_s <= duration_s + max_merge_gap_s:
             duration_s = max(duration_s, clock_duration_s)
 
     distance_m = geo.haversine_m(
         from_sample.gps.lat, from_sample.gps.lon, to_sample.gps.lat, to_sample.gps.lon
     )
-    return geo.implied_speed_kmh(distance_m, duration_s) <= settings.max_speed_kmh
+    return geo.implied_speed_kmh(distance_m, duration_s) <= MAX_SPEED_KMH
 
 
 def select_segment_chain(
-    segments: list[list[int]],
-    parsed_samples: list[ParsedSample],
-    settings: CleaningSettings,
+    segments: list[list[int]], parsed_samples: list[ParsedSample]
 ) -> list[list[int]]:
     """
     Find the time-ordered chain of mutually reachable segments with the most points.
@@ -324,7 +316,7 @@ def select_segment_chain(
         for previous_index in range(index):
             last_sample = parsed_samples[segments[previous_index][-1]]
             weight = best_weights[previous_index] + len(segment)
-            if weight > best_weights[index] and is_reachable(last_sample, first_sample, settings):
+            if weight > best_weights[index] and is_reachable(last_sample, first_sample):
                 best_weights[index] = weight
                 best_predecessors[index] = previous_index
 
@@ -336,11 +328,7 @@ def select_segment_chain(
     return list(reversed(chain))
 
 
-def detect_good_fixes(
-    parsed_samples: list[ParsedSample],
-    settings: CleaningSettings,
-    overrides: Overrides,
-) -> list[str]:
+def detect_good_fixes(parsed_samples: list[ParsedSample], overrides: Overrides) -> list[str]:
     """
     Decide which candidate fixes are genuine.
 
@@ -356,11 +344,11 @@ def detect_good_fixes(
 
     segments = [
         segment
-        for segment in split_into_segments(parsed_samples, settings)
+        for segment in split_into_segments(parsed_samples)
         if not has_implausible_clock(segment, parsed_samples)
         and not has_speed_mismatch(segment, parsed_samples)
     ]
-    for segment in select_segment_chain(segments, parsed_samples, settings):
+    for segment in select_segment_chain(segments, parsed_samples):
         for index in segment:
             statuses[index] = STATUS_OK
 
@@ -371,16 +359,14 @@ def detect_good_fixes(
     return statuses
 
 
-def compute_clock_jumps(
-    parsed_samples: list[ParsedSample], settings: CleaningSettings
-) -> list[float]:
+def compute_clock_jumps(parsed_samples: list[ParsedSample]) -> list[float]:
     """
     Compute the merge gap (in seconds) between each sample and the previous one.
 
     A gap is a forward jump of `camera time - video offset` between two samples with trusted
     clocks. Jumps within `CLOCK_JITTER_S` are sampling noise and count as zero.
     """
-    max_merge_gap_s = settings.max_merge_gap_hours * 3600
+    max_merge_gap_s = MAX_MERGE_GAP_HOURS * 3600
     jumps = [0.0] * len(parsed_samples)
     for index in range(1, len(parsed_samples)):
         previous = parsed_samples[index - 1]
@@ -408,7 +394,7 @@ def assign_times(
         The local time of every sample and whether it is estimated.
     """
     timezone = zoneinfo.ZoneInfo(settings.timezone)
-    jumps = compute_clock_jumps(parsed_samples, settings)
+    jumps = compute_clock_jumps(parsed_samples)
 
     # Cumulative merge gaps and count of samples without a trusted clock, so that the values
     # between any two samples can be looked up in constant time.
@@ -478,7 +464,7 @@ def assign_times(
     return times
 
 
-def interpolate_short_gaps(samples: list[CleanSample], settings: CleaningSettings) -> None:
+def interpolate_short_gaps(samples: list[CleanSample]) -> None:
     """Fill runs of samples without a good fix between two good fixes, if the gap is short."""
     good_indexes = [index for index, sample in enumerate(samples) if sample.status == STATUS_OK]
     for previous_index, next_index in zip(good_indexes, good_indexes[1:], strict=False):
@@ -493,7 +479,7 @@ def interpolate_short_gaps(samples: list[CleanSample], settings: CleaningSetting
             gap_s = (following.time - previous.time).total_seconds()
         else:
             gap_s = following.t - previous.t
-        if gap_s > settings.max_interpolation_gap_s or gap_s <= 0:
+        if gap_s > MAX_INTERPOLATION_GAP_S or gap_s <= 0:
             continue
 
         for index in range(previous_index + 1, next_index):
@@ -518,7 +504,7 @@ def clean_track(
         overrides = Overrides()
 
     parsed_samples = parse_samples(raw_samples, settings, overrides)
-    statuses = detect_good_fixes(parsed_samples, settings, overrides)
+    statuses = detect_good_fixes(parsed_samples, overrides)
     times = assign_times(parsed_samples, statuses, settings)
 
     samples = []
@@ -538,5 +524,5 @@ def clean_track(
             )
         )
 
-    interpolate_short_gaps(samples, settings)
+    interpolate_short_gaps(samples)
     return samples

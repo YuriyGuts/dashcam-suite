@@ -427,7 +427,7 @@ def test_plan_encode_jobs_skips_existing_outputs(config, tmp_path):
     # WHEN planning jobs
     job_defs = encode.plan_encode_jobs(
         [("2026-09-25 Trip 11-17", [segment]), ("2026-09-25 Trip 15-00", [segment])],
-        output_dir=tmp_path,
+        library_dir=tmp_path,
         config=config,
     )
 
@@ -452,13 +452,13 @@ def test_encode_trips_encodes_each_trip(
         "20260925111807_000002.MP4",
         "20260925180000_000003.MP4",
     )
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
 
     # WHEN encoding trips
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
-        output_dir=output_dir,
+        library_dir=library_dir,
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -469,7 +469,7 @@ def test_encode_trips_encodes_each_trip(
     # THEN each trip gets its own video, and the progress counts finished videos
     assert failed_count == 0
     assert "Progress: 2/2 videos" in caplog.text
-    assert sorted(path.name for path in output_dir.iterdir()) == [
+    assert sorted(path.name for path in library_dir.iterdir()) == [
         "2026-09-25 Trip 11-17.mp4",
         "2026-09-25 Trip 18-00.mp4",
     ]
@@ -492,7 +492,7 @@ def test_encode_trips_counts_failures(
     # WHEN encoding trips
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
-        output_dir=tmp_path,
+        library_dir=tmp_path,
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -516,7 +516,7 @@ def test_encode_trips_dry_run_does_not_run_ffmpeg(
     # WHEN encoding trips in dry run mode
     encode.encode_trips(
         raw_video_dir=raw_video_dir,
-        output_dir=tmp_path,
+        library_dir=tmp_path,
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -543,13 +543,13 @@ def test_encode_range_uses_first_segment_start_time_as_default_name(
         "20260925110100_000002.MP4",
         "20260925110200_000003.MP4",
     )
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
 
     # WHEN encoding the range 2-3 without an output name
     encode.encode_range(
         raw_video_dir=raw_video_dir,
-        output_dir=output_dir,
+        library_dir=library_dir,
         config=config,
         start_index=2,
         end_index=3,
@@ -559,7 +559,7 @@ def test_encode_range_uses_first_segment_start_time_as_default_name(
     )
 
     # THEN the output is named after the start time of segment 2
-    assert [path.name for path in output_dir.iterdir()] == ["2026-09-25 Trip 11-01.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-01.mp4"]
 
 
 def test_encode_range_with_output_name(
@@ -573,13 +573,13 @@ def test_encode_range_with_output_name(
 ):
     # GIVEN a raw segment
     make_raw_videos("20260925110000_000001.MP4")
-    output_dir = tmp_path / "out"
-    output_dir.mkdir()
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
 
     # WHEN encoding it with an explicit output name
     encode.encode_range(
         raw_video_dir=raw_video_dir,
-        output_dir=output_dir,
+        library_dir=library_dir,
         config=config,
         start_index=1,
         end_index=1,
@@ -589,7 +589,7 @@ def test_encode_range_with_output_name(
     )
 
     # THEN the output uses that name
-    assert [path.name for path in output_dir.iterdir()] == ["Road Trip.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["Road Trip.mp4"]
 
 
 @pytest.mark.skipif(not SAMPLE_RAW_VIDEO_DIR.is_dir(), reason="Sample SD card videos not present")

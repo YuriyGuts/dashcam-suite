@@ -13,10 +13,10 @@ from dashcam import serve
 
 
 @pytest.fixture
-def video_dir(tmp_path):
-    video_dir = tmp_path / "videos"
-    video_dir.mkdir()
-    return video_dir
+def library_dir(tmp_path):
+    library_dir = tmp_path / "videos"
+    library_dir.mkdir()
+    return library_dir
 
 
 @pytest.fixture
@@ -27,8 +27,8 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def app(video_dir, store):
-    return serve.VisualizerApp(video_dir, store.root, max_interpolation_gap_s=60)
+def app(library_dir, store):
+    return serve.VisualizerApp(library_dir, store.root)
 
 
 @pytest.fixture
@@ -335,7 +335,7 @@ def test_is_index_stale_without_index(store, add_track):
 def test_is_index_stale_with_current_index(store, add_track):
     # GIVEN an index built after the last track change
     add_track()
-    store.rebuild_index(60)
+    store.rebuild_index()
 
     # WHEN checking the index
     # THEN it is current
@@ -345,7 +345,7 @@ def test_is_index_stale_with_current_index(store, add_track):
 def test_is_index_stale_after_track_changes(store, add_track):
     # GIVEN a track modified after the index was built
     track = add_track()
-    store.rebuild_index(60)
+    store.rebuild_index()
     path = store.track_path(track.stem)
     index_mtime_ns = store.index_path.stat().st_mtime_ns
     os.utime(path, ns=(index_mtime_ns, index_mtime_ns + 1_000_000_000))
@@ -358,7 +358,7 @@ def test_is_index_stale_after_track_changes(store, add_track):
 def test_is_index_stale_after_track_removal(store, add_track):
     # GIVEN an index that lists a track that is gone
     track = add_track()
-    store.rebuild_index(60)
+    store.rebuild_index()
     store.track_path(track.stem).unlink()
 
     # WHEN checking the index
@@ -369,7 +369,7 @@ def test_is_index_stale_after_track_removal(store, add_track):
 def test_is_index_stale_after_new_preview(store, add_track):
     # GIVEN a preview made after the index was built
     track = add_track()
-    store.rebuild_index(60)
+    store.rebuild_index()
     store.previews_dir.mkdir()
     preview_path = store.preview_path(track.stem)
     preview_path.write_bytes(b"preview")
@@ -405,10 +405,10 @@ def test_load_index_rebuilds_stale_index(app, store, add_track, caplog):
     assert "Rebuilding the trip index" in caplog.text
 
 
-def test_get_trips_with_available_video(app, video_dir, add_track):
-    # GIVEN a track whose video is in the video directory
+def test_get_trips_with_available_video(app, library_dir, add_track):
+    # GIVEN a track whose video is in the library directory
     add_track("2026-09-25 Trip #1.mp4")
-    (video_dir / "2026-09-25 Trip #1.mp4").write_bytes(b"video")
+    (library_dir / "2026-09-25 Trip #1.mp4").write_bytes(b"video")
 
     # WHEN listing the trips
     trip = app.get_trips()["trips"][0]
@@ -464,13 +464,13 @@ def test_get_geometry_skips_trips_without_gps(app, store, add_track, make_track)
     assert geometry["2026-09-25 Trip"] == [[[49.8, 24.0], [49.8003, 24.0], [49.8006, 24.0]]]
 
 
-def test_warn_about_library_reports_mismatches(app, video_dir, add_track, caplog):
+def test_warn_about_library_reports_mismatches(app, library_dir, add_track, caplog):
     # GIVEN a video without a track, a track without a video, and a complete trip
     caplog.set_level(logging.INFO)
     add_track("2026-09-25 Trip.mp4")
     add_track("2026-09-24 Complete.mp4")
-    (video_dir / "2026-09-24 Complete.mp4").write_bytes(b"video")
-    (video_dir / "2026-09-26 New.mp4").write_bytes(b"video")
+    (library_dir / "2026-09-24 Complete.mp4").write_bytes(b"video")
+    (library_dir / "2026-09-26 New.mp4").write_bytes(b"video")
 
     # WHEN running the startup checks
     app.warn_about_library()
@@ -480,15 +480,15 @@ def test_warn_about_library_reports_mismatches(app, video_dir, add_track, caplog
     assert "1 tracks have no video" in caplog.text
 
 
-def test_warn_about_library_without_tracks_or_video_dir(tmp_path, store, caplog):
-    # GIVEN a missing video directory and no tracks
-    app = serve.VisualizerApp(tmp_path / "missing", store.root, max_interpolation_gap_s=60)
+def test_warn_about_library_without_tracks_or_library_dir(tmp_path, store, caplog):
+    # GIVEN a missing library directory and no tracks
+    app = serve.VisualizerApp(tmp_path / "missing", store.root)
 
     # WHEN running the startup checks
     app.warn_about_library()
 
     # THEN both problems are reported
-    assert "Video directory not found" in caplog.text
+    assert "Library directory not found" in caplog.text
     assert "No tracks in" in caplog.text
 
 
@@ -534,10 +534,10 @@ def test_server_serves_vendored_leaflet(server):
     assert headers["Content-Type"] == "text/javascript; charset=utf-8"
 
 
-def test_server_api_trips(server, video_dir, add_track):
+def test_server_api_trips(server, library_dir, add_track):
     # GIVEN a trip with its video
     add_track()
-    (video_dir / "2026-09-25 Trip.mp4").write_bytes(b"video")
+    (library_dir / "2026-09-25 Trip.mp4").write_bytes(b"video")
 
     # WHEN requesting the trip list
     status, headers, body = fetch(f"{server}/api/trips")
@@ -589,9 +589,9 @@ def test_server_serves_preview(server, store):
     assert body == b"preview"
 
 
-def test_server_serves_whole_video_with_range_support(server, video_dir):
+def test_server_serves_whole_video_with_range_support(server, library_dir):
     # GIVEN a video
-    (video_dir / "trip.mp4").write_bytes(bytes(range(100)))
+    (library_dir / "trip.mp4").write_bytes(bytes(range(100)))
 
     # WHEN requesting it without a range
     status, headers, body = fetch(f"{server}/videos/trip.mp4")
@@ -603,9 +603,9 @@ def test_server_serves_whole_video_with_range_support(server, video_dir):
     assert body == bytes(range(100))
 
 
-def test_server_serves_video_byte_range(server, video_dir):
+def test_server_serves_video_byte_range(server, library_dir):
     # GIVEN a video
-    (video_dir / "trip.mp4").write_bytes(bytes(range(100)))
+    (library_dir / "trip.mp4").write_bytes(bytes(range(100)))
 
     # WHEN requesting a byte range, as browsers do when seeking
     status, headers, body = fetch(f"{server}/videos/trip.mp4", headers={"Range": "bytes=10-19"})
@@ -617,11 +617,11 @@ def test_server_serves_video_byte_range(server, video_dir):
     assert body == bytes(range(10, 20))
 
 
-def test_server_serves_large_video_range_in_chunks(server, video_dir, monkeypatch):
+def test_server_serves_large_video_range_in_chunks(server, library_dir, monkeypatch):
     # GIVEN a video larger than one send chunk
     monkeypatch.setattr("dashcam.serve.CHUNK_SIZE", 7)
     content = bytes(index % 256 for index in range(1000))
-    (video_dir / "trip.mp4").write_bytes(content)
+    (library_dir / "trip.mp4").write_bytes(content)
 
     # WHEN requesting an open-ended range
     status, _, body = fetch(f"{server}/videos/trip.mp4", headers={"Range": "bytes=500-"})
@@ -631,9 +631,9 @@ def test_server_serves_large_video_range_in_chunks(server, video_dir, monkeypatc
     assert body == content[500:]
 
 
-def test_server_rejects_range_beyond_end_of_video(server, video_dir):
+def test_server_rejects_range_beyond_end_of_video(server, library_dir):
     # GIVEN a video
-    (video_dir / "trip.mp4").write_bytes(bytes(100))
+    (library_dir / "trip.mp4").write_bytes(bytes(100))
 
     # WHEN requesting a range after its end
     status, headers, _ = fetch(f"{server}/videos/trip.mp4", headers={"Range": "bytes=100-"})
@@ -643,9 +643,9 @@ def test_server_rejects_range_beyond_end_of_video(server, video_dir):
     assert headers["Content-Range"] == "bytes */100"
 
 
-def test_server_head_request_has_no_body(server, video_dir):
+def test_server_head_request_has_no_body(server, library_dir):
     # GIVEN a video
-    (video_dir / "trip.mp4").write_bytes(bytes(100))
+    (library_dir / "trip.mp4").write_bytes(bytes(100))
 
     # WHEN sending a HEAD request
     status, headers, body = fetch(f"{server}/videos/trip.mp4", method="HEAD")
@@ -656,9 +656,9 @@ def test_server_head_request_has_no_body(server, video_dir):
     assert body == b""
 
 
-def test_server_refuses_files_that_are_not_videos(server, video_dir):
-    # GIVEN a non-video file in the video directory
-    (video_dir / "notes.txt").write_text("private", encoding="utf-8")
+def test_server_refuses_files_that_are_not_videos(server, library_dir):
+    # GIVEN a non-video file in the library directory
+    (library_dir / "notes.txt").write_text("private", encoding="utf-8")
 
     # WHEN requesting it through the video route
     status, _, _ = fetch(f"{server}/videos/notes.txt")
@@ -677,9 +677,9 @@ def test_server_refuses_files_that_are_not_videos(server, video_dir):
         "/.hidden",
     ],
 )
-def test_server_refuses_paths_outside_served_directories(server, video_dir, url_path):
+def test_server_refuses_paths_outside_served_directories(server, library_dir, url_path):
     # GIVEN a request that tries to escape a served directory
-    (video_dir / "trip.mp4").write_bytes(b"video")
+    (library_dir / "trip.mp4").write_bytes(b"video")
 
     # WHEN requesting it
     status, _, _ = fetch(f"{server}{url_path}")
@@ -698,7 +698,7 @@ def test_server_missing_file(server):
     assert status == 404
 
 
-def test_serve_logs_url_and_stops_on_interrupt(video_dir, store, add_track, monkeypatch, caplog):
+def test_serve_logs_url_and_stops_on_interrupt(library_dir, store, add_track, monkeypatch, caplog):
     # GIVEN a server that is interrupted right after starting
     caplog.set_level(logging.INFO)
     add_track()
@@ -709,26 +709,26 @@ def test_serve_logs_url_and_stops_on_interrupt(video_dir, store, add_track, monk
     monkeypatch.setattr(serve.VisualizerServer, "serve_forever", interrupted_serve_forever)
 
     # WHEN running it on a free port
-    serve.serve(video_dir, store.root, max_interpolation_gap_s=60, port=0)
+    serve.serve(library_dir, store.root, port=0)
 
     # THEN it reports the trips and the URL, then stops cleanly
     assert "Serving 1 trips at http://127.0.0.1:" in caplog.text
     assert "Stopped" in caplog.text
 
 
-def test_get_trips_reports_video_dir(app, video_dir, add_track):
+def test_get_trips_reports_library_dir(app, library_dir, add_track):
     # GIVEN a track
     add_track()
 
     # WHEN listing the trips
     index = app.get_trips()
 
-    # THEN the absolute video directory is included for error messages
-    assert index["video_dir"] == str(video_dir.resolve())
+    # THEN the absolute library directory is included for error messages
+    assert index["library_dir"] == str(library_dir.resolve())
 
 
 def test_warn_about_library_when_no_video_is_found(app, add_track, caplog):
-    # GIVEN tracks, none of whose videos is in the video directory
+    # GIVEN tracks, none of whose videos is in the library directory
     add_track("2026-09-25 Trip.mp4")
     add_track("2026-09-26 Trip.mp4")
 
@@ -737,7 +737,7 @@ def test_warn_about_library_when_no_video_is_found(app, add_track, caplog):
 
     # THEN the user is told to pass the right directory
     assert "None of the 2 tracks has its video in" in caplog.text
-    assert "`dashcam serve DIR`" in caplog.text
+    assert "`dashcam serve --library-dir DIR`" in caplog.text
 
 
 def test_server_ignores_dropped_connections(app, capsys):
@@ -805,11 +805,9 @@ STUSA = {"name": "вулиця Василя Стуса", "distance_m": 967}
 
 
 @pytest.fixture
-def rename_server(video_dir, store):
+def rename_server(library_dir, store):
     """Run a server that allows renaming, and yield its base URL."""
-    app = serve.VisualizerApp(
-        video_dir, store.root, max_interpolation_gap_s=60, car_model="CX-5", allow_rename=True
-    )
+    app = serve.VisualizerApp(library_dir, store.root, car_model="CX-5", allow_rename=True)
     http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     thread.start()
@@ -820,9 +818,9 @@ def rename_server(video_dir, store):
 
 
 @pytest.fixture
-def add_trip_with_video(video_dir, store, make_named_track):
+def add_trip_with_video(library_dir, store, make_named_track):
     def _add_trip_with_video(video_filename="2026-09-25 Trip 11-17.mp4"):
-        (video_dir / video_filename).write_bytes(b"video")
+        (library_dir / video_filename).write_bytes(b"video")
         store.save_track(make_named_track(video_filename, [STUSA]))
 
     return _add_trip_with_video
@@ -843,7 +841,7 @@ def post_rename(base_url, data, headers=None):
         return exc.code, json.loads(exc.read())
 
 
-def test_server_renames_trip(rename_server, video_dir, store, add_trip_with_video):
+def test_server_renames_trip(rename_server, library_dir, store, add_trip_with_video):
     # GIVEN a trip
     add_trip_with_video()
 
@@ -854,7 +852,7 @@ def test_server_renames_trip(rename_server, video_dir, store, add_trip_with_vide
 
     # THEN the files are renamed and the index lists the new trip ID
     assert (status, body) == (200, {"id": "2026-09-25 To Work"})
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
     _, _, trips_body = fetch(f"{rename_server}/api/trips")
     assert [trip["id"] for trip in json.loads(trips_body)["trips"]] == ["2026-09-25 To Work"]
 
@@ -903,7 +901,7 @@ def test_server_rejects_rename_without_json(rename_server, add_trip_with_video):
     assert status == 415
 
 
-def test_server_rejects_cross_origin_rename(rename_server, video_dir, add_trip_with_video):
+def test_server_rejects_cross_origin_rename(rename_server, library_dir, add_trip_with_video):
     # GIVEN a trip
     add_trip_with_video()
 
@@ -916,7 +914,7 @@ def test_server_rejects_cross_origin_rename(rename_server, video_dir, add_trip_w
 
     # THEN it is refused and nothing is renamed
     assert status == 403
-    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
 
 
 def test_server_rejects_rename_with_foreign_host(rename_server, add_trip_with_video):
@@ -991,11 +989,11 @@ def test_server_api_suggestion_when_disabled(server):
     assert status == 403
 
 
-def test_get_trips_reports_whether_renaming_is_allowed(video_dir, store, add_track):
+def test_get_trips_reports_whether_renaming_is_allowed(library_dir, store, add_track):
     # GIVEN apps with and without renaming
     add_track()
-    rename_app = serve.VisualizerApp(video_dir, store.root, 60, allow_rename=True)
-    read_only_app = serve.VisualizerApp(video_dir, store.root, 60)
+    rename_app = serve.VisualizerApp(library_dir, store.root, allow_rename=True)
+    read_only_app = serve.VisualizerApp(library_dir, store.root)
 
     # WHEN listing the trips
     # THEN the web app learns whether to offer renaming
@@ -1003,7 +1001,7 @@ def test_get_trips_reports_whether_renaming_is_allowed(video_dir, store, add_tra
     assert read_only_app.get_trips()["can_rename"] is False
 
 
-def test_serve_disables_renaming_on_all_interfaces(video_dir, store, monkeypatch, caplog):
+def test_serve_disables_renaming_on_all_interfaces(library_dir, store, monkeypatch, caplog):
     # GIVEN a server started on all interfaces, which stops right away
     caplog.set_level(logging.INFO)
     started_apps = []
@@ -1023,7 +1021,7 @@ def test_serve_disables_renaming_on_all_interfaces(video_dir, store, monkeypatch
     monkeypatch.setattr(serve, "VisualizerServer", FakeServer)
 
     # WHEN running it
-    serve.serve(video_dir, store.root, max_interpolation_gap_s=60, host="0.0.0.0")
+    serve.serve(library_dir, store.root, host="0.0.0.0")
 
     # THEN renaming is disabled
     assert started_apps[0].allow_rename is False

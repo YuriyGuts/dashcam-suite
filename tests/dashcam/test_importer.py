@@ -27,7 +27,7 @@ def step_calls(monkeypatch):
 def run_import(tmp_path, config, metadata_dir, dry_run=False, suggest_names=True):
     return importer.import_trips(
         raw_video_dir=tmp_path / "sd",
-        output_dir=tmp_path / "videos",
+        library_dir=tmp_path / "videos",
         metadata_dir=metadata_dir,
         config=config,
         min_trip_gap_hours=3,
@@ -47,8 +47,8 @@ def test_import_trips_runs_all_steps(tmp_path, config, osm_metadata_dir, step_ca
     # THEN all steps run on the same directories, and their failures add up
     assert [name for name, _ in step_calls] == ["encode", "extract", "enrich", "rename"]
     kwargs_by_step = dict(step_calls)
-    assert kwargs_by_step["encode"]["output_dir"] == tmp_path / "videos"
-    assert kwargs_by_step["extract"]["video_dir"] == tmp_path / "videos"
+    assert kwargs_by_step["encode"]["library_dir"] == tmp_path / "videos"
+    assert kwargs_by_step["extract"]["library_dir"] == tmp_path / "videos"
     assert kwargs_by_step["extract"]["metadata_dir"] == osm_metadata_dir
     assert kwargs_by_step["enrich"]["update_osm"] is False
     assert kwargs_by_step["rename"]["interactive"] is True

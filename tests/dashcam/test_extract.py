@@ -19,10 +19,10 @@ SAMPLE_VIDEO_PATH = Path(__file__).parents[2] / "video" / "2026-09-23 Some Trip 
 
 
 @pytest.fixture
-def video_dir(tmp_path):
-    video_dir = tmp_path / "videos"
-    video_dir.mkdir()
-    return video_dir
+def library_dir(tmp_path):
+    library_dir = tmp_path / "videos"
+    library_dir.mkdir()
+    return library_dir
 
 
 @pytest.fixture
@@ -33,9 +33,9 @@ def store(tmp_path):
 
 
 @pytest.fixture
-def make_video_file(video_dir):
+def make_video_file(library_dir):
     def _make_video_file(name, content=b"video content"):
-        path = video_dir / name
+        path = library_dir / name
         path.write_bytes(content)
         return path
 
@@ -69,7 +69,7 @@ def make_reading(left_text, right_text, left_score=0.95, right_score=0.95):
     )
 
 
-def test_find_videos_with_include_and_exclude(video_dir, make_video_file):
+def test_find_videos_with_include_and_exclude(library_dir, make_video_file):
     # GIVEN trip videos, an old-camera video, a hidden file, and a non-video file
     for name in (
         "2026-09-25 Trip.mp4",
@@ -81,19 +81,19 @@ def test_find_videos_with_include_and_exclude(video_dir, make_video_file):
         make_video_file(name)
 
     # WHEN finding videos from 2026 only
-    video_paths = extract.find_videos(video_dir, include=["2026-*"], exclude=["*.MOV"])
+    video_paths = extract.find_videos(library_dir, include=["2026-*"], exclude=["*.MOV"])
 
     # THEN only the matching trip video is found
     assert [path.name for path in video_paths] == ["2026-09-25 Trip.mp4"]
 
 
-def test_find_videos_without_patterns(video_dir, make_video_file):
+def test_find_videos_without_patterns(library_dir, make_video_file):
     # GIVEN two videos
     make_video_file("b.mp4")
     make_video_file("a.mov")
 
     # WHEN finding videos without patterns
-    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
 
     # THEN all videos are found, sorted by name
     assert [path.name for path in video_paths] == ["a.mov", "b.mp4"]
@@ -367,7 +367,7 @@ def serial_extract_pool(monkeypatch, serial_pool):
 
 
 def test_extract_videos_extracts_new_videos_and_builds_index(
-    config, video_dir, store, make_video_file, fake_extract_video, serial_extract_pool
+    config, library_dir, store, make_video_file, fake_extract_video, serial_extract_pool
 ):
     # GIVEN two new videos
     make_video_file("2026-09-25 Trip A.mp4", b"a")
@@ -375,7 +375,7 @@ def test_extract_videos_extracts_new_videos_and_builds_index(
 
     # WHEN extracting
     failed_count = extract.extract_videos(
-        video_dir,
+        library_dir,
         store.root,
         config,
         include=[],
@@ -397,7 +397,7 @@ def test_extract_videos_extracts_new_videos_and_builds_index(
 
 def test_extract_videos_with_only_forces_one_video(
     config,
-    video_dir,
+    library_dir,
     store,
     make_video_file,
     save_track_for,
@@ -412,7 +412,7 @@ def test_extract_videos_with_only_forces_one_video(
 
     # WHEN re-extracting only one of them
     extract.extract_videos(
-        video_dir,
+        library_dir,
         store.root,
         config,
         include=[],
@@ -427,7 +427,7 @@ def test_extract_videos_with_only_forces_one_video(
 
 
 def test_extract_videos_reports_failures(
-    monkeypatch, config, video_dir, store, make_video_file, serial_extract_pool
+    monkeypatch, config, library_dir, store, make_video_file, serial_extract_pool
 ):
     # GIVEN a video that cannot be decoded
     make_video_file("2026-09-25 Broken.mp4")
@@ -439,7 +439,7 @@ def test_extract_videos_reports_failures(
 
     # WHEN extracting
     failed_count = extract.extract_videos(
-        video_dir,
+        library_dir,
         store.root,
         config,
         include=[],
@@ -455,7 +455,7 @@ def test_extract_videos_reports_failures(
 
 
 def test_extract_videos_makes_missing_previews(
-    monkeypatch, config, video_dir, store, make_video_file, save_track_for, serial_extract_pool
+    monkeypatch, config, library_dir, store, make_video_file, save_track_for, serial_extract_pool
 ):
     # GIVEN a video with a track but without a preview
     video_path = make_video_file("2026-09-25 Trip.mp4")
@@ -468,7 +468,7 @@ def test_extract_videos_makes_missing_previews(
 
     # WHEN extracting with previews
     extract.extract_videos(
-        video_dir,
+        library_dir,
         store.root,
         config,
         include=[],

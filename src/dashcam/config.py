@@ -7,6 +7,7 @@ or at the path given by the `DASHCAM_CONFIG` environment variable.
 
 Example config file:
 
+    library_dir = "~/Videos/Dashcam"
     raw_video_dir = "/media/me/DASHCAM/DCIM/Movie"
     hwaccel_options = "-hwaccel vulkan"
     video_codec_options = "-c:v libx265 -crf 28 -preset medium"
@@ -30,6 +31,10 @@ CONFIG_PATH_ENV_VAR = "DASHCAM_CONFIG"
 # Name of the config file inside the user config directory.
 CONFIG_FILENAME = "config.toml"
 
+# Directory settings in which `~` is expanded, and those of them that must be absolute.
+PATH_SETTINGS = ("library_dir", "raw_video_dir", "metadata_dir")
+ABSOLUTE_PATH_SETTINGS = ("library_dir", "raw_video_dir")
+
 
 @dataclasses.dataclass(frozen=True)
 class Config:
@@ -37,6 +42,10 @@ class Config:
 
     # Path to the raw video directory on the SD card.
     raw_video_dir: str
+
+    # Path to the library directory with the trip videos and the metadata directory.
+    # `None` means it must be passed on the command line.
+    library_dir: str | None
 
     # Which FFmpeg executable to run.
     ffmpeg_executable: str
@@ -58,19 +67,12 @@ class Config:
     # Car model used in suggested trip names.
     car_model: str
 
-    # Directory for extracted tracks and the trip index.
+    # Metadata directory for extracted tracks and the trip index. A relative path is relative
+    # to the library directory.
     metadata_dir: str
 
     # Time zone of the camera clock.
     timezone: str
-
-    # GPS cleaning thresholds: the highest plausible speed, how far the camera clock date may
-    # be from the date in the video filename, the longest gap inside a merged video, and the
-    # longest gap in GPS data that is filled in by linear interpolation.
-    max_speed_kmh: float
-    max_clock_date_diff_days: float
-    max_merge_gap_hours: float
-    max_interpolation_gap_s: float
 
     # OpenStreetMap extract downloaded by `enrich --update-osm`.
     osm_extract_url: str
@@ -89,11 +91,8 @@ def get_platform_defaults() -> Config:
         "min_trip_gap_hours": 3,
         "car_model": "CX-5",
         "metadata_dir": ".metadata",
+        "library_dir": None,
         "timezone": "Europe/Kyiv",
-        "max_speed_kmh": 250,
-        "max_clock_date_diff_days": 1,
-        "max_merge_gap_hours": 12,
-        "max_interpolation_gap_s": 60,
         "osm_extract_url": "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf",
     }
 
@@ -126,21 +125,22 @@ def get_config_path() -> Path:
     return platformdirs.user_config_path("dashcam") / CONFIG_FILENAME
 
 
-def load_config(config_path: Path | None = None) -> Config:
+def read_config_file(config_path: Path) -> dict[str, t.Any]:
     """
-    Load the config, applying overrides from the config file on top of the platform defaults.
+    Read the settings overridden in the config file, with `~` expanded in paths.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The overridden settings, or an empty dict if the file does not exist.
 
     Raises
     ------
     ValueError
-        If the config file contains unknown settings.
+        If the config file contains unknown settings or relative directory paths.
     """
-    if config_path is None:
-        config_path = get_config_path()
-
-    defaults = get_platform_defaults()
     if not config_path.is_file():
-        return defaults
+        return {}
 
     with config_path.open("rb") as fp:
         overrides = tomllib.load(fp)
@@ -150,4 +150,26 @@ def load_config(config_path: Path | None = None) -> Config:
     if unknown_settings:
         raise ValueError(f"Unknown settings in '{config_path}': {', '.join(unknown_settings)}")
 
-    return dataclasses.replace(defaults, **overrides)
+    for setting in PATH_SETTINGS:
+        if setting not in overrides:
+            continue
+        path = Path(overrides[setting]).expanduser()
+        if setting in ABSOLUTE_PATH_SETTINGS and not path.is_absolute():
+            raise ValueError(f"'{setting}' in '{config_path}' must be an absolute path")
+        overrides[setting] = str(path)
+
+    return overrides
+
+
+def load_config(config_path: Path | None = None) -> Config:
+    """
+    Load the config, applying overrides from the config file on top of the platform defaults.
+
+    Raises
+    ------
+    ValueError
+        If the config file contains unknown settings or relative directory paths.
+    """
+    if config_path is None:
+        config_path = get_config_path()
+    return dataclasses.replace(get_platform_defaults(), **read_config_file(config_path))
