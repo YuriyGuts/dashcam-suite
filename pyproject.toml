@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Dashcam video toolkit: merge SD card segments, extract GPS tracks from the overlay, and visualize routes."
 readme = "docs/SPEC.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "platformdirs>=4",
+]
+
+[project.scripts]
+dashcam = "dashcam.cli:main"
 
 [dependency-groups]
 dev = [
