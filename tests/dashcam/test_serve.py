@@ -1,3 +1,4 @@
+import contextlib
 import json
 import logging
 import os
@@ -790,6 +791,22 @@ def test_is_loopback_host(host, expected):
 
 
 @pytest.mark.parametrize(
+    ("host", "allow_ip_addresses", "expected"),
+    [
+        ("localhost", False, True),
+        ("127.0.0.1", False, True),
+        ("192.168.1.5", False, False),
+        ("192.168.1.5", True, True),
+        ("[fe80::1]", True, True),
+        ("mac.local", True, False),
+        ("attacker.example", True, False),
+    ],
+)
+def test_is_trusted_host(host, allow_ip_addresses, expected):
+    assert serve.is_trusted_host(host, allow_ip_addresses) is expected
+
+
+@pytest.mark.parametrize(
     ("host_header", "expected_host"),
     [
         ("127.0.0.1:8765", "127.0.0.1"),
@@ -804,17 +821,39 @@ def test_split_host_header(host_header, expected_host):
 STUSA = {"name": "вулиця Василя Стуса", "distance_m": 967}
 
 
-@pytest.fixture
-def rename_server(library_dir, store):
+@contextlib.contextmanager
+def run_rename_server(library_dir, store, allow_rename_by_ip=False):
     """Run a server that allows renaming, and yield its base URL."""
-    app = serve.VisualizerApp(library_dir, store.root, car_model="Car", allow_rename=True)
+    app = serve.VisualizerApp(
+        library_dir,
+        store.root,
+        car_model="Car",
+        allow_rename=True,
+        allow_rename_by_ip=allow_rename_by_ip,
+    )
     http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{http_server.server_address[1]}"
-    http_server.shutdown()
-    http_server.server_close()
-    thread.join()
+    try:
+        yield f"http://127.0.0.1:{http_server.server_address[1]}"
+    finally:
+        http_server.shutdown()
+        http_server.server_close()
+        thread.join()
+
+
+@pytest.fixture
+def rename_server(library_dir, store):
+    """Run a server that allows renaming from this machine, and yield its base URL."""
+    with run_rename_server(library_dir, store) as base_url:
+        yield base_url
+
+
+@pytest.fixture
+def network_rename_server(library_dir, store):
+    """Run a server that allows renaming from the network, and yield its base URL."""
+    with run_rename_server(library_dir, store, allow_rename_by_ip=True) as base_url:
+        yield base_url
 
 
 @pytest.fixture
@@ -933,6 +972,57 @@ def test_server_rejects_rename_with_foreign_host(rename_server, add_trip_with_vi
     assert "Host" in body["error"]
 
 
+def test_server_rejects_rename_by_ip_address_by_default(rename_server, add_trip_with_video):
+    # GIVEN a trip on a server that only allows renaming from this machine
+    add_trip_with_video()
+
+    # WHEN a device on the network sends the request to the server's IP address
+    status, _ = post_rename(
+        rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Host": "192.168.1.5:8765", "Origin": "http://192.168.1.5:8765"},
+    )
+
+    # THEN it is refused
+    assert status == 403
+
+
+def test_server_renames_trip_from_the_network(
+    network_rename_server, library_dir, add_trip_with_video
+):
+    # GIVEN a trip on a server that allows renaming from the network
+    add_trip_with_video()
+
+    # WHEN the web app on another device renames it through the server's IP address
+    status, body = post_rename(
+        network_rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Host": "192.168.1.5:8765", "Origin": "http://192.168.1.5:8765"},
+    )
+
+    # THEN the trip is renamed
+    assert (status, body) == (200, {"id": "2026-09-25 To Work"})
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+
+
+def test_server_rejects_network_rename_with_foreign_host(
+    network_rename_server, library_dir, add_trip_with_video
+):
+    # GIVEN a trip on a server that allows renaming from the network
+    add_trip_with_video()
+
+    # WHEN the request addresses the server by another name (as after DNS rebinding)
+    status, _ = post_rename(
+        network_rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Host": "attacker.example:8765", "Origin": "http://attacker.example:8765"},
+    )
+
+    # THEN it is refused and nothing is renamed
+    assert status == 403
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -1001,16 +1091,16 @@ def test_get_trips_reports_whether_renaming_is_allowed(library_dir, store, add_t
     assert read_only_app.get_trips()["can_rename"] is False
 
 
-def test_serve_disables_renaming_on_all_interfaces(library_dir, store, monkeypatch, caplog):
-    # GIVEN a server started on all interfaces, which stops right away
-    caplog.set_level(logging.INFO)
-    started_apps = []
+@pytest.fixture
+def started_apps(monkeypatch):
+    """Replace the HTTP server with one that stops right away, and record the served apps."""
+    apps = []
 
     class FakeServer:
         server_address = ("0.0.0.0", 8765)
 
         def __init__(self, server_address, app):
-            started_apps.append(app)
+            apps.append(app)
 
         def serve_forever(self):
             raise KeyboardInterrupt
@@ -1019,10 +1109,39 @@ def test_serve_disables_renaming_on_all_interfaces(library_dir, store, monkeypat
             pass
 
     monkeypatch.setattr(serve, "VisualizerServer", FakeServer)
+    return apps
+
+
+def test_serve_disables_renaming_on_all_interfaces(library_dir, store, started_apps, caplog):
+    # GIVEN a server started on all interfaces
+    caplog.set_level(logging.INFO)
 
     # WHEN running it
     serve.serve(library_dir, store.root, host="0.0.0.0")
 
-    # THEN renaming is disabled
+    # THEN renaming is disabled, with a hint to enable it
     assert started_apps[0].allow_rename is False
     assert "Renaming trips in the browser is disabled" in caplog.text
+    assert "--allow-rename" in caplog.text
+
+
+def test_serve_allows_network_renaming_on_request(library_dir, store, started_apps, caplog):
+    # GIVEN a server started on all interfaces with network renaming
+    caplog.set_level(logging.INFO)
+
+    # WHEN running it
+    serve.serve(library_dir, store.root, host="0.0.0.0", allow_network_rename=True)
+
+    # THEN renaming is enabled by IP address, with a warning
+    assert started_apps[0].allow_rename is True
+    assert started_apps[0].allow_rename_by_ip is True
+    assert "Anyone who can reach this server can rename trips" in caplog.text
+
+
+def test_serve_allows_local_renaming_by_default(library_dir, store, started_apps):
+    # WHEN running a server on the loopback address
+    serve.serve(library_dir, store.root, host="127.0.0.1")
+
+    # THEN renaming is enabled for loopback names only
+    assert started_apps[0].allow_rename is True
+    assert started_apps[0].allow_rename_by_ip is False

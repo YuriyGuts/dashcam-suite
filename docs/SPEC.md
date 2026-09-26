@@ -128,7 +128,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 
 `--fix` never deletes a track; it moves it to `.metadata/trash/`. `extract` and `serve` run the cheap checks at startup and warn.
 
-### `dashcam serve [-d DIR]`
+### `dashcam serve [-d DIR] [--host ADDRESS] [--port PORT] [--allow-rename]`
 
 Local HTTP server for the static web app, the metadata directory, and the videos in the library directory.
 
@@ -140,7 +140,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
   - Coverage mode: all filtered routes as thin translucent lines. Optional heatmap layer.
   - Hover shows the time and video offset.
 - Trip detail: stats, street list, and a closable video panel that loads nothing until opened. A marker follows playback; clicking the route seeks the video. Disabled when the video is unreachable. Uses the preview if one exists.
-- Renaming: the trip name in the trip detail can be edited in place (date and extension fixed), prefilled with the current name, with the `rename` suggestion one click away. Names are validated like `rename`; errors appear under the field. A playing video is reopened at the same position under the new name. Only available when the server listens on a loopback address, and only for same-origin JSON requests addressed to a loopback host name.
+- Renaming: the trip name in the trip detail can be edited in place (date and extension fixed), prefilled with the current name, with the `rename` suggestion one click away. Names are validated like `rename`; errors appear under the field. A playing video is reopened at the same position under the new name. Only available when the server listens on a loopback address, or with `--allow-rename` on any address. Only same-origin JSON requests are accepted, addressed to a loopback host name, or also to an IP address with `--allow-rename` (DNS rebinding always uses the attacker's host name).
 
 ## Metadata Layout
 

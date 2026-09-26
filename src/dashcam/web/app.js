@@ -99,7 +99,7 @@ const state = {
   trips: [],
   tripsById: new Map(),
   libraryDir: "",
-  // Whether the server allows renaming trips (only when it listens on localhost).
+  // Whether the server allows renaming trips (on localhost, or with `--allow-rename`).
   canRename: false,
   // First and last trip dates, as ISO dates and as day numbers. Null without dated trips.
   dateBounds: null,

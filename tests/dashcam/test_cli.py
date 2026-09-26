@@ -558,18 +558,24 @@ def test_main_runs_serve_with_defaults(monkeypatch, config, recorded_calls, libr
     assert kwargs["library_dir"] == library_dir
     assert kwargs["metadata_dir"] == library_dir / config.metadata_dir
     assert (kwargs["host"], kwargs["port"]) == ("127.0.0.1", 8765)
+    assert kwargs["allow_network_rename"] is False
 
 
 def test_main_runs_serve_with_options(monkeypatch, config, recorded_calls):
-    # GIVEN `serve` with a directory, address, and port
+    # GIVEN `serve` with a directory, address, port, and network renaming
 
     # WHEN running the tool
-    run_main(monkeypatch, config, ["serve", "-d", "videos", "--host", "0.0.0.0", "--port", "9000"])
+    run_main(
+        monkeypatch,
+        config,
+        ["serve", "-d", "videos", "--host", "0.0.0.0", "--port", "9000", "--allow-rename"],
+    )
 
     # THEN the options are passed on
     kwargs = recorded_calls[0][2]
     assert kwargs["library_dir"] == Path("videos")
     assert (kwargs["host"], kwargs["port"]) == ("0.0.0.0", 9000)
+    assert kwargs["allow_network_rename"] is True
 
 
 def test_main_exits_with_error_when_port_is_taken(monkeypatch, config, caplog):

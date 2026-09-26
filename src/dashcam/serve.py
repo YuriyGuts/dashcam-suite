@@ -16,13 +16,14 @@ Files are served with HTTP range requests (`206 Partial Content`), which browser
 in videos.
 
 The server binds to `127.0.0.1` by default, so it is only reachable from this machine. Renaming
-is only enabled on a loopback address, and only for requests from the web app itself: they must
-send JSON (which other websites cannot do without a CORS preflight that the server does not
-allow), come from the same origin, and address the server by a loopback name (which defeats DNS
-rebinding).
+is enabled on a loopback address, or on any address with `--allow-rename`. It is only accepted
+for requests from the web app itself: they must send JSON (which other websites cannot do without
+a CORS preflight that the server does not allow), come from the same origin, and address the
+server by a loopback name, or by an IP address with `--allow-rename`. A DNS rebinding attack
+always addresses the server by the attacker's domain name, so it is refused.
 
 Usage example:
-> dashcam serve ~/Videos/Dashcam --port 8765
+> dashcam serve -d ~/Videos/Dashcam --port 8765
 """
 
 import dataclasses
@@ -84,6 +85,10 @@ MAX_REQUEST_BODY_SIZE = 16 * 1024
 
 # Host names that always refer to this machine.
 LOOPBACK_HOST_NAMES = frozenset(["localhost"])
+
+RENAME_DISABLED_MESSAGE = (
+    "Renaming is only available when the server listens on localhost or runs with --allow-rename"
+)
 
 # Sample statuses that have coordinates.
 LOCATED_STATUSES = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
@@ -161,6 +166,23 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def is_trusted_host(host: str, allow_ip_addresses: bool) -> bool:
+    """
+    Check whether a host name cannot belong to a DNS rebinding attack.
+
+    Loopback names are always trusted. IP addresses are trusted if `allow_ip_addresses` is set.
+    """
+    if is_loopback_host(host):
+        return True
+    if not allow_ip_addresses:
+        return False
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return True
 
 
 def split_host_header(host_header: str) -> str:
@@ -325,11 +347,16 @@ class VisualizerApp:
         metadata_dir: Path,
         car_model: str = "",
         allow_rename: bool = False,
+        allow_rename_by_ip: bool = False,
     ):
         self.library_dir = library_dir
         self.store = metadata.MetadataStore(metadata_dir)
         self.car_model = car_model
         self.allow_rename = allow_rename
+
+        # Whether rename requests may address the server by an IP address, not only by a
+        # loopback name, so that other devices on the network can rename trips.
+        self.allow_rename_by_ip = allow_rename_by_ip
         self.summaries = TrackSummaryCache(self.store)
         self.index_lock = threading.Lock()
 
@@ -530,9 +557,9 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
             The HTTP status and message of the rejection, or None to accept the request.
         """
         if not self.app.allow_rename:
-            return 403, "Renaming is only available when the server listens on localhost"
+            return 403, RENAME_DISABLED_MESSAGE
         host_header = self.headers.get("Host") or ""
-        if not is_loopback_host(split_host_header(host_header)):
+        if not is_trusted_host(split_host_header(host_header), self.app.allow_rename_by_ip):
             return 403, "Unexpected Host header"
         origin = self.headers.get("Origin")
         if origin is not None and origin != f"http://{host_header}":
@@ -575,9 +602,7 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         trip_id = (query.get("id") or [""])[0]
         if not self.app.allow_rename:
-            self.send_json_error(
-                403, "Renaming is only available when the server listens on localhost"
-            )
+            self.send_json_error(403, RENAME_DISABLED_MESSAGE)
             return
         try:
             filename = self.app.suggest_filename(trip_id)
@@ -664,14 +689,22 @@ def serve(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     car_model: str = "",
+    allow_network_rename: bool = False,
 ) -> None:
-    """Run the visualizer server until interrupted."""
-    allow_rename = is_loopback_host(host)
+    """
+    Run the visualizer server until interrupted.
+
+    Renaming is enabled on a loopback address. `allow_network_rename` also enables it on other
+    addresses, for anyone who can reach the server.
+    """
+    is_loopback = is_loopback_host(host)
+    allow_rename = is_loopback or allow_network_rename
     app = VisualizerApp(
         library_dir,
         metadata_dir,
         car_model=car_model,
         allow_rename=allow_rename,
+        allow_rename_by_ip=allow_network_rename,
     )
     app.warn_about_library()
     trip_count = len(app.load_index()["trips"])
@@ -683,7 +716,12 @@ def serve(
         extra=terminal.SUCCESS,
     )
     if not allow_rename:
-        LOGGER.info("Renaming trips in the browser is disabled on non-loopback addresses")
+        LOGGER.info(
+            "Renaming trips in the browser is disabled on non-loopback addresses "
+            "(use `--allow-rename` to enable it)"
+        )
+    elif not is_loopback:
+        LOGGER.warning("Anyone who can reach this server can rename trips")
     LOGGER.info("Press Ctrl+C to stop")
     try:
         server.serve_forever()

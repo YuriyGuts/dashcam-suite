@@ -391,6 +391,14 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         type=int,
         default=serve.DEFAULT_PORT,
     )
+    serve_parser.add_argument(
+        "--allow-rename",
+        action="store_true",
+        help=(
+            "Allow renaming trips in the browser when listening on a non-loopback address. "
+            "Anyone who can reach the server can then rename trips."
+        ),
+    )
 
     subparsers.add_parser(
         name="config",
@@ -594,6 +602,7 @@ def main() -> None:
                 host=parsed_args.host,
                 port=parsed_args.port,
                 car_model=config.car_model,
+                allow_network_rename=parsed_args.allow_rename,
             )
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)

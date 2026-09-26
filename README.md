@@ -182,7 +182,7 @@ Then run `dashcam extract`, `dashcam enrich` and, for the first form, `dashcam r
 
 **Watch in a browser that can't play HEVC.** Chrome, for example, depends on the OS and hardware for this. `dashcam extract --previews` makes small H.264 copies in `.metadata/previews/`, and the web app uses them when they exist. To make a preview for one trip, add `--include "<file name>"`. The web app shows this command when a video doesn't play.
 
-**Browse from a phone or TV.** `dashcam serve --host 0.0.0.0` makes the app reachable from your local network. Renaming from the web app is turned off in this mode.
+**Browse from a phone or TV.** `dashcam serve --host 0.0.0.0` makes the app reachable from your local network. Renaming from the web app is turned off in this mode. Add `--allow-rename` to turn it on for anyone on your network, and open the app by the computer's IP address.
 
 **Rename trips.** Click the trip name in the web app's trip details to edit it. The street-based suggestion is one click away. You can also rename files in Finder or your file manager. The next `dashcam extract` (or `dashcam doctor --fix`) recognizes a renamed video by its content and moves its track along, without reading the video again.
 
@@ -232,10 +232,6 @@ Supporting another camera means teaching the OCR module about the camera's text 
 
 `docs/SPEC.md` describes the whole design in detail.
 
-
-## Known limitations
-
-- Renaming from the web app only works when the server listens on `127.0.0.1`.
 
 ## Development
 
