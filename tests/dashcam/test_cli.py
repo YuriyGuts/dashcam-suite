@@ -136,3 +136,81 @@ def test_main_exits_with_error_on_invalid_config(monkeypatch):
 
     # THEN it exits with an error
     assert exc_info.value.code == 1
+
+
+@pytest.fixture
+def recorded_calls(monkeypatch):
+    calls = []
+
+    def recorder(name, return_value=0):
+        def record(*args, **kwargs):
+            calls.append((name, args, kwargs))
+            return return_value
+
+        return record
+
+    monkeypatch.setattr("dashcam.cli.extract.extract_videos", recorder("extract_videos"))
+    monkeypatch.setattr("dashcam.cli.extract.reclean_tracks", recorder("reclean_tracks"))
+    return calls
+
+
+def run_main(monkeypatch, config, argv):
+    monkeypatch.setattr("dashcam.cli.load_config", lambda: config)
+    monkeypatch.setattr("sys.argv", ["dashcam", *argv])
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+    return exc_info.value.code
+
+
+def test_parse_command_line_args_extract_defaults(config):
+    # GIVEN no options
+
+    # WHEN parsing `extract`
+    parsed_args = cli.parse_command_line_args(["extract"], config)
+
+    # THEN the current directory and the configured metadata directory are used
+    assert parsed_args.video_dir == Path.cwd()
+    assert parsed_args.metadata_dir == Path(config.metadata_dir)
+    assert parsed_args.include == []
+    assert not parsed_args.reclean
+
+
+def test_main_runs_extract_with_patterns(monkeypatch, config, recorded_calls):
+    # GIVEN `extract` with repeated patterns and previews
+
+    # WHEN running the tool
+    exit_code = run_main(
+        monkeypatch,
+        config,
+        [
+            "extract",
+            "videos",
+            "--include",
+            "2026-*",
+            "--include",
+            "2025-*",
+            "--exclude",
+            "*old*",
+            "--previews",
+        ],
+    )
+
+    # THEN the extractor receives the options
+    name, _, kwargs = recorded_calls[0]
+    assert exit_code == 0
+    assert name == "extract_videos"
+    assert kwargs["video_dir"] == Path("videos")
+    assert kwargs["include"] == ["2026-*", "2025-*"]
+    assert kwargs["exclude"] == ["*old*"]
+    assert kwargs["make_previews"] is True
+
+
+def test_main_runs_reclean(monkeypatch, config, recorded_calls):
+    # GIVEN `extract --reclean`
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["extract", "--reclean", "--metadata-dir", "meta"])
+
+    # THEN only recleaning runs
+    assert [call[0] for call in recorded_calls] == ["reclean_tracks"]
+    assert recorded_calls[0][1][0] == Path("meta")

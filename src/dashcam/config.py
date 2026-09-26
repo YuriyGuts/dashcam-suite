@@ -58,6 +58,20 @@ class Config:
     # Car model used in suggested trip names.
     car_model: str
 
+    # Directory for extracted tracks and the trip index.
+    metadata_dir: str
+
+    # Time zone of the camera clock.
+    timezone: str
+
+    # GPS cleaning thresholds: the highest plausible speed, how far the camera clock date may
+    # be from the date in the video filename, the longest gap inside a merged video, and the
+    # longest gap in GPS data that is filled in by linear interpolation.
+    max_speed_kmh: float
+    max_clock_date_diff_days: float
+    max_merge_gap_hours: float
+    max_interpolation_gap_s: float
+
 
 def get_platform_defaults() -> Config:
     """Return the default settings for the current platform."""
@@ -68,6 +82,12 @@ def get_platform_defaults() -> Config:
         "job_count": 2,
         "min_trip_gap_hours": 3,
         "car_model": "CX-5",
+        "metadata_dir": ".metadata",
+        "timezone": "Europe/Kyiv",
+        "max_speed_kmh": 250,
+        "max_clock_date_diff_days": 1,
+        "max_merge_gap_hours": 12,
+        "max_interpolation_gap_s": 60,
     }
 
     if sys.platform == "darwin":

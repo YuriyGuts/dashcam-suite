@@ -10,7 +10,8 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
   - Left: `46 KM/H N49.810205 E24.028992`. Blank when there is no GPS fix.
   - Middle: `VIOFO A119 V3` (optional; absent in some videos).
   - Right: `2026/09/23 18:42:06` (camera clock, local time, always present).
-- Resolutions vary (2560×1440, 2560×1600). The overlay layout is derived from the video resolution.
+- Resolutions vary (2560×1440, 2560×1600). Both share the same overlay layout: text 20–44 px above the bottom edge, 18 px character grid, left field at x≈18, right field at x≈2200. Videos of other widths are treated as having no overlay.
+- The camera occasionally renders garbage for a second (e.g. `169 KM/H E24.000110 10.248983`).
 - GPS spoofing happens: coordinates jump to another continent, the displayed speed is ~200 km/h, and the camera clock jumps to a fake date and may run backwards. A spoof can last most of a trip.
 - A trip video may contain gaps between merged segments (up to 12 h).
 - Some older videos come from a camera without GPS and must be skipped.
@@ -36,25 +37,28 @@ Port of `dashcam-encode`.
 - The SD card is never modified. The user controls the scope.
 - Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). Existing outputs are skipped with a warning and never overwritten. Incomplete outputs never appear under the final name.
 
-### `dashcam extract [DIR] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
+### `dashcam extract [DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
 
 - `DIR` defaults to the current directory. Glob patterns match filenames and may be repeated.
-- Probe: ~10 frames per new video are checked for the date/time field. Videos without it are recorded as `no_overlay` and skipped until `--force`.
+- Probe: 10 frames spread over each new video are checked for a readable date/time field; at least 3 must have it. Videos without it are recorded as `no_overlay` and skipped until `--force`.
 - OCR:
-  - One frame per second, aligned to overlay ticks, decoded with `ffmpeg` hardware acceleration.
-  - Template matching against the fixed font; glyph templates bootstrapped once with Tesseract.
-  - Regex validation. Anything that fails is `unreadable` and never guessed.
-  - Read: speed, latitude, longitude, camera time, video offset.
+  - Frames are sampled at 2 fps from the bottom 64 px strip, decoded with `ffmpeg` (hardware acceleration from the config), and collapsed to one sample per camera clock tick.
+  - Each cell is matched against glyph templates with normalized cross-correlation over the glyph fill and its 1 px dark outline only, so the background (night, snow, glare) does not matter.
+  - Fields are decoded with their known formats: `dddd/dd/dd dd:dd:dd` for the clock, and the 18 digit-count variants of `d KM/H hd.dddddd vd.dddddd` for GPS. A blank field means no fix.
+  - Text whose worst cell scores below 0.6 is unreliable and becomes `unreadable` (genuine text scores above 0.8). It is kept as raw text but never used.
+  - Glyph templates are averaged from hand-labeled strips in `tests/fixtures/overlay/` by `scripts/build_glyph_templates.py`.
 - Cleaning (runs on stored raw values; `--reclean` re-runs it without OCR):
   - A sample is suspect if its date is more than 1 day from the filename date, the clock does not advance ~1 s per video second, the implied speed from neighbouring good points exceeds a threshold (default 250 km/h), or the displayed speed disagrees with the implied speed.
   - The track is split into internally consistent segments, and only segments that chain together plausibly are kept. This catches long spoofs where fake points agree with each other.
   - A forward clock jump up to 12 h between good fixes with plausible positions is a merge gap, not a spoof.
   - Time: the overlay clock is trusted only on good fixes. Elsewhere, time is derived from the video offset anchored to the nearest good sample. Camera-clock jumps (up to 12 h) during no-fix stretches mark merge gaps. Times derived across an uncertain boundary are flagged `time_estimated`.
-  - Gaps up to 60 s are interpolated linearly. Longer gaps stay gaps.
+  - Gaps up to 60 s are interpolated linearly, including short spoofed or unreadable stretches. Longer gaps stay gaps.
   - Manual overrides from the track are applied last (see Track Format).
   - Sample statuses: `ok`, `interpolated`, `no_fix`, `spoofed`, `unreadable`.
   - Times are stored as ISO-8601 with offset in `Europe/Kyiv`.
-- Incremental and resumable: only videos without a track, or whose content changed, are processed.
+- Incremental and resumable: only videos without a track, or whose content changed, are processed. Each track is written when its video is done.
+- `--only` re-extracts the named videos and keeps their manual overrides.
+- `--metadata-dir` defaults to `.metadata` in the current directory (config: `metadata_dir`).
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
 
 ### `dashcam enrich [--update-osm]`
@@ -134,6 +138,7 @@ Local HTTP server for the static web app, `.metadata/`, and the videos in `DIR`.
 - The video filename is the only source of truth for the trip name and date.
 - Each track stores a content fingerprint: `<size>:<sha256 of first 1 MB + last 1 MB>`.
 - A video with no track of the same stem is fingerprinted and matched against existing tracks. A match is a rename: the track and preview are renamed, no OCR. No match means a new video.
+- If the matched track's video still exists under its old name, the new file is a duplicate copy: it is skipped with a warning, and `doctor` reports it.
 - Same stem but different fingerprint means the content changed: the old track goes to trash and the video is re-extracted.
 - Tracks outlive their videos. A track whose video is missing is `unreachable`.
 
@@ -149,18 +154,20 @@ One JSON file. Header pretty-printed, one sample per line.
   "overrides": {"bad_ranges_s": [], "good_ranges_s": []},
   "streets": [],
   "samples": [
-    {"t": 0, "time": "2026-09-25T10:22:28+03:00", "lat": 49.828035, "lon": 24.00494, "kmh": 28, "status": "ok", "raw": "28 KM/H N49.828035 E24.004940 | 2026/09/25 10:22:28"}
+    {"t": 0.0, "time": "2026-09-25T10:22:28+03:00", "lat": 49.828035, "lon": 24.00494, "kmh": 28, "status": "ok", "raw": "28 KM/H N49.828035 E24.004940 | 2026/09/25 10:22:28", "scores": [0.97, 0.99]}
   ]
 }
 ```
 
 - `overrides.bad_ranges_s` / `overrides.good_ranges_s`: lists of `[start, end]` video-second ranges forced to spoofed or trusted. User-editable; survive `--reclean`.
-- Everything else is derived. `--reclean` regenerates `time`, `lat`, `lon`, and `status` from `raw`.
+- `scores` are the lowest OCR cell scores of the GPS and clock fields; they decide which raw text is reliable.
+- `time_estimated: true` appears on samples whose time was derived across samples without a trustworthy clock.
+- Everything else is derived. `--reclean` regenerates `time`, `lat`, `lon`, and `status` from `raw` and `scores`.
 
 ## Validation
 
-- OCR: ~2,000 sampled frames across all sample videos (day, night, rain, snow, glare, no fix, spoofed), cross-checked against Tesseract and physical continuity. Disagreements are checked by hand. A labelled set of crops is kept as a regression fixture.
-- Cleaning: synthetic-track tests for every rule; golden end-to-end test on `2026-08-03 Trip with Bad GPS.mp4`.
+- OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Ten hand-labeled strips are kept as a regression fixture.
+- Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
 - Encode: grouping, parsing, and naming tests against `video/raw-sd`.
 - Visualizer: browser smoke test.
 

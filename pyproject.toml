@@ -5,6 +5,8 @@ description = "Dashcam video toolkit: merge SD card segments, extract GPS tracks
 readme = "docs/SPEC.md"
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.5.3",
+    "opencv-python-headless>=5.0.0.93",
     "platformdirs>=4",
 ]
 

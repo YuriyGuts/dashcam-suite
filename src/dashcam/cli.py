@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 from dashcam import encode
+from dashcam import extract
 from dashcam.config import Config
 from dashcam.config import load_config
 from dashcam.system import configure_logging
@@ -141,6 +142,71 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
         )
 
 
+def add_metadata_dir_argument(parser: argparse.ArgumentParser, config: Config) -> None:
+    """Add the `--metadata-dir` option."""
+    parser.add_argument(
+        "--metadata-dir",
+        metavar="PATH",
+        help=f"Directory for tracks and the trip index (default: '{config.metadata_dir}').",
+        type=Path,
+        default=Path(config.metadata_dir),
+    )
+
+
+def add_video_dir_argument(parser: argparse.ArgumentParser) -> None:
+    """Add the optional video directory argument."""
+    parser.add_argument(
+        "video_dir",
+        metavar="DIR",
+        help="Directory with trip videos (default: current directory).",
+        type=Path,
+        nargs="?",
+        default=Path.cwd(),
+    )
+
+
+def add_extract_arguments(extract_parser: argparse.ArgumentParser, config: Config) -> None:
+    """Add the arguments of the `extract` command."""
+    add_video_dir_argument(extract_parser)
+    add_metadata_dir_argument(extract_parser, config)
+    extract_parser.add_argument(
+        "--include",
+        metavar="GLOB",
+        help="Only process videos whose filename matches this pattern (repeatable).",
+        action="append",
+        default=[],
+    )
+    extract_parser.add_argument(
+        "--exclude",
+        metavar="GLOB",
+        help="Skip videos whose filename matches this pattern (repeatable).",
+        action="append",
+        default=[],
+    )
+    extract_parser.add_argument(
+        "--only",
+        metavar="VIDEO",
+        help="Re-extract only this video, even if its track is up to date (repeatable).",
+        action="append",
+        default=[],
+    )
+    extract_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-extract all videos, including those without an overlay.",
+    )
+    extract_parser.add_argument(
+        "--reclean",
+        action="store_true",
+        help="Re-run GPS cleaning on the stored readings of all tracks without decoding videos.",
+    )
+    extract_parser.add_argument(
+        "--previews",
+        action="store_true",
+        help="Also make low-resolution H.264 previews for browsers that cannot play HEVC.",
+    )
+
+
 def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespace:
     """Parse the arguments passed via the command line."""
     parser = argparse.ArgumentParser(
@@ -157,6 +223,12 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Concatenate and encode dashcam videos stored on an SD card.",
     )
     add_encode_subparsers(encode_parser, config)
+
+    extract_parser = subparsers.add_parser(
+        name="extract",
+        help="Extract GPS tracks from the overlay of trip videos.",
+    )
+    add_extract_arguments(extract_parser, config)
 
     parsed_args = parser.parse_args(args)
     return parsed_args
@@ -190,6 +262,23 @@ def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
     )
 
 
+def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
+    """Entry point for the `extract` command."""
+    if parsed_args.reclean:
+        return extract.reclean_tracks(parsed_args.metadata_dir, config)
+
+    return extract.extract_videos(
+        video_dir=parsed_args.video_dir,
+        metadata_dir=parsed_args.metadata_dir,
+        config=config,
+        include=parsed_args.include,
+        exclude=parsed_args.exclude,
+        only=parsed_args.only,
+        force=parsed_args.force,
+        make_previews=parsed_args.previews,
+    )
+
+
 def main() -> None:
     configure_logging()
     try:
@@ -204,6 +293,8 @@ def main() -> None:
         failed_count = 0
         if parsed_args.command == "encode":
             failed_count = run_encode_command(parsed_args, config)
+        elif parsed_args.command == "extract":
+            failed_count = run_extract_command(parsed_args, config)
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)
         sys.exit(1)
