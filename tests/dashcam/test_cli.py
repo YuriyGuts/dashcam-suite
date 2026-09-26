@@ -154,6 +154,7 @@ def recorded_calls(monkeypatch):
     monkeypatch.setattr("dashcam.cli.maintenance.print_status", recorder("print_status", None))
     monkeypatch.setattr("dashcam.cli.maintenance.forget_trips", recorder("forget_trips"))
     monkeypatch.setattr("dashcam.cli.maintenance.run_doctor", recorder("run_doctor"))
+    monkeypatch.setattr("dashcam.cli.serve.serve", recorder("serve", None))
     return calls
 
 
@@ -262,3 +263,45 @@ def test_main_exits_with_error_when_doctor_finds_errors(monkeypatch, config):
 
     # THEN the exit code signals failure
     assert exit_code == 1
+
+
+def test_main_runs_serve_with_defaults(monkeypatch, config, recorded_calls):
+    # GIVEN `serve` without options
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["serve"])
+
+    # THEN the server listens on the local address and default port
+    name, _, kwargs = recorded_calls[0]
+    assert exit_code == 0
+    assert name == "serve"
+    assert kwargs["video_dir"] == Path.cwd()
+    assert kwargs["metadata_dir"] == Path(config.metadata_dir)
+    assert (kwargs["host"], kwargs["port"]) == ("127.0.0.1", 8765)
+
+
+def test_main_runs_serve_with_options(monkeypatch, config, recorded_calls):
+    # GIVEN `serve` with a directory, address, and port
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["serve", "videos", "--host", "0.0.0.0", "--port", "9000"])
+
+    # THEN the options are passed on
+    kwargs = recorded_calls[0][2]
+    assert kwargs["video_dir"] == Path("videos")
+    assert (kwargs["host"], kwargs["port"]) == ("0.0.0.0", 9000)
+
+
+def test_main_exits_with_error_when_port_is_taken(monkeypatch, config, caplog):
+    # GIVEN a port that cannot be bound
+    def failing_serve(**kwargs):
+        raise OSError("[Errno 48] Address already in use")
+
+    monkeypatch.setattr("dashcam.cli.serve.serve", failing_serve)
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["serve"])
+
+    # THEN the error is reported
+    assert exit_code == 1
+    assert "Address already in use" in caplog.text

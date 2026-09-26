@@ -16,6 +16,9 @@ where trips should be at least 8 hours apart, encode 3 trips in parallel:
 Encode raw video files labeled from #15 to #319 and save them as a single output video file
 named "Road Trip.mp4" in the specified directory:
 > dashcam encode range 15 319 --output-name "Road Trip" --output-dir ~/Videos/Dashcam
+
+Browse the trips in ~/Videos/Dashcam on a map at http://127.0.0.1:8765/:
+> dashcam serve ~/Videos/Dashcam
 """
 
 import argparse
@@ -26,6 +29,7 @@ from pathlib import Path
 from dashcam import encode
 from dashcam import extract
 from dashcam import maintenance
+from dashcam import serve
 from dashcam.config import Config
 from dashcam.config import load_config
 from dashcam.system import configure_logging
@@ -262,6 +266,29 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Apply safe fixes: reconnect renamed videos, rebuild the index, delete leftovers.",
     )
 
+    serve_parser = subparsers.add_parser(
+        name="serve",
+        help="Browse the trips on a map with synchronized video playback.",
+    )
+    add_video_dir_argument(serve_parser)
+    add_metadata_dir_argument(serve_parser, config)
+    serve_parser.add_argument(
+        "--host",
+        metavar="ADDRESS",
+        help=(
+            f"Address to listen on (default: '{serve.DEFAULT_HOST}', reachable from this "
+            f"machine only). Use '0.0.0.0' to allow other devices on the network."
+        ),
+        default=serve.DEFAULT_HOST,
+    )
+    serve_parser.add_argument(
+        "--port",
+        metavar="PORT",
+        help=f"Port to listen on (default: {serve.DEFAULT_PORT}).",
+        type=int,
+        default=serve.DEFAULT_PORT,
+    )
+
     parsed_args = parser.parse_args(args)
     return parsed_args
 
@@ -341,6 +368,14 @@ def main() -> None:
                 metadata_dir=parsed_args.metadata_dir,
                 max_interpolation_gap_s=config.max_interpolation_gap_s,
                 apply_fixes=parsed_args.fix,
+            )
+        elif parsed_args.command == "serve":
+            serve.serve(
+                video_dir=parsed_args.video_dir,
+                metadata_dir=parsed_args.metadata_dir,
+                max_interpolation_gap_s=config.max_interpolation_gap_s,
+                host=parsed_args.host,
+                port=parsed_args.port,
             )
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)
