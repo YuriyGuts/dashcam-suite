@@ -29,6 +29,7 @@ from dashcam import cleaning
 from dashcam import geo
 from dashcam import metadata
 from dashcam import osm
+from dashcam import terminal
 from dashcam.config import Config
 
 # Version of the matching algorithm. Tracks enriched by an older version are enriched again.
@@ -492,13 +493,14 @@ def enrich_tracks(
                 "1 street" if len(track.streets) == 1 else f"{len(track.streets)} streets"
             )
             LOGGER.info(
-                f"Enriched: {track.video_filename} ({street_count_text}, {format_route(track)})"
+                f"Enriched: {track.video_filename} ({street_count_text}, {format_route(track)})",
+                extra=terminal.SUCCESS,
             )
     finally:
         database.close()
 
     if not enriched_count:
-        LOGGER.info("All street lists are up to date")
+        LOGGER.info("All street lists are up to date", extra=terminal.SUCCESS)
     index = store.rebuild_index(config.max_interpolation_gap_s)
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")
     return failed_count

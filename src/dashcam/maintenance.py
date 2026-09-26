@@ -11,12 +11,17 @@ from dashcam import enrich
 from dashcam import extract
 from dashcam import metadata
 from dashcam import osm
+from dashcam import terminal
 from dashcam import video
 
 # Severity levels of doctor findings.
 SEVERITY_ERROR = "error"
 SEVERITY_WARNING = "warning"
 SEVERITY_INFO = "info"
+
+# GPS coverage (in percent) from which `status` shows a trip in green, or in yellow.
+GOOD_COVERAGE_PERCENT = 90
+FAIR_COVERAGE_PERCENT = 50
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
@@ -79,6 +84,20 @@ def format_duration(duration_s: float | None) -> str:
     return f"{total_s // 3600}:{total_s % 3600 // 60:02d}:{total_s % 60:02d}"
 
 
+def get_coverage_style(coverage_percent: float) -> str:
+    """Return the color of a GPS coverage value in `status`."""
+    if coverage_percent >= GOOD_COVERAGE_PERCENT:
+        return "green"
+    if coverage_percent >= FAIR_COVERAGE_PERCENT:
+        return "yellow"
+    return "red"
+
+
+def print_section_title(title: str, count: int) -> None:
+    """Print a bold section title with a dim item count."""
+    terminal.print_line((title, "bold"), (f" ({count})", "dim"))
+
+
 def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: float) -> None:
     """Print the trips, unprocessed videos, videos without an overlay, and unreachable tracks."""
     store = metadata.MetadataStore(metadata_dir)
@@ -94,9 +113,15 @@ def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: f
             no_overlay_names.append(track.video_filename)
             continue
         stats = metadata.compute_trip_stats(track, max_interpolation_gap_s)
+        coverage_percent = stats["coverage"] * 100
         trip_rows.append(
-            f"  {stem:<60} {format_duration(stats['duration_s']):>8} "
-            f"{stats['distance_km']:>7.1f} km {stats['coverage'] * 100:>4.0f}% GPS"
+            (
+                f"  {stem:<60} ",
+                (f"{format_duration(stats['duration_s']):>8} ", "dim"),
+                (f"{stats['distance_km']:>7.1f} km ", "dim"),
+                (f"{coverage_percent:>4.0f}%", get_coverage_style(coverage_percent)),
+                (" GPS", "dim"),
+            )
         )
 
     unprocessed_names = sorted(
@@ -105,8 +130,11 @@ def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: f
         if stem not in scan.tracks_by_stem
     )
 
-    print(f"Trips ({len(trip_rows)}):")
-    print("\n".join(trip_rows) or "  (none)")
+    print_section_title("Trips", len(trip_rows))
+    for row in trip_rows:
+        terminal.print_line(*row)
+    if not trip_rows:
+        terminal.print_line(("  (none)", "dim"))
     sections = [
         ("Videos not extracted yet (run `dashcam extract`)", unprocessed_names),
         ("Videos without an overlay (skipped)", no_overlay_names),
@@ -115,8 +143,10 @@ def print_status(video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: f
     ]
     for title, names in sections:
         if names:
-            print(f"\n{title} ({len(names)}):")
-            print("\n".join(f"  {name}" for name in names))
+            terminal.print_line()
+            print_section_title(title, len(names))
+            for name in names:
+                terminal.print_line(f"  {name}")
 
 
 def resolve_stem(name: str) -> str:
@@ -365,7 +395,9 @@ def run_doctor(
         for finding in fixable_findings:
             assert finding.fix is not None
             finding.fix()
-            LOGGER.info(f"Fixed: {finding.message} ({finding.fix_description})")
+            LOGGER.info(
+                f"Fixed: {finding.message} ({finding.fix_description})", extra=terminal.SUCCESS
+            )
 
     # File checks run last, so that the index reflects any renames made above.
     file_findings = check_files(store, max_interpolation_gap_s)
@@ -373,7 +405,10 @@ def run_doctor(
         for finding in file_findings:
             if finding.fix is not None:
                 finding.fix()
-                LOGGER.info(f"Fixed: {finding.message} ({finding.fix_description})")
+                LOGGER.info(
+                    f"Fixed: {finding.message} ({finding.fix_description})",
+                    extra=terminal.SUCCESS,
+                )
 
     all_findings = findings + file_findings
     unfixed_findings = [
@@ -388,7 +423,7 @@ def run_doctor(
         LOGGER.log(log_level, f"{finding.message}{suffix}")
 
     if not all_findings:
-        LOGGER.info("No problems found")
+        LOGGER.info("No problems found", extra=terminal.SUCCESS)
     elif not apply_fixes and any(finding.fix is not None for finding in all_findings):
         LOGGER.info("Run `dashcam doctor --fix` to apply the fixable changes")
     return sum(finding.severity == SEVERITY_ERROR for finding in unfixed_findings)

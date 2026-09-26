@@ -331,7 +331,7 @@ def test_print_status(video_dir, store, add_trip, make_track, capsys):
 
     # THEN every group is listed
     output = capsys.readouterr().out
-    assert "Trips (2):" in output
+    assert "Trips (2)" in output
     assert "Videos not extracted yet" in output and "2026-09-26 New.mp4" in output
     assert "Videos without an overlay" in output and "2019-01-01 Old Camera.mp4" in output
     assert "not in" in output and "2026-01-01 Deleted.mp4" in output
@@ -345,3 +345,18 @@ def test_format_duration():
 
     # THEN it is shown as H:MM:SS
     assert text == "1:02:03"
+
+
+@pytest.mark.parametrize(
+    ("coverage_percent", "expected_style"),
+    [
+        (100, "green"),
+        (90, "green"),
+        (89.5, "yellow"),
+        (50, "yellow"),
+        (49.9, "red"),
+        (0, "red"),
+    ],
+)
+def test_get_coverage_style(coverage_percent, expected_style):
+    assert maintenance.get_coverage_style(coverage_percent) == expected_style

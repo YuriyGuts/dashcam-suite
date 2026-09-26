@@ -26,6 +26,7 @@ from pathlib import Path
 from dashcam import enrich
 from dashcam import extract
 from dashcam import metadata
+from dashcam import terminal
 from dashcam.config import Config
 
 # The longest allowed filename, including the extension.
@@ -594,8 +595,8 @@ def apply_rename(plan: RenamePlan, store: metadata.MetadataStore) -> None:
 def print_plans(plans: list[RenamePlan]) -> None:
     """Print the old and new names."""
     for number, plan in enumerate(plans, start=1):
-        print(f"{number:>3}. {plan.video_path.name}")
-        print(f"     -> {plan.new_filename}", flush=True)
+        terminal.print_line((f"{number:>3}. ", "dim"), (plan.video_path.name, "dim"))
+        terminal.print_line(f"     {terminal.ARROW} ", (plan.new_filename, "bold"))
 
 
 def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
@@ -608,7 +609,9 @@ def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
         The new filename, or None to keep the current one.
     """
     extension = plan.video_path.suffix
-    print(f"\n{plan.video_path.name}\n  suggested: {plan.new_filename}")
+    terminal.print_line()
+    terminal.print_line((plan.video_path.name, "dim"))
+    terminal.print_line(("  suggested: ", "dim"), (plan.new_filename, "bold"))
     while True:
         answer = ask("  Enter to accept, '-' to skip, or type a new name: ").strip()
         if not answer:
@@ -620,7 +623,7 @@ def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
         problem = validate_filename(answer, extension)
         if problem is None:
             return answer
-        print(f"  Invalid name: {problem}")
+        terminal.print_line(("  ▲ Invalid name: ", "yellow"), problem)
 
 
 def confirm_plans(plans: list[RenamePlan], ask: t.Callable[[str], str]) -> list[RenamePlan]:
@@ -637,7 +640,7 @@ def confirm_plans(plans: list[RenamePlan], ask: t.Callable[[str], str]) -> list[
     try:
         return ask_for_confirmed_plans(plans, ask)
     except EOFError:
-        print()
+        terminal.print_line()
         return []
 
 
@@ -671,7 +674,7 @@ def rename_trips(
     include_all: bool,
     interactive: bool,
     assume_yes: bool,
-    ask: t.Callable[[str], str] = input,
+    ask: t.Callable[[str], str] = terminal.ask,
 ) -> int:
     """
     Suggest trip names, then apply them after confirmation (or right away with `assume_yes`).
@@ -708,7 +711,10 @@ def rename_trips(
             failed_count += 1
             continue
         renamed_count += 1
-        LOGGER.info(f"Renamed: {plan.video_path.name} -> {plan.new_filename}")
+        LOGGER.info(
+            f"Renamed: {plan.video_path.name} {terminal.ARROW} {plan.new_filename}",
+            extra=terminal.SUCCESS,
+        )
 
     if renamed_count:
         store.rebuild_index(config.max_interpolation_gap_s)

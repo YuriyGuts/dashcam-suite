@@ -3,25 +3,45 @@
 import contextlib
 import ctypes
 import logging
+import multiprocessing
+import multiprocessing.pool
 import subprocess
 import sys
+import threading
 import typing as t
 
-# Format of log messages.
-LOG_FORMAT = "%(asctime)s | %(levelname)8s | %(message)s"
+from dashcam import terminal
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
 
 
-def configure_logging() -> None:
+@contextlib.contextmanager
+def worker_pool(process_count: int) -> t.Iterator[multiprocessing.pool.Pool]:
     """
-    Set up console logging.
+    Start a pool of worker processes whose log records are written by this process.
 
-    Also used as the initializer of worker processes, which start without the parent's logging
-    configuration on macOS.
+    With a single writer, the lines of parallel jobs never tear or interleave.
     """
-    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+    log_queue = multiprocessing.SimpleQueue()
+    forwarder = threading.Thread(
+        target=terminal.forward_worker_logs, args=(log_queue,), daemon=True
+    )
+    forwarder.start()
+    with multiprocessing.Pool(
+        process_count,
+        initializer=terminal.configure_worker_logging,
+        initargs=(log_queue,),
+    ) as process_pool:
+        yield process_pool
+        # Wait for the workers to exit, so that none is killed while sending a record.
+        process_pool.close()
+        process_pool.join()
+
+    # Every worker has exited, so all their records are in the queue before this sentinel.
+    log_queue.put(None)
+    forwarder.join()
+    log_queue.close()
 
 
 @contextlib.contextmanager

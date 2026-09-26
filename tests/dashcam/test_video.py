@@ -175,3 +175,84 @@ def test_compute_fingerprint_detects_changed_end(tmp_path):
     # WHEN fingerprinting them
     # THEN the fingerprints differ
     assert video.compute_fingerprint(first_path) != video.compute_fingerprint(second_path)
+
+
+def test_probe_duration(monkeypatch, tmp_path):
+    # GIVEN ffprobe reporting a duration
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="61.5\n", stderr="")
+
+    monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
+
+    # WHEN probing the duration
+    duration_s = video.probe_duration(tmp_path / "segment.MP4")
+
+    # THEN it is parsed
+    assert duration_s == 61.5
+
+
+def test_probe_duration_of_unreadable_file(monkeypatch, tmp_path):
+    # GIVEN ffprobe failing to read a file
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Invalid data found\n")
+
+    monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
+
+    # WHEN probing the duration
+    # THEN the error names the file and the ffprobe error
+    with pytest.raises(RuntimeError, match="segment.MP4.*Invalid data found"):
+        video.probe_duration(tmp_path / "segment.MP4")
+
+
+def test_get_error_tail_keeps_last_lines():
+    # GIVEN more error lines than are reported
+    stderr = "".join(f"line {number}\n" for number in range(30))
+
+    # WHEN taking the tail
+    tail = video.get_error_tail(stderr)
+
+    # THEN only the last lines are kept
+    assert tail.splitlines() == [f"line {number}" for number in range(10, 30)]
+
+
+def test_iter_ffmpeg_progress_yields_reports():
+    # GIVEN a command that prints two ffmpeg progress reports
+    progress_lines = (
+        "out_time_us=N/A\nspeed=N/A\nprogress=continue\n"
+        "frame=10\nout_time_us=1500000\nspeed=1.23x\nprogress=end\n"
+    )
+    cmd = ["sh", "-c", f"printf '{progress_lines}'"]
+
+    # WHEN reading its progress
+    reports = list(video.iter_ffmpeg_progress(cmd))
+
+    # THEN one report is yielded per `progress` line, with the values known so far
+    assert reports == [
+        video.FfmpegProgress(output_time_s=0.0, speed=None),
+        video.FfmpegProgress(output_time_s=1.5, speed=1.23),
+    ]
+
+
+def test_iter_ffmpeg_progress_raises_with_error_tail():
+    # GIVEN a command that fails with error output
+    cmd = ["sh", "-c", "echo 'Unknown encoder' >&2; exit 3"]
+
+    # WHEN reading its progress
+    # THEN the error carries the exit code and the error output
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        list(video.iter_ffmpeg_progress(cmd))
+    assert exc_info.value.returncode == 3
+    assert exc_info.value.stderr == "Unknown encoder"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1.23x", 1.23),
+        ("  12x", 12.0),
+        ("N/A", None),
+        ("0x", None),
+    ],
+)
+def test_parse_speed(value, expected):
+    assert video.parse_speed(value) == expected

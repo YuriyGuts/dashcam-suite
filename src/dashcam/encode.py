@@ -43,16 +43,18 @@ under a temporary name, so an interrupted run never leaves an incomplete video b
 import dataclasses
 import datetime
 import logging
-import multiprocessing
 import re
 import shlex
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
+from dashcam import terminal
+from dashcam import video
 from dashcam.config import Config
-from dashcam.system import configure_logging
 from dashcam.system import prevent_os_sleep
+from dashcam.system import worker_pool
 
 # Extensions of the video files to expect in the input directory.
 EXPECTED_VIDEO_EXTENSIONS = (".avi", ".mp4", ".mov")
@@ -70,6 +72,8 @@ OUTPUT_FORMAT = "mp4"
 # Suffix of the videos that are still being encoded.
 PARTIAL_OUTPUT_SUFFIX = ".partial"
 
+# How often (in seconds) to log encoding progress.
+PROGRESS_INTERVAL_S = 10
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
@@ -171,7 +175,7 @@ def is_raw_video_readable(path: Path, ffmpeg_executable: str) -> bool:
         "null",
         "-",
     ]
-    LOGGER.info(f"Running: {shlex.join(cmd)}")
+    LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)
     result = subprocess.run(cmd, capture_output=True, check=False)
     return result.returncode == 0
 
@@ -278,7 +282,8 @@ def build_ffmpeg_command(
     return [
         config.ffmpeg_executable,
         "-nostdin",
-        "-hide_banner",
+        # Report errors only, and the progress as `key=value` lines on stdout.
+        *["-v", "error", "-nostats", "-progress", "pipe:1"],
         # Allow ffmpeg to use absolute input paths (-safe 0).
         *["-f", "concat", "-safe", "0"],
         *shlex.split(config.hwaccel_options),
@@ -289,6 +294,76 @@ def build_ffmpeg_command(
         # The partial output file has an unusual extension, so specify the format explicitly.
         *["-f", OUTPUT_FORMAT, "-y", str(partial_output_path)],
     ]
+
+
+def get_total_duration(segments: list[RawVideoSegment]) -> float | None:
+    """
+    Sum the durations of the raw videos.
+
+    Returns
+    -------
+    float | None
+        The total duration in seconds, or None if a duration cannot be read.
+    """
+    try:
+        return sum(video.probe_duration(segment.path) for segment in segments)
+    except (OSError, RuntimeError) as exc:
+        LOGGER.warning(f"Cannot compute the encoding progress: {exc}")
+        return None
+
+
+def format_video_time(time_s: float) -> str:
+    """Format a video time as `M:SS`, or `H:MM:SS` from one hour."""
+    total_s = int(time_s)
+    hours, minutes, seconds = total_s // 3600, total_s % 3600 // 60, total_s % 60
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def format_encode_progress(
+    output_name: str,
+    progress: video.FfmpegProgress,
+    total_duration_s: float | None,
+) -> str:
+    """
+    Describe the progress of an encoding job.
+
+    E.g. `Trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)`, or `Trip.mp4: 1:23 encoded, 1.2x`
+    when the total duration is unknown.
+    """
+    output_time_text = format_video_time(progress.output_time_s)
+    speed_text = "" if progress.speed is None else f", {progress.speed:.1f}x"
+    if not total_duration_s:
+        return f"{output_name}: {output_time_text} encoded{speed_text}"
+
+    percent = min(100, round(progress.output_time_s / total_duration_s * 100))
+    time_left_text = ""
+    if progress.speed is not None:
+        remaining_s = max(0.0, total_duration_s - progress.output_time_s) / progress.speed
+        if remaining_s < 60:
+            time_left_text = ", <1 min left"
+        else:
+            time_left_text = f", ~{round(remaining_s / 60)} min left"
+    return (
+        f"{output_name}: {percent}% ({output_time_text} of {format_video_time(total_duration_s)}"
+        f"{speed_text}{time_left_text})"
+    )
+
+
+def run_ffmpeg_with_progress(
+    cmd: list[str], output_name: str, total_duration_s: float | None
+) -> None:
+    """Run the encoding command, logging its progress every `PROGRESS_INTERVAL_S`."""
+    next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
+    for progress in video.iter_ffmpeg_progress(cmd):
+        if time.monotonic() < next_progress_at:
+            continue
+        LOGGER.info(
+            format_encode_progress(output_name, progress, total_duration_s),
+            extra=terminal.PROGRESS,
+        )
+        next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
 
 
 def run_encode_job(job_def: EncodeJobDefinition) -> bool:
@@ -302,6 +377,9 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
     """
     output_path = job_def.output_path
     partial_output_path = get_partial_output_path(output_path)
+    total_duration_s = get_total_duration(job_def.raw_segments)
+    duration_text = "" if total_duration_s is None else f", {total_duration_s / 60:.0f} min"
+    LOGGER.info(f"Encoding: {output_path.name} ({len(job_def.raw_segments)} files{duration_text})")
 
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -310,25 +388,26 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
         suffix=".txt",
         delete=False,
     ) as fp:
-        LOGGER.info(f"Writing ffmpeg file list to '{fp.name}'")
         fp.write(format_ffmpeg_concat_list(job_def.raw_segments))
         concat_list_path = Path(fp.name)
 
     cmd = build_ffmpeg_command(concat_list_path, partial_output_path, job_def.config)
     try:
-        LOGGER.info(f"Running: {shlex.join(cmd)}")
-        subprocess.run(cmd, check=True)
+        LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)
+        run_ffmpeg_with_progress(cmd, output_path.name, total_duration_s)
         partial_output_path.rename(output_path)
     except subprocess.CalledProcessError as exc:
+        error_tail = f"\n{exc.stderr}" if exc.stderr else ""
         LOGGER.error(
             f"Encoding failed for '{output_path.name}' (ffmpeg exit code {exc.returncode})"
+            f"{error_tail}"
         )
         partial_output_path.unlink(missing_ok=True)
         return False
     finally:
         concat_list_path.unlink(missing_ok=True)
 
-    LOGGER.info(f"Encoding completed: {output_path.name}")
+    LOGGER.info(f"Encoding completed: {output_path.name}", extra=terminal.SUCCESS)
     return True
 
 
@@ -370,14 +449,22 @@ def run_encode_jobs(job_defs: list[EncodeJobDefinition], job_count: int) -> int:
         LOGGER.info("Nothing to encode")
         return 0
 
+    process_count = min(job_count, len(job_defs))
+    LOGGER.info(f"Encoding {len(job_defs)} videos with {process_count} parallel jobs")
+    failed_count = 0
     with prevent_os_sleep():
-        with multiprocessing.Pool(
-            min(job_count, len(job_defs)), initializer=configure_logging
-        ) as process_pool:
-            results = process_pool.map(run_encode_job, job_defs)
+        with worker_pool(process_count) as process_pool:
+            for done_count, is_encoded in enumerate(
+                process_pool.imap_unordered(run_encode_job, job_defs), start=1
+            ):
+                LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
+                failed_count += not is_encoded
 
-    failed_count = results.count(False)
-    LOGGER.info(f"Encoded {len(results) - failed_count} videos, {failed_count} failed")
+    summary = f"Encoded {len(job_defs) - failed_count} videos, {failed_count} failed"
+    if failed_count:
+        LOGGER.warning(summary)
+    else:
+        LOGGER.info(summary, extra=terminal.SUCCESS)
     return failed_count
 
 
@@ -407,7 +494,7 @@ def encode_trips(
 
     LOGGER.info(f"Discovered {len(trips)} trips")
     for trip in trips:
-        LOGGER.info(trip)
+        LOGGER.info(f"  {trip}")
 
     segment_groups = [(trip.get_placeholder_name(), trip.raw_segments) for trip in trips]
     job_defs = plan_encode_jobs(segment_groups, output_dir, config)

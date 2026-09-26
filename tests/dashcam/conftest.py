@@ -13,6 +13,7 @@ from dashcam import cleaning
 from dashcam import enrich
 from dashcam import metadata
 from dashcam import osm
+from dashcam import video
 from dashcam.config import get_platform_defaults
 
 KYIV_SUMMER = datetime.timezone(datetime.timedelta(hours=3))
@@ -139,6 +140,8 @@ class FakeFfmpeg:
     def __init__(self):
         self.calls = []
         self.encode_return_code = 0
+        self.encode_stderr = ""
+        self.progress_reports = [video.FfmpegProgress(output_time_s=0.0, speed=None)]
         self.unreadable_paths = set()
 
     def run(self, cmd, **kwargs):
@@ -149,18 +152,26 @@ class FakeFfmpeg:
             return_code = 1 if input_path in self.unreadable_paths else 0
             return subprocess.CompletedProcess(cmd, return_code)
 
+        raise AssertionError(f"Unexpected ffmpeg command: {cmd}")
+
+    def iter_progress(self, cmd):
+        self.calls.append(cmd)
         output_path = cmd[-1]
         with open(output_path, "wb") as fp:
             fp.write(b"partial video")
+        yield from self.progress_reports
         if self.encode_return_code != 0:
-            raise subprocess.CalledProcessError(self.encode_return_code, cmd)
-        return subprocess.CompletedProcess(cmd, 0)
+            raise subprocess.CalledProcessError(
+                self.encode_return_code, cmd, stderr=self.encode_stderr
+            )
 
 
 @pytest.fixture
 def fake_ffmpeg(monkeypatch):
     ffmpeg = FakeFfmpeg()
     monkeypatch.setattr("dashcam.encode.subprocess.run", ffmpeg.run)
+    monkeypatch.setattr("dashcam.video.iter_ffmpeg_progress", ffmpeg.iter_progress)
+    monkeypatch.setattr("dashcam.video.probe_duration", lambda path: 60.0)
     return ffmpeg
 
 
@@ -169,24 +180,22 @@ def no_os_sleep_prevention(monkeypatch):
     monkeypatch.setattr("dashcam.encode.prevent_os_sleep", contextlib.nullcontext)
 
 
+class SerialPool:
+    """Runs pool jobs in the test process so that monkeypatched functions stay in effect."""
+
+    def imap_unordered(self, func, items):
+        return (func(item) for item in items)
+
+
+@contextlib.contextmanager
+def serial_worker_pool(process_count):
+    yield SerialPool()
+
+
 @pytest.fixture
 def serial_pool(monkeypatch):
-    """Run pool jobs in the test process so that monkeypatched functions stay in effect."""
-
-    class SerialPool:
-        def __init__(self, processes, initializer=None):
-            self.processes = processes
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc_info):
-            return False
-
-        def map(self, func, items):
-            return [func(item) for item in items]
-
-    monkeypatch.setattr("dashcam.encode.multiprocessing.Pool", SerialPool)
+    monkeypatch.setattr("dashcam.encode.worker_pool", serial_worker_pool)
+    monkeypatch.setattr("dashcam.extract.worker_pool", serial_worker_pool)
 
 
 @pytest.fixture

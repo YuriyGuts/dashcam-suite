@@ -14,6 +14,7 @@ from dashcam import enrich
 from dashcam import extract
 from dashcam import osm
 from dashcam import rename
+from dashcam import terminal
 from dashcam.config import Config
 
 # pylint: disable=logging-fstring-interpolation
@@ -39,7 +40,7 @@ def import_trips(
     int
         The number of failed trips over all steps.
     """
-    LOGGER.info("Step 1/4: encoding trips")
+    LOGGER.info("Step 1/4: encoding trips", extra=terminal.HEADING)
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
         output_dir=output_dir,
@@ -52,7 +53,7 @@ def import_trips(
     if dry_run:
         return failed_count
 
-    LOGGER.info("Step 2/4: extracting GPS tracks")
+    LOGGER.info("Step 2/4: extracting GPS tracks", extra=terminal.HEADING)
     failed_count += extract.extract_videos(
         video_dir=output_dir,
         metadata_dir=metadata_dir,
@@ -71,7 +72,7 @@ def import_trips(
         )
         return failed_count
 
-    LOGGER.info("Step 3/4: matching streets")
+    LOGGER.info("Step 3/4: matching streets", extra=terminal.HEADING)
     failed_count += enrich.enrich_tracks(
         metadata_dir=metadata_dir,
         config=config,
@@ -82,7 +83,7 @@ def import_trips(
 
     if not suggest_names:
         return failed_count
-    LOGGER.info("Step 4/4: naming trips")
+    LOGGER.info("Step 4/4: naming trips", extra=terminal.HEADING)
     failed_count += rename.rename_trips(
         video_dir=output_dir,
         metadata_dir=metadata_dir,

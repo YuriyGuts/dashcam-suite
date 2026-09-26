@@ -362,21 +362,7 @@ def fake_extract_video(monkeypatch, make_track):
 
 
 @pytest.fixture
-def serial_extract_pool(monkeypatch):
-    class SerialPool:
-        def __init__(self, processes, initializer=None):
-            self.processes = processes
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc_info):
-            return False
-
-        def imap_unordered(self, func, items):
-            return (func(item) for item in items)
-
-    monkeypatch.setattr("dashcam.extract.multiprocessing.Pool", SerialPool)
+def serial_extract_pool(monkeypatch, serial_pool):
     monkeypatch.setattr("dashcam.extract.prevent_os_sleep", contextlib.nullcontext)
 
 
@@ -500,7 +486,7 @@ def test_make_preview_renames_partial_output(monkeypatch, config, tmp_path):
     # GIVEN an ffmpeg run that writes the partial output
     commands = []
 
-    def fake_run(cmd, check):
+    def fake_run(cmd, **kwargs):
         commands.append(cmd)
         Path(cmd[-1]).write_bytes(b"preview")
 
@@ -517,18 +503,18 @@ def test_make_preview_renames_partial_output(monkeypatch, config, tmp_path):
 
 def test_make_preview_removes_partial_output_on_failure(monkeypatch, config, tmp_path):
     # GIVEN an ffmpeg run that fails after writing some output
-    def failing_run(cmd, check):
+    def failing_run(cmd, **kwargs):
         Path(cmd[-1]).write_bytes(b"partial")
-        raise subprocess.CalledProcessError(1, cmd)
+        raise subprocess.CalledProcessError(1, cmd, stderr="Invalid data found\n")
 
     monkeypatch.setattr("dashcam.extract.subprocess.run", failing_run)
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"
 
     # WHEN making a preview
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(RuntimeError, match="Invalid data found"):
         extract.make_preview(tmp_path / "trip.mp4", preview_path, config)
 
-    # THEN nothing is left behind
+    # THEN nothing is left behind, and the error names the ffmpeg error
     assert list(preview_path.parent.iterdir()) == []
 
 

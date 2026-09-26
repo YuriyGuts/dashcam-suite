@@ -45,9 +45,9 @@ from dashcam import importer
 from dashcam import maintenance
 from dashcam import rename
 from dashcam import serve
+from dashcam import terminal
 from dashcam.config import Config
 from dashcam.config import load_config
-from dashcam.system import configure_logging
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
@@ -458,7 +458,7 @@ def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
 
 
 def main() -> None:
-    configure_logging()
+    terminal.configure_logging()
     try:
         config = load_config()
     except (OSError, ValueError) as exc:

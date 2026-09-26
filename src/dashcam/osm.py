@@ -34,6 +34,8 @@ import osmium.filter
 import osmium.io
 import osmium.osm
 
+from dashcam import terminal
+
 # Version of the database layout. Databases of other versions must be rebuilt.
 DATABASE_FORMAT_VERSION = 1
 
@@ -255,8 +257,9 @@ class OsmFilterHandler(osmium.SimpleHandler):
         if time.monotonic() < self.next_progress_at:
             return
         LOGGER.info(
-            f"  {len(self.writer.road_ids)} roads, {self.writer.chunk_count} chunks, "
-            f"{self.writer.locality_count} localities so far"
+            f"{len(self.writer.road_ids)} roads, {self.writer.chunk_count} chunks, "
+            f"{self.writer.locality_count} localities so far",
+            extra=terminal.PROGRESS,
         )
         self.next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
 
@@ -337,7 +340,8 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
         connection.commit()
         LOGGER.info(
             f"Kept {len(writer.road_ids)} roads ({writer.chunk_count} chunks) and "
-            f"{writer.locality_count} localities in {time.monotonic() - started_at:.0f} s"
+            f"{writer.locality_count} localities in {time.monotonic() - started_at:.0f} s",
+            extra=terminal.SUCCESS,
         )
         connection.execute("VACUUM")
     except BaseException:
@@ -361,7 +365,10 @@ def download_file(url: str, target_path: Path) -> None:
             downloaded_size += len(block)
             if time.monotonic() >= next_progress_at:
                 total_text = f" of {total_size / 1e6:.0f}" if total_size else ""
-                LOGGER.info(f"  {downloaded_size / 1e6:.0f}{total_text} MB")
+                LOGGER.info(
+                    f"Downloaded {downloaded_size / 1e6:.0f}{total_text} MB",
+                    extra=terminal.PROGRESS,
+                )
                 next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
 
 
@@ -386,7 +393,7 @@ def update_osm_data(metadata_dir: Path, extract_url: str, pbf_path: Path | None 
             download_path.unlink(missing_ok=True)
 
     size_mb = database_path.stat().st_size / 1e6
-    LOGGER.info(f"OSM data: '{database_path}' ({size_mb:.0f} MB)")
+    LOGGER.info(f"OSM data: '{database_path}' ({size_mb:.0f} MB)", extra=terminal.SUCCESS)
 
 
 class RoadDatabase:

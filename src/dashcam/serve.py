@@ -43,6 +43,7 @@ from dashcam import extract
 from dashcam import geo
 from dashcam import metadata
 from dashcam import rename
+from dashcam import terminal
 
 # Default bind address and port.
 DEFAULT_HOST = "127.0.0.1"
@@ -678,7 +679,10 @@ def serve(
 
     server = VisualizerServer((host, port), app)
     bound_port = server.server_address[1]
-    LOGGER.info(f"Serving {trip_count} trips at {format_server_url(host, int(bound_port))}")
+    LOGGER.info(
+        f"Serving {trip_count} trips at {format_server_url(host, int(bound_port))}",
+        extra=terminal.SUCCESS,
+    )
     if not allow_rename:
         LOGGER.info("Renaming trips in the browser is disabled on non-loopback addresses")
     LOGGER.info("Press Ctrl+C to stop")

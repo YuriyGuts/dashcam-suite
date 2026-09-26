@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dashcam import encode
+from dashcam import video
 
 SAMPLE_RAW_VIDEO_DIR = Path(__file__).parents[2] / "video" / "raw-sd" / "DCIM" / "Movie"
 
@@ -220,7 +222,7 @@ def test_build_ffmpeg_command(config, tmp_path):
     assert cmd == [
         "ffmpeg",
         "-nostdin",
-        "-hide_banner",
+        *["-v", "error", "-nostats", "-progress", "pipe:1"],
         *["-f", "concat", "-safe", "0"],
         *["-hwaccel", "videotoolbox"],
         *["-i", str(concat_list_path)],
@@ -279,6 +281,127 @@ def test_run_encode_job_removes_partial_output_on_failure(config, tmp_path, fake
     assert not encode.get_partial_output_path(output_path).exists()
 
 
+def test_run_encode_job_logs_ffmpeg_errors(config, tmp_path, fake_ffmpeg, caplog):
+    # GIVEN an encoding job for which ffmpeg fails with error output
+    fake_ffmpeg.encode_return_code = 1
+    fake_ffmpeg.encode_stderr = "Unknown encoder 'libx265'"
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=tmp_path / "2026-09-25 Trip 11-17.mp4",
+        config=config,
+    )
+
+    # WHEN running it
+    encode.run_encode_job(job_def)
+
+    # THEN the error names the video and includes the ffmpeg output
+    error_messages = [
+        record.getMessage() for record in caplog.records if record.levelno == logging.ERROR
+    ]
+    assert error_messages == [
+        "Encoding failed for '2026-09-25 Trip 11-17.mp4' (ffmpeg exit code 1)\n"
+        "Unknown encoder 'libx265'"
+    ]
+
+
+def test_run_encode_job_logs_progress_every_interval(config, tmp_path, monkeypatch, caplog):
+    # GIVEN an ffmpeg run that reports its progress every 4 seconds
+    caplog.set_level(logging.INFO)
+    wall_clock = {"now_s": 0.0}
+    monkeypatch.setattr("dashcam.encode.time.monotonic", lambda: wall_clock["now_s"])
+
+    def iter_progress(cmd):
+        Path(cmd[-1]).write_bytes(b"partial video")
+        for report_number in range(1, 7):
+            wall_clock["now_s"] = report_number * 4.0
+            yield video.FfmpegProgress(output_time_s=report_number * 6.0, speed=1.5)
+
+    monkeypatch.setattr("dashcam.video.iter_ffmpeg_progress", iter_progress)
+    monkeypatch.setattr("dashcam.video.probe_duration", lambda path: 60.0)
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=tmp_path / "trip.mp4",
+        config=config,
+    )
+
+    # WHEN running it
+    encode.run_encode_job(job_def)
+
+    # THEN the progress is logged at most every `PROGRESS_INTERVAL_S` (at 12 s and 24 s)
+    progress_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if getattr(record, "marker", None) == "progress"
+    ]
+    assert progress_messages == [
+        "trip.mp4: 30% (0:18 of 1:00, 1.5x, <1 min left)",
+        "trip.mp4: 60% (0:36 of 1:00, 1.5x, <1 min left)",
+    ]
+
+
+def test_run_encode_job_without_durations_still_encodes(
+    config, tmp_path, fake_ffmpeg, monkeypatch, caplog
+):
+    # GIVEN a job whose raw video durations cannot be read
+    def failing_probe_duration(path):
+        raise RuntimeError(f"Cannot read the duration of '{path}'")
+
+    monkeypatch.setattr("dashcam.video.probe_duration", failing_probe_duration)
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=tmp_path / "trip.mp4",
+        config=config,
+    )
+
+    # WHEN running it
+    is_encoded = encode.run_encode_job(job_def)
+
+    # THEN the video is still encoded, with a warning about the progress
+    assert is_encoded
+    assert "Cannot compute the encoding progress" in caplog.text
+
+
+def test_format_encode_progress_with_total_and_speed():
+    # GIVEN 1:23 of a 6-minute video encoded at 1.2x
+    progress = video.FfmpegProgress(output_time_s=83.0, speed=1.2)
+
+    # WHEN describing the progress
+    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=360.0)
+
+    # THEN it has the percentage, times, speed, and the time left in minutes
+    assert text == "trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)"
+
+
+def test_format_encode_progress_before_speed_is_known():
+    # GIVEN the first report, without a speed
+    progress = video.FfmpegProgress(output_time_s=0.0, speed=None)
+
+    # WHEN describing the progress
+    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=360.0)
+
+    # THEN the speed and the time left are left out
+    assert text == "trip.mp4: 0% (0:00 of 6:00)"
+
+
+def test_format_encode_progress_without_total_duration():
+    # GIVEN a job whose total duration is unknown
+    progress = video.FfmpegProgress(output_time_s=83.0, speed=1.2)
+
+    # WHEN describing the progress
+    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=None)
+
+    # THEN the encoded time and speed are shown
+    assert text == "trip.mp4: 1:23 encoded, 1.2x"
+
+
+def test_format_video_time_from_one_hour():
+    assert encode.format_video_time(3723.9) == "1:02:03"
+
+
+def test_format_video_time_under_one_hour():
+    assert encode.format_video_time(83.0) == "1:23"
+
+
 def test_run_encode_job_deletes_concat_list(config, tmp_path, fake_ffmpeg):
     # GIVEN an encoding job
     job_def = encode.EncodeJobDefinition(
@@ -320,8 +443,10 @@ def test_encode_trips_encodes_each_trip(
     fake_ffmpeg,
     serial_pool,
     no_os_sleep_prevention,
+    caplog,
 ):
     # GIVEN segments that form two trips
+    caplog.set_level(logging.INFO)
     make_raw_videos(
         "20260925111707_000001.MP4",
         "20260925111807_000002.MP4",
@@ -341,8 +466,9 @@ def test_encode_trips_encodes_each_trip(
         check_readability=False,
     )
 
-    # THEN each trip gets its own video
+    # THEN each trip gets its own video, and the progress counts finished videos
     assert failed_count == 0
+    assert "Progress: 2/2 videos" in caplog.text
     assert sorted(path.name for path in output_dir.iterdir()) == [
         "2026-09-25 Trip 11-17.mp4",
         "2026-09-25 Trip 18-00.mp4",
@@ -357,6 +483,7 @@ def test_encode_trips_counts_failures(
     fake_ffmpeg,
     serial_pool,
     no_os_sleep_prevention,
+    caplog,
 ):
     # GIVEN a trip for which ffmpeg fails
     make_raw_videos("20260925111707_000001.MP4")
@@ -373,8 +500,11 @@ def test_encode_trips_counts_failures(
         check_readability=False,
     )
 
-    # THEN the failure is reported
+    # THEN the failure is counted and summarized as a warning
     assert failed_count == 1
+    assert [
+        record.getMessage() for record in caplog.records if record.levelno == logging.WARNING
+    ] == ["Encoded 0 videos, 1 failed"]
 
 
 def test_encode_trips_dry_run_does_not_run_ffmpeg(

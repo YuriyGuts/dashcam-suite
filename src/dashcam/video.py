@@ -20,6 +20,9 @@ FFPROBE_EXECUTABLE = "ffprobe"
 # How many bytes from the start and from the end of a file go into its fingerprint.
 FINGERPRINT_CHUNK_SIZE = 1024 * 1024
 
+# How many of the last ffmpeg error lines to report when it fails.
+ERROR_TAIL_LINE_COUNT = 20
+
 
 @dataclasses.dataclass(frozen=True)
 class VideoInfo:
@@ -60,6 +63,101 @@ def probe_video(path: Path) -> VideoInfo:
         height=int(streams[0]["height"]),
         duration_s=float(probe_output["format"]["duration"]),
     )
+
+
+def probe_duration(path: Path) -> float:
+    """
+    Read the duration of a media file in seconds.
+
+    Raises
+    ------
+    RuntimeError
+        If the file cannot be read or has no duration.
+    """
+    cmd = [
+        FFPROBE_EXECUTABLE,
+        *["-v", "error"],
+        *["-show_entries", "format=duration"],
+        *["-of", "default=noprint_wrappers=1:nokey=1"],
+        str(path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        return float(result.stdout)
+    except ValueError:
+        raise RuntimeError(
+            f"Cannot read the duration of '{path}': {result.stderr.strip()}"
+        ) from None
+
+
+@dataclasses.dataclass(frozen=True)
+class FfmpegProgress:
+    """A progress report of a running ffmpeg command."""
+
+    # Time (in seconds) of the output written so far.
+    output_time_s: float
+
+    # Seconds of output written per second of processing, or None before it is known.
+    speed: float | None
+
+
+def parse_speed(value: str) -> float | None:
+    """Parse an ffmpeg speed such as `1.23x`. `N/A` and zero speeds give None."""
+    try:
+        speed = float(value.removesuffix("x"))
+    except ValueError:
+        return None
+    return speed or None
+
+
+def get_error_tail(stderr: str) -> str:
+    """Return the last lines of ffmpeg's error output."""
+    return "\n".join(stderr.strip().splitlines()[-ERROR_TAIL_LINE_COUNT:])
+
+
+def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
+    """
+    Run an ffmpeg command that has `-progress pipe:1` and yield its progress reports.
+
+    ffmpeg writes a report of `key=value` lines about twice per second, each ending with a
+    `progress` line.
+
+    Yields
+    ------
+    FfmpegProgress
+        The output time and speed at each report.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If ffmpeg fails. Its `stderr` holds the last lines of the error output.
+    """
+    # Collect errors in a file: a pipe could fill up and block ffmpeg.
+    with tempfile.TemporaryFile() as stderr_file:
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_file, text=True) as proc:
+            assert proc.stdout is not None
+            output_time_s = 0.0
+            speed = None
+            try:
+                for line in proc.stdout:
+                    key, _, value = line.strip().partition("=")
+                    # The values are `N/A` until the first frame is written.
+                    if key == "out_time_us" and value.isdigit():
+                        output_time_s = int(value) / 1e6
+                    elif key == "speed":
+                        speed = parse_speed(value)
+                    elif key == "progress":
+                        yield FfmpegProgress(output_time_s=output_time_s, speed=speed)
+            except GeneratorExit:
+                # The caller stopped reading early.
+                proc.kill()
+                raise
+            proc.wait()
+
+        if proc.returncode != 0:
+            stderr_file.seek(0)
+            stderr = stderr_file.read().decode(errors="replace")
+            raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=get_error_tail(stderr))
 
 
 def build_strip_reader_command(

@@ -18,7 +18,6 @@ import dataclasses
 import datetime
 import fnmatch
 import logging
-import multiprocessing
 import shlex
 import subprocess
 import time
@@ -29,10 +28,11 @@ import cv2
 from dashcam import cleaning
 from dashcam import metadata
 from dashcam import overlay
+from dashcam import terminal
 from dashcam import video
 from dashcam.config import Config
-from dashcam.system import configure_logging
 from dashcam.system import prevent_os_sleep
+from dashcam.system import worker_pool
 
 # Extensions of trip videos.
 VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi")
@@ -186,7 +186,7 @@ def read_all_frames(
         readings.append((offset_s, overlay.read_overlay(strip, layout)))
         if offset_s >= next_progress_s:
             percent = min(100, round(offset_s / video_info.duration_s * 100))
-            LOGGER.info(f"  {video_path.name}: {percent}%")
+            LOGGER.info(f"{video_path.name}: {percent}%", extra=terminal.PROGRESS)
             next_progress_s += PROGRESS_INTERVAL_S
     return readings
 
@@ -205,12 +205,15 @@ def make_preview(video_path: Path, preview_path: Path, config: Config) -> None:
         *shlex.split(PREVIEW_AUDIO_OPTIONS),
         *["-movflags", "+faststart", "-f", "mp4", "-y", str(partial_path)],
     ]
-    LOGGER.info(f"Running: {shlex.join(cmd)}")
+    LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)
     try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
         partial_path.unlink(missing_ok=True)
-        raise
+        raise RuntimeError(
+            f"ffmpeg failed to make the preview (exit code {exc.returncode})\n"
+            f"{video.get_error_tail(exc.stderr or '')}"
+        ) from exc
     partial_path.rename(preview_path)
 
 
@@ -291,7 +294,8 @@ def run_extract_job(job_def: ExtractJobDefinition) -> ExtractJobResult:
     elapsed_s = time.monotonic() - started_at
     LOGGER.info(
         f"Extracted: {video_filename} ({track.extraction_status}, {elapsed_s:.0f} s) "
-        f"{status_counts}"
+        f"{status_counts}",
+        extra=terminal.SUCCESS,
     )
     return ExtractJobResult(
         video_filename=video_filename,
@@ -367,7 +371,9 @@ def plan_extraction(
         fingerprint = video.compute_fingerprint(video_path)
         old_stem = stems_by_fingerprint.get(fingerprint)
         if old_stem is not None and old_stem not in present_stems:
-            LOGGER.info(f"Renamed: {old_stem} -> {video_path.stem} (track renamed, no OCR)")
+            LOGGER.info(
+                f"Renamed: {old_stem} {terminal.ARROW} {video_path.stem} (track renamed, no OCR)"
+            )
             store.rename_trip(old_stem, video_path.name)
             tracks_by_stem[video_path.stem] = tracks_by_stem.pop(old_stem)
             stems_by_fingerprint[fingerprint] = video_path.stem
@@ -449,18 +455,17 @@ def extract_videos(
 
     failed_count = 0
     if job_defs:
-        LOGGER.info(f"Processing {len(job_defs)} videos with {config.job_count} parallel jobs")
+        process_count = min(config.job_count, len(job_defs))
+        LOGGER.info(f"Processing {len(job_defs)} videos with {process_count} parallel jobs")
         with prevent_os_sleep():
-            with multiprocessing.Pool(
-                min(config.job_count, len(job_defs)), initializer=configure_logging
-            ) as process_pool:
+            with worker_pool(process_count) as process_pool:
                 for done_count, result in enumerate(
                     process_pool.imap_unordered(run_extract_job, job_defs), start=1
                 ):
                     LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
                     failed_count += result.error is not None
     else:
-        LOGGER.info("All tracks are up to date")
+        LOGGER.info("All tracks are up to date", extra=terminal.SUCCESS)
 
     index = store.rebuild_index(config.max_interpolation_gap_s)
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")
@@ -516,7 +521,7 @@ def reclean_tracks(metadata_dir: Path, config: Config) -> int:
         )
         track.cleaning_version = metadata.CLEANING_VERSION
         store.save_track(track)
-        LOGGER.info(f"Recleaned: {track.video_filename}")
+        LOGGER.info(f"Recleaned: {track.video_filename}", extra=terminal.SUCCESS)
 
     index = store.rebuild_index(config.max_interpolation_gap_s)
     LOGGER.info(f"Index: {len(index['trips'])} trips in '{store.index_path}'")

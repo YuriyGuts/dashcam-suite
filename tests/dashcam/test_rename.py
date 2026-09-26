@@ -671,3 +671,18 @@ def test_rename_trip_to_same_name(library, add_named_trip):
 
     assert new_stem == "2026-09-25 To Work"
     assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+
+
+def test_print_plans_shows_old_and_new_names(two_plans, capsys):
+    # GIVEN two rename plans
+
+    # WHEN printing them
+    rename.print_plans(two_plans)
+
+    # THEN each old name is followed by an arrow and the new name
+    assert capsys.readouterr().out.splitlines() == [
+        "  1. 2026-09-25 Trip 09-00.mp4",
+        "     → 2026-09-25 A (CX-5).mp4",
+        "  2. 2026-09-25 Trip 18-00.mp4",
+        "     → 2026-09-25 B (CX-5).mp4",
+    ]
