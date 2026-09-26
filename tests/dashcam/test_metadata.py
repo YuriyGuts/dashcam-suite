@@ -161,10 +161,10 @@ def test_parse_trip_name():
     # GIVEN a video filename with a date and a name
 
     # WHEN parsing it
-    trip_name = metadata.parse_trip_name("2026-09-25 Horodotska, M06 (CX-5).mp4")
+    trip_name = metadata.parse_trip_name("2026-09-25 Horodotska, M06 (Car).mp4")
 
     # THEN the date and name are split
-    assert trip_name == metadata.TripName(datetime.date(2026, 9, 25), "Horodotska, M06 (CX-5)")
+    assert trip_name == metadata.TripName(datetime.date(2026, 9, 25), "Horodotska, M06 (Car)")
 
 
 def test_parse_trip_name_without_date():
@@ -276,13 +276,13 @@ def test_metadata_store_rename_trip(make_track, store):
     store.preview_path(track.stem).write_bytes(b"preview")
 
     # WHEN its video is renamed
-    store.rename_trip(track.stem, "2026-09-25 Horodotska (CX-5).mp4")
+    store.rename_trip(track.stem, "2026-09-25 Horodotska (Car).mp4")
 
     # THEN the track and preview follow the new name
-    renamed_track = store.load_track("2026-09-25 Horodotska (CX-5)")
-    assert renamed_track.video_filename == "2026-09-25 Horodotska (CX-5).mp4"
+    renamed_track = store.load_track("2026-09-25 Horodotska (Car)")
+    assert renamed_track.video_filename == "2026-09-25 Horodotska (Car).mp4"
     assert not store.track_path(track.stem).exists()
-    assert store.preview_path("2026-09-25 Horodotska (CX-5)").read_bytes() == b"preview"
+    assert store.preview_path("2026-09-25 Horodotska (Car)").read_bytes() == b"preview"
 
 
 def test_metadata_store_rename_trip_changing_only_letter_case(make_track, store):

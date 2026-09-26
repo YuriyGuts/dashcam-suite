@@ -12,7 +12,7 @@ Example config file:
     hwaccel_options = "-hwaccel vulkan"
     video_codec_options = "-c:v libx265 -crf 28 -preset medium"
     job_count = 3
-    car_model = "CX-5"
+    car_model = "Car"
 """
 
 import dataclasses
@@ -89,7 +89,7 @@ def get_platform_defaults() -> Config:
         "audio_codec_options": "-c:a aac -b:a 128k",
         "job_count": 2,
         "min_trip_gap_hours": 3,
-        "car_model": "CX-5",
+        "car_model": "Car",
         "metadata_dir": ".metadata",
         "library_dir": None,
         "timezone": "Europe/Kyiv",

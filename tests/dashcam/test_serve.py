@@ -807,7 +807,7 @@ STUSA = {"name": "вулиця Василя Стуса", "distance_m": 967}
 @pytest.fixture
 def rename_server(library_dir, store):
     """Run a server that allows renaming, and yield its base URL."""
-    app = serve.VisualizerApp(library_dir, store.root, car_model="CX-5", allow_rename=True)
+    app = serve.VisualizerApp(library_dir, store.root, car_model="Car", allow_rename=True)
     http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=http_server.serve_forever, daemon=True)
     thread.start()
@@ -973,7 +973,7 @@ def test_server_api_suggestion(rename_server, add_trip_with_video):
 
     # THEN the suggestion is returned
     assert status == 200
-    assert json.loads(body) == {"filename": "2026-09-25 Vasylia Stusa (CX-5).mp4"}
+    assert json.loads(body) == {"filename": "2026-09-25 Vasylia Stusa (Car).mp4"}
 
 
 def test_server_api_suggestion_for_unknown_trip(rename_server):

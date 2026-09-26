@@ -256,7 +256,7 @@ def test_plan_extraction_with_renamed_video(store, make_video_file, save_track_f
     # GIVEN a track whose video was renamed
     old_path = make_video_file("2026-09-25 Trip 11-17.mp4")
     save_track_for(old_path)
-    new_path = old_path.rename(old_path.with_name("2026-09-25 Horodotska (CX-5).mp4"))
+    new_path = old_path.rename(old_path.with_name("2026-09-25 Horodotska (Car).mp4"))
 
     # WHEN planning
     planned = extract.plan_extraction([new_path], store, force=False)

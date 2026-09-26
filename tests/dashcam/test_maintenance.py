@@ -95,17 +95,17 @@ def test_run_doctor_fixes_track_filename(library_dir, store, add_trip):
 def test_run_doctor_reconnects_renamed_video(library_dir, store, add_trip):
     # GIVEN a video renamed by hand
     video_path, _ = add_trip("2026-09-25 Trip.mp4")
-    video_path.rename(library_dir / "2026-09-25 Horodotska (CX-5).mp4")
+    video_path.rename(library_dir / "2026-09-25 Horodotska (Car).mp4")
 
     # WHEN running the doctor with fixes
     run_doctor(library_dir, store, apply_fixes=True)
 
     # THEN the track follows the video and the index is rebuilt
-    assert store.load_track("2026-09-25 Horodotska (CX-5)").video_filename == (
-        "2026-09-25 Horodotska (CX-5).mp4"
+    assert store.load_track("2026-09-25 Horodotska (Car)").video_filename == (
+        "2026-09-25 Horodotska (Car).mp4"
     )
     index = json.loads(store.index_path.read_text(encoding="utf-8"))
-    assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Horodotska (CX-5)"]
+    assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Horodotska (Car)"]
 
 
 def test_run_doctor_without_fix_changes_nothing(library_dir, store, add_trip, caplog):
@@ -300,7 +300,7 @@ def test_forget_trips(store, add_trip):
         ("2026-09-25 Trip.json", "2026-09-25 Trip"),
         ("2026-09-25 Trip", "2026-09-25 Trip"),
         ("/videos/2026-09-25 Trip.MOV", "2026-09-25 Trip"),
-        ("2026-09-25 Trip (CX-5)", "2026-09-25 Trip (CX-5)"),
+        ("2026-09-25 Trip (Car)", "2026-09-25 Trip (Car)"),
     ],
 )
 def test_resolve_stem(name, expected):

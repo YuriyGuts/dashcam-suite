@@ -91,13 +91,13 @@ def test_console_log_handler_highlights_quoted_names_on_terminal():
 
 def test_console_log_handler_keeps_brackets():
     # GIVEN a message with square brackets, which rich would read as markup
-    record = make_record("Renamed: [bold]A[/bold] (CX-5) [fixable: rename it]")
+    record = make_record("Renamed: [bold]A[/bold] (Car) [fixable: rename it]")
 
     # WHEN writing it
     output = emit(record)
 
     # THEN the brackets are printed as they are
-    assert "Renamed: [bold]A[/bold] (CX-5) [fixable: rename it]" in output
+    assert "Renamed: [bold]A[/bold] (Car) [fixable: rename it]" in output
 
 
 def test_console_log_handler_indents_continuation_lines():
