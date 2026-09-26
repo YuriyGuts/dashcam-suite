@@ -631,3 +631,28 @@ def test_extract_video_with_sample_video(config, tmp_path):
     assert first_sample.time.isoformat() == "2026-09-23T18:42:03+03:00"
     assert first_sample.lat == pytest.approx(49.81, abs=0.01)
     assert first_sample.lon == pytest.approx(24.03, abs=0.01)
+
+
+def test_extract_video_probes_with_configured_ffprobe(monkeypatch, config, tmp_path):
+    # GIVEN a config with a custom ffprobe
+    probed_executables = []
+
+    def fake_probe_video(path, ffprobe_executable):
+        probed_executables.append(ffprobe_executable)
+        raise RuntimeError("stop after probing")
+
+    monkeypatch.setattr("dashcam.extract.video.probe_video", fake_probe_video)
+    job_def = extract.ExtractJobDefinition(
+        video_path=tmp_path / "2026-09-25 Trip.mp4",
+        fingerprint="100:abc",
+        metadata_dir=tmp_path / ".metadata",
+        config=dataclasses.replace(config, ffprobe_executable="/opt/ffmpeg/bin/ffprobe"),
+        make_preview=False,
+    )
+
+    # WHEN extracting the video
+    with pytest.raises(RuntimeError, match="stop after probing"):
+        extract.extract_video(job_def)
+
+    # THEN the custom ffprobe reads the video
+    assert probed_executables == ["/opt/ffmpeg/bin/ffprobe"]

@@ -106,6 +106,7 @@ def config():
     return dataclasses.replace(
         get_platform_defaults(),
         ffmpeg_executable="ffmpeg",
+        ffprobe_executable="ffprobe",
         hwaccel_options="-hwaccel videotoolbox",
         video_codec_options="-c:v libx265 -crf 30 -preset fast",
         audio_codec_options="-c:a aac -b:a 128k",
@@ -171,7 +172,7 @@ def fake_ffmpeg(monkeypatch):
     ffmpeg = FakeFfmpeg()
     monkeypatch.setattr("dashcam.encode.subprocess.run", ffmpeg.run)
     monkeypatch.setattr("dashcam.video.iter_ffmpeg_progress", ffmpeg.iter_progress)
-    monkeypatch.setattr("dashcam.video.probe_duration", lambda path: 60.0)
+    monkeypatch.setattr("dashcam.video.probe_duration", lambda path, ffprobe_executable: 60.0)
     return ffmpeg
 
 

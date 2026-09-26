@@ -319,7 +319,7 @@ def test_run_encode_job_logs_progress_every_interval(config, tmp_path, monkeypat
             yield video.FfmpegProgress(output_time_s=report_number * 6.0, speed=1.5)
 
     monkeypatch.setattr("dashcam.video.iter_ffmpeg_progress", iter_progress)
-    monkeypatch.setattr("dashcam.video.probe_duration", lambda path: 60.0)
+    monkeypatch.setattr("dashcam.video.probe_duration", lambda path, ffprobe_executable: 60.0)
     job_def = encode.EncodeJobDefinition(
         raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
         output_path=tmp_path / "trip.mp4",
@@ -341,11 +341,35 @@ def test_run_encode_job_logs_progress_every_interval(config, tmp_path, monkeypat
     ]
 
 
+def test_run_encode_job_probes_durations_with_configured_ffprobe(
+    config, tmp_path, fake_ffmpeg, monkeypatch
+):
+    # GIVEN a config with a custom ffprobe
+    probed_executables = []
+
+    def fake_probe_duration(path, ffprobe_executable):
+        probed_executables.append(ffprobe_executable)
+        return 60.0
+
+    monkeypatch.setattr("dashcam.video.probe_duration", fake_probe_duration)
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=tmp_path / "trip.mp4",
+        config=dataclasses.replace(config, ffprobe_executable="/opt/ffmpeg/bin/ffprobe"),
+    )
+
+    # WHEN running the job
+    encode.run_encode_job(job_def)
+
+    # THEN the custom ffprobe reads the durations
+    assert probed_executables == ["/opt/ffmpeg/bin/ffprobe"]
+
+
 def test_run_encode_job_without_durations_still_encodes(
     config, tmp_path, fake_ffmpeg, monkeypatch, caplog
 ):
     # GIVEN a job whose raw video durations cannot be read
-    def failing_probe_duration(path):
+    def failing_probe_duration(path, ffprobe_executable):
         raise RuntimeError(f"Cannot read the duration of '{path}'")
 
     monkeypatch.setattr("dashcam.video.probe_duration", failing_probe_duration)

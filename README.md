@@ -70,8 +70,9 @@ min_trip_gap_hours = 3
 # Number of videos encoded or extracted in parallel. Tune to your CPU.
 job_count = 2
 
-# FFmpeg binary to run.
+# FFmpeg and FFprobe binaries to run.
 ffmpeg_executable = "ffmpeg"
+ffprobe_executable = "ffprobe"
 
 # Hardware decoding options (on macOS: "-hwaccel videotoolbox"). Set to "" to disable.
 hwaccel_options = "-hwaccel vulkan"

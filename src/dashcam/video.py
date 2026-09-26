@@ -16,9 +16,6 @@ from dashcam.overlay import NOMINAL_FRAME_WIDTH
 from dashcam.overlay import STRIP_HEIGHT
 from dashcam.overlay import GrayImage
 
-# Which FFprobe executable to run.
-FFPROBE_EXECUTABLE = "ffprobe"
-
 # How many bytes from the start and from the end of a file go into its fingerprint.
 FINGERPRINT_CHUNK_SIZE = 1024 * 1024
 
@@ -35,7 +32,7 @@ class VideoInfo:
     duration_s: float
 
 
-def probe_video(path: Path) -> VideoInfo:
+def probe_video(path: Path, ffprobe_executable: str) -> VideoInfo:
     """
     Read the resolution and duration of a video.
 
@@ -45,7 +42,7 @@ def probe_video(path: Path) -> VideoInfo:
         If the file cannot be read or has no video stream.
     """
     cmd = [
-        FFPROBE_EXECUTABLE,
+        ffprobe_executable,
         *["-v", "error"],
         *["-select_streams", "v:0"],
         *["-show_entries", "stream=width,height:format=duration"],
@@ -67,7 +64,7 @@ def probe_video(path: Path) -> VideoInfo:
     )
 
 
-def probe_duration(path: Path) -> float:
+def probe_duration(path: Path, ffprobe_executable: str) -> float:
     """
     Read the duration of a media file in seconds.
 
@@ -77,7 +74,7 @@ def probe_duration(path: Path) -> float:
         If the file cannot be read or has no duration.
     """
     cmd = [
-        FFPROBE_EXECUTABLE,
+        ffprobe_executable,
         *["-v", "error"],
         *["-show_entries", "format=duration"],
         *["-of", "default=noprint_wrappers=1:nokey=1"],

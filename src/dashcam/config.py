@@ -47,8 +47,9 @@ class Config:
     # `None` means it must be passed on the command line.
     library_dir: str | None
 
-    # Which FFmpeg executable to run.
+    # Which FFmpeg and FFprobe executables to run.
     ffmpeg_executable: str
+    ffprobe_executable: str
 
     # Hardware acceleration options for decoding. Leave blank ("") for none.
     hwaccel_options: str
@@ -82,6 +83,7 @@ def get_platform_defaults() -> Config:
     """Return the default settings for the current platform."""
     common_settings: dict[str, t.Any] = {
         "ffmpeg_executable": "ffmpeg",
+        "ffprobe_executable": "ffprobe",
         # Closed GOPs make every keyframe an IDR frame. Firefox only seeks efficiently to IDR
         # frames: with x265's default open GOPs, it decodes from the start of the video on every
         # seek, which takes up to a minute in a long trip.

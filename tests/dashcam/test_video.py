@@ -52,7 +52,7 @@ def test_probe_video(synthetic_video):
     # GIVEN a 3-second 2560x200 video
 
     # WHEN probing it
-    video_info = video.probe_video(synthetic_video)
+    video_info = video.probe_video(synthetic_video, "ffprobe")
 
     # THEN the resolution and duration are reported
     assert (video_info.width, video_info.height) == (2560, 200)
@@ -68,7 +68,7 @@ def test_probe_video_with_invalid_file(tmp_path):
     # WHEN probing it
     # THEN it fails with a readable error
     with pytest.raises(RuntimeError, match="Cannot read"):
-        video.probe_video(path)
+        video.probe_video(path, "ffprobe")
 
 
 @requires_ffmpeg
@@ -248,16 +248,20 @@ def test_compute_fingerprint_detects_changed_end(tmp_path):
 
 def test_probe_duration(monkeypatch, tmp_path):
     # GIVEN ffprobe reporting a duration
+    commands = []
+
     def fake_run(cmd, **kwargs):
+        commands.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="61.5\n", stderr="")
 
     monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
 
-    # WHEN probing the duration
-    duration_s = video.probe_duration(tmp_path / "segment.MP4")
+    # WHEN probing the duration with a custom ffprobe
+    duration_s = video.probe_duration(tmp_path / "segment.MP4", "/opt/ffmpeg/bin/ffprobe")
 
-    # THEN it is parsed
+    # THEN it is parsed, and the custom ffprobe is run
     assert duration_s == 61.5
+    assert commands[0][0] == "/opt/ffmpeg/bin/ffprobe"
 
 
 def test_probe_duration_of_unreadable_file(monkeypatch, tmp_path):
@@ -270,7 +274,7 @@ def test_probe_duration_of_unreadable_file(monkeypatch, tmp_path):
     # WHEN probing the duration
     # THEN the error names the file and the ffprobe error
     with pytest.raises(RuntimeError, match="segment.MP4.*Invalid data found"):
-        video.probe_duration(tmp_path / "segment.MP4")
+        video.probe_duration(tmp_path / "segment.MP4", "ffprobe")
 
 
 def test_get_error_tail_keeps_last_lines():

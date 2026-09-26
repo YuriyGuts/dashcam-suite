@@ -252,7 +252,7 @@ def extract_video(job_def: ExtractJobDefinition) -> metadata.Track:
     """Probe, decode, read, and clean one video."""
     video_path = job_def.video_path
     config = job_def.config
-    video_info = video.probe_video(video_path)
+    video_info = video.probe_video(video_path, config.ffprobe_executable)
     stat = video_path.stat()
 
     has_overlay = probe_overlay(video_path, video_info, config)

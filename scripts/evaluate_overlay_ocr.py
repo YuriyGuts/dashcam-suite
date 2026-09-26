@@ -190,7 +190,7 @@ def find_speed_mismatches(
 def evaluate_video(path: Path) -> None:
     """Read all sampled frames of a video with the OCR and report flagged readings."""
     config = load_config()
-    video_info = probe_video(path)
+    video_info = probe_video(path, config.ffprobe_executable)
     templates = overlay.load_glyph_templates()
     layout = overlay.get_nominal_layout()
 

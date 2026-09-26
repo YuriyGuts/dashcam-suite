@@ -350,7 +350,7 @@ def build_ffmpeg_command(
     ]
 
 
-def get_total_duration(segments: list[RawVideoSegment]) -> float | None:
+def get_total_duration(segments: list[RawVideoSegment], ffprobe_executable: str) -> float | None:
     """
     Sum the durations of the raw videos.
 
@@ -360,7 +360,7 @@ def get_total_duration(segments: list[RawVideoSegment]) -> float | None:
         The total duration in seconds, or None if a duration cannot be read.
     """
     try:
-        return sum(video.probe_duration(segment.path) for segment in segments)
+        return sum(video.probe_duration(segment.path, ffprobe_executable) for segment in segments)
     except (OSError, RuntimeError) as exc:
         LOGGER.warning(f"Cannot compute the encoding progress: {exc}")
         return None
@@ -431,7 +431,7 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
     """
     output_path = job_def.output_path
     partial_output_path = metadata.get_partial_path(output_path)
-    total_duration_s = get_total_duration(job_def.raw_segments)
+    total_duration_s = get_total_duration(job_def.raw_segments, job_def.config.ffprobe_executable)
     duration_text = "" if total_duration_s is None else f", {total_duration_s / 60:.0f} min"
     LOGGER.info(f"Encoding: {output_path.name} ({len(job_def.raw_segments)} files{duration_text})")
 
