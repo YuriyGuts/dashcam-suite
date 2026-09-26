@@ -1,0 +1,30 @@
+[project]
+name = "dashcam"
+version = "0.1.0"
+description = "Dashcam video toolkit: merge SD card segments, extract GPS tracks from the overlay, and visualize routes."
+readme = "docs/SPEC.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "ty>=0.0.1a1",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<1"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
