@@ -70,25 +70,29 @@ Port of `dashcam-encode`.
 - Localities: the place with the smallest distance relative to its radius (by place type, growing with population); none if the point is outside all radii.
 - Incremental: a track is re-enriched when it has no street list, its located samples changed, the OSM data changed, or the enricher version increased. `--force` re-enriches all tracks. `extract --reclean` and `--only` keep the street list; `enrich` and `doctor` detect whether it is outdated.
 
-### `dashcam rename --suggest [--all]`
+### `dashcam rename [DIR] [--metadata-dir PATH] [--suggest] [--all] [--yes]`
 
-- Pattern: `YYYY-mm-dd <streets> (<car model>).mp4`. Car model defaults to `CX-5` (config override).
+- Pattern: `YYYY-mm-dd <streets> (<car model>).mp4`, streets separated by `, `. Car model defaults to `CX-5` (config override). The extension of the video is kept.
 - ASCII only. Whole filename (including extension) at most 140 characters.
 - Streets:
   - In travel order. Stretches under ~300 m and consecutive repeats are dropped.
   - If the name is too long, keep the first, the last, and the longest streets in between, in travel order.
   - Name source: OSM `name:en`, else KMU 2010 transliteration of `name`.
   - All street-type words are dropped (e.g. `vulytsia`, `prospekt`, `Street`, `Avenue`).
-  - Highways use their ref (`M06`).
-- Collisions: the first trip keeps the plain name; later ones get `(1)`, `(2)`, … before the car model.
+  - Motorways, trunks, and roads without a name use their ref, transliterated and without spaces or hyphens (`М-06` → `M06`). City streets that carry a ref keep their name.
+  - Characters not allowed in filenames (`/ \ : * ? " < > |`) are removed.
+- Collisions: the first trip (by date and start time) keeps the plain name; later ones get `(1)`, `(2)`, … before the car model. Names of existing videos and tracks (including unreachable ones) count as taken.
 - Fallback for trips without usable GPS: `YYYY-mm-dd Trip HH-MM (<car model>).mp4`.
-- Targets trips still named `Trip …` unless `--all` is given.
-- Shows an old → new table and asks for confirmation: yes, no, or edit individually.
+- Targets trips still named `Trip HH-MM` unless `--all` is given. Trips whose street list is missing or older than their samples are skipped with a hint to run `enrich`.
+- Without options, prints the old → new table only. `--suggest` asks for confirmation: yes, no, or edit individually (Enter accepts, `-` skips, or type a name; typed names are validated). The end of input counts as no. `--yes` applies without asking.
 - Renames the video, its track, and its preview together.
 
 ### `dashcam import`
 
-Runs `encode` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode` options plus `--out DIR` and `--no-rename`.
+Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode trips` options plus `--out DIR` (default: current directory), `--metadata-dir` (default: `.metadata` inside `--out`), and `--no-rename`.
+
+- `--dry-run` only prints the encoding plan.
+- Without OSM data, `enrich` and `rename` are skipped with a hint to run `enrich --update-osm`; the large download is never started implicitly.
 
 ### `dashcam status [DIR]` and `dashcam forget VIDEO|STEM`
 

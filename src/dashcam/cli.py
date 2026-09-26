@@ -21,6 +21,14 @@ Download the OpenStreetMap data, then match all tracks in the default metadata d
 (see `dashcam.config`) to streets:
 > dashcam enrich --update-osm
 
+Suggest street-based names for the trips in ~/Videos/Dashcam still named "Trip HH-MM", and
+rename them after confirmation:
+> dashcam rename ~/Videos/Dashcam --suggest
+
+Import new trips from the SD card into ~/Videos/Dashcam: encode, extract, match streets, and
+suggest names:
+> dashcam import --out ~/Videos/Dashcam
+
 Browse the trips in ~/Videos/Dashcam on a map at http://127.0.0.1:8765/:
 > dashcam serve ~/Videos/Dashcam
 """
@@ -33,7 +41,9 @@ from pathlib import Path
 from dashcam import encode
 from dashcam import enrich
 from dashcam import extract
+from dashcam import importer
 from dashcam import maintenance
+from dashcam import rename
 from dashcam import serve
 from dashcam.config import Config
 from dashcam.config import load_config
@@ -41,6 +51,62 @@ from dashcam.system import configure_logging
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
+
+
+def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config) -> None:
+    """Add the options that group raw videos into trips and set the parallelism."""
+    parser.add_argument(
+        "--min-trip-gap-hours",
+        metavar="TG",
+        help=(
+            "The minimum time difference (in hours) between consecutive files "
+            "for them to be considered separate trips."
+        ),
+        type=float,
+        required=False,
+        default=config.min_trip_gap_hours,
+    )
+    parser.add_argument(
+        "--job-count",
+        metavar="JC",
+        help=(
+            "The maximum number of trips allowed to be encoded in parallel. "
+            "Adjust this number to change system resource utilization."
+        ),
+        type=int,
+        required=False,
+        default=config.job_count,
+    )
+
+
+def add_raw_video_arguments(parser: argparse.ArgumentParser, config: Config) -> None:
+    """Add the options that locate and check the raw videos on the SD card."""
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Print out the discovered trips or segments, but do not run ffmpeg for actual encoding."
+        ),
+    )
+    parser.add_argument(
+        "--raw-video-dir",
+        metavar="PATH",
+        help=(
+            f"Path to the raw video directory on the SD card (default: '{config.raw_video_dir}')."
+        ),
+        type=Path,
+        required=False,
+        default=Path(config.raw_video_dir),
+    )
+    parser.add_argument(
+        "--skip-raw-video-validation",
+        action="store_true",
+        help=(
+            "Do not check the raw videos for readability. This is faster, "
+            "but may result in abruptly cut encoded videos in case of "
+            "corrupted files."
+        ),
+    )
 
 
 def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config) -> None:
@@ -54,28 +120,7 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
             "trips according to recording start times."
         ),
     )
-    parser_trips_cmd.add_argument(
-        "--min-trip-gap-hours",
-        metavar="TG",
-        help=(
-            "The minimum time difference (in hours) between consecutive files "
-            "for them to be considered separate trips."
-        ),
-        type=float,
-        required=False,
-        default=config.min_trip_gap_hours,
-    )
-    parser_trips_cmd.add_argument(
-        "--job-count",
-        metavar="JC",
-        help=(
-            "The maximum number of trips allowed to be encoded in parallel. "
-            "Adjust this number to change system resource utilization."
-        ),
-        type=int,
-        required=False,
-        default=config.job_count,
-    )
+    add_trip_grouping_arguments(parser_trips_cmd, config)
 
     parser_range_cmd = subparsers.add_parser(
         name="range",
@@ -114,25 +159,7 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
     )
 
     for subparser in [parser_trips_cmd, parser_range_cmd]:
-        subparser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help=(
-                "Print out the discovered trips or segments, but do not "
-                "run ffmpeg for actual encoding."
-            ),
-        )
-        subparser.add_argument(
-            "--raw-video-dir",
-            metavar="PATH",
-            help=(
-                f"Path to the raw video directory on the SD card "
-                f"(default: '{config.raw_video_dir}')."
-            ),
-            type=Path,
-            required=False,
-            default=Path(config.raw_video_dir),
-        )
+        add_raw_video_arguments(subparser, config)
         subparser.add_argument(
             "--output-dir",
             metavar="PATH",
@@ -140,15 +167,6 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
             type=Path,
             required=False,
             default=Path.cwd(),
-        )
-        subparser.add_argument(
-            "--skip-raw-video-validation",
-            action="store_true",
-            help=(
-                "Do not check the raw videos for readability. This is faster, "
-                "but may result in abruptly cut encoded videos in case of "
-                "corrupted files."
-            ),
         )
 
 
@@ -265,6 +283,60 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Enrich all tracks, including those whose street lists are up to date.",
     )
 
+    rename_parser = subparsers.add_parser(
+        name="rename",
+        help="Name trips after the streets they follow.",
+    )
+    add_video_dir_argument(rename_parser)
+    add_metadata_dir_argument(rename_parser, config)
+    rename_parser.add_argument(
+        "--suggest",
+        action="store_true",
+        help=(
+            "Show the suggested names and ask whether to apply them, skip them, or edit them "
+            "one by one. Without this option, the suggestions are only printed."
+        ),
+    )
+    rename_parser.add_argument(
+        "--all",
+        action="store_true",
+        dest="include_all",
+        help="Suggest names for all trips, not only those still named 'Trip HH-MM'.",
+    )
+    rename_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Apply the suggested names without asking.",
+    )
+
+    import_parser = subparsers.add_parser(
+        name="import",
+        help="Encode new trips from the SD card, extract and enrich them, and suggest names.",
+    )
+    add_trip_grouping_arguments(import_parser, config)
+    add_raw_video_arguments(import_parser, config)
+    import_parser.add_argument(
+        "--out",
+        metavar="DIR",
+        help="Trip video directory to import into (default: current directory).",
+        type=Path,
+        default=Path.cwd(),
+    )
+    import_parser.add_argument(
+        "--metadata-dir",
+        metavar="PATH",
+        help=(
+            f"Directory for tracks and the trip index (default: '{config.metadata_dir}', "
+            f"relative to the --out directory)."
+        ),
+        type=Path,
+    )
+    import_parser.add_argument(
+        "--no-rename",
+        action="store_true",
+        help="Do not suggest new names for the imported trips.",
+    )
+
     status_parser = subparsers.add_parser(
         name="status",
         help="List trips, unprocessed videos, and unreachable tracks.",
@@ -368,6 +440,23 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
     )
 
 
+def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
+    """Entry point for the `import` command."""
+    metadata_dir = parsed_args.metadata_dir or parsed_args.out / config.metadata_dir
+    parsed_args.out.mkdir(parents=True, exist_ok=True)
+    return importer.import_trips(
+        raw_video_dir=parsed_args.raw_video_dir,
+        output_dir=parsed_args.out,
+        metadata_dir=metadata_dir,
+        config=config,
+        min_trip_gap_hours=parsed_args.min_trip_gap_hours,
+        job_count=parsed_args.job_count,
+        dry_run=parsed_args.dry_run,
+        check_readability=not parsed_args.skip_raw_video_validation,
+        suggest_names=not parsed_args.no_rename,
+    )
+
+
 def main() -> None:
     configure_logging()
     try:
@@ -392,6 +481,17 @@ def main() -> None:
                 osm_file=parsed_args.osm_file,
                 force=parsed_args.force,
             )
+        elif parsed_args.command == "rename":
+            failed_count = rename.rename_trips(
+                video_dir=parsed_args.video_dir,
+                metadata_dir=parsed_args.metadata_dir,
+                config=config,
+                include_all=parsed_args.include_all,
+                interactive=parsed_args.suggest,
+                assume_yes=parsed_args.yes,
+            )
+        elif parsed_args.command == "import":
+            failed_count = run_import_command(parsed_args, config)
         elif parsed_args.command == "status":
             maintenance.print_status(
                 parsed_args.video_dir, parsed_args.metadata_dir, config.max_interpolation_gap_s

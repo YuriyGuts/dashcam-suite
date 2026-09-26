@@ -151,21 +151,10 @@ def forget_trips(names: list[str], metadata_dir: Path, max_interpolation_gap_s: 
     return missing_count
 
 
-def read_osm_timestamp(store: metadata.MetadataStore) -> str | None:
-    """Return the timestamp of the OSM data, or None if there is no usable OSM data."""
-    database = osm.open_database(store.root)
-    if database is None:
-        return None
-    try:
-        return database.osm_timestamp
-    finally:
-        database.close()
-
-
 def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Finding]:
     """Check track contents: format, names, versions, street lists, and suspicious results."""
     findings = []
-    osm_timestamp = read_osm_timestamp(store)
+    osm_timestamp = osm.read_database_timestamp(store.root)
     for stem, error in sorted(scan.unreadable_tracks.items()):
         findings.append(Finding(SEVERITY_ERROR, f"Track '{stem}.json' is unreadable: {error}"))
 

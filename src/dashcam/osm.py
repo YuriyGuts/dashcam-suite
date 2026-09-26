@@ -462,3 +462,14 @@ def open_database(metadata_dir: Path) -> RoadDatabase | None:
         database.close()
         return None
     return database
+
+
+def read_database_timestamp(metadata_dir: Path) -> str | None:
+    """Return the timestamp of the OSM data, or None if there is no usable OSM data."""
+    database = open_database(metadata_dir)
+    if database is None:
+        return None
+    try:
+        return database.osm_timestamp
+    finally:
+        database.close()

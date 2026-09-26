@@ -156,6 +156,8 @@ def recorded_calls(monkeypatch):
     monkeypatch.setattr("dashcam.cli.maintenance.run_doctor", recorder("run_doctor"))
     monkeypatch.setattr("dashcam.cli.serve.serve", recorder("serve", None))
     monkeypatch.setattr("dashcam.cli.enrich.enrich_tracks", recorder("enrich_tracks"))
+    monkeypatch.setattr("dashcam.cli.rename.rename_trips", recorder("rename_trips"))
+    monkeypatch.setattr("dashcam.cli.importer.import_trips", recorder("import_trips"))
     return calls
 
 
@@ -282,6 +284,94 @@ def test_main_runs_enrich_with_osm_file_and_force(monkeypatch, config, recorded_
     assert kwargs["update_osm"] is False
     assert kwargs["osm_file"] == Path("lviv.osm.pbf")
     assert kwargs["force"] is True
+
+
+def test_main_runs_rename_suggest_all(monkeypatch, config, recorded_calls):
+    # GIVEN `rename --suggest --all` with a directory
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["rename", "videos", "--suggest", "--all"])
+
+    # THEN all trips are offered for renaming interactively
+    name, _, kwargs = recorded_calls[0]
+    assert exit_code == 0
+    assert name == "rename_trips"
+    assert kwargs["video_dir"] == Path("videos")
+    assert kwargs["include_all"] is True
+    assert kwargs["interactive"] is True
+    assert kwargs["assume_yes"] is False
+
+
+def test_main_runs_rename_without_options(monkeypatch, config, recorded_calls):
+    # GIVEN `rename` alone
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["rename"])
+
+    # THEN only placeholder names are targeted, without applying anything
+    kwargs = recorded_calls[0][2]
+    assert kwargs["include_all"] is False
+    assert kwargs["interactive"] is False
+    assert kwargs["assume_yes"] is False
+
+
+def test_main_runs_rename_with_yes(monkeypatch, config, recorded_calls):
+    run_main(monkeypatch, config, ["rename", "--yes"])
+
+    assert recorded_calls[0][2]["assume_yes"] is True
+
+
+def test_main_runs_import_with_metadata_under_out_dir(
+    monkeypatch, config, recorded_calls, tmp_path
+):
+    # GIVEN `import` into a new directory, with encode options
+    out_dir = tmp_path / "Dashcam"
+
+    # WHEN running the tool
+    exit_code = run_main(
+        monkeypatch,
+        config,
+        ["import", "--out", str(out_dir), "--raw-video-dir", "sd", "--job-count", "3"],
+    )
+
+    # THEN the directory is created and the metadata lives inside it
+    name, _, kwargs = recorded_calls[0]
+    assert exit_code == 0
+    assert name == "import_trips"
+    assert out_dir.is_dir()
+    assert kwargs["output_dir"] == out_dir
+    assert kwargs["metadata_dir"] == out_dir / config.metadata_dir
+    assert kwargs["raw_video_dir"] == Path("sd")
+    assert kwargs["job_count"] == 3
+    assert kwargs["suggest_names"] is True
+    assert kwargs["check_readability"] is True
+
+
+def test_main_runs_import_with_options(monkeypatch, config, recorded_calls, tmp_path):
+    # GIVEN `import` with an explicit metadata directory and without renaming
+
+    # WHEN running the tool
+    run_main(
+        monkeypatch,
+        config,
+        [
+            "import",
+            "--out",
+            str(tmp_path),
+            "--metadata-dir",
+            "meta",
+            "--no-rename",
+            "--dry-run",
+            "--skip-raw-video-validation",
+        ],
+    )
+
+    # THEN the options are passed on
+    kwargs = recorded_calls[0][2]
+    assert kwargs["metadata_dir"] == Path("meta")
+    assert kwargs["suggest_names"] is False
+    assert kwargs["dry_run"] is True
+    assert kwargs["check_readability"] is False
 
 
 def test_main_exits_with_error_without_osm_data(monkeypatch, config, tmp_path):
