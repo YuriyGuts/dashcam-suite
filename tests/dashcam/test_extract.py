@@ -186,6 +186,19 @@ def test_probe_overlay_with_camera_clock(fake_strips, config):
     assert has_overlay
 
 
+def test_probe_overlay_with_narrow_video(fake_strips, config):
+    # GIVEN a video narrower than the overlay can be read at, whose frames show the camera clock
+    strip = overlay.read_strip_image(OVERLAY_FIXTURE_DIR / "2026-09-23_60s.png")
+    fake_strips["frames"] = [(offset_s / 2, strip) for offset_s in range(20)]
+    video_info = video.VideoInfo(width=960, height=540, duration_s=10)
+
+    # WHEN probing it
+    has_overlay = extract.probe_overlay(Path("small.mp4"), video_info, config)
+
+    # THEN it is treated as having no overlay
+    assert not has_overlay
+
+
 def test_probe_overlay_without_camera_clock(fake_strips, config):
     # GIVEN a video without any overlay
     strip = overlay.read_strip_image(OVERLAY_FIXTURE_DIR / "2026-09-23_60s.png") * 0 + 90

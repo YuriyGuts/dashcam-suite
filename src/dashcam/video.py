@@ -3,6 +3,7 @@
 import dataclasses
 import hashlib
 import json
+import math
 import shlex
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
+from dashcam.overlay import NOMINAL_FRAME_WIDTH
 from dashcam.overlay import STRIP_HEIGHT
 from dashcam.overlay import GrayImage
 
@@ -160,15 +162,43 @@ def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
             raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=get_error_tail(stderr))
 
 
+def build_strip_filter(frame_width: int) -> str:
+    """
+    Build the ffmpeg filter that cuts the bottom strip of a frame, scaled to the nominal width.
+
+    For other widths, a strip of the proportional height is cut first, so that the strip after
+    scaling matches the overlay geometry of `NOMINAL_FRAME_WIDTH`.
+    """
+    crop_filter = f"crop=iw:{STRIP_HEIGHT}:0:ih-{STRIP_HEIGHT}"
+    if frame_width == NOMINAL_FRAME_WIDTH:
+        return crop_filter
+
+    scale_factor = NOMINAL_FRAME_WIDTH / frame_width
+    # Round up, so that the scaled strip is never shorter than `STRIP_HEIGHT`.
+    source_height = math.ceil(STRIP_HEIGHT / scale_factor)
+    scaled_height = round(source_height * scale_factor)
+    return (
+        f"crop=iw:{source_height}:0:ih-{source_height},"
+        f"scale={NOMINAL_FRAME_WIDTH}:{scaled_height}:flags=lanczos,"
+        f"{crop_filter}"
+    )
+
+
 def build_strip_reader_command(
     path: Path,
+    frame_width: int,
     sample_fps: float,
     ffmpeg_executable: str,
     hwaccel_options: str,
     start_s: float = 0.0,
     duration_s: float | None = None,
 ) -> list[str]:
-    """Build the ffmpeg command that outputs bottom strips of sampled frames as raw grayscale."""
+    """
+    Build the ffmpeg command that outputs bottom strips of sampled frames as raw grayscale.
+
+    The strips are `NOMINAL_FRAME_WIDTH` pixels wide, whatever the frame width.
+    """
+    strip_filter = build_strip_filter(frame_width)
     input_options = []
     if start_s > 0:
         input_options += ["-ss", f"{start_s:.3f}"]
@@ -183,7 +213,7 @@ def build_strip_reader_command(
         *input_options,
         *["-i", str(path)],
         *["-an", "-sn"],
-        *["-vf", f"fps={sample_fps},crop=iw:{STRIP_HEIGHT}:0:ih-{STRIP_HEIGHT},format=gray"],
+        *["-vf", f"fps={sample_fps},format=gray,{strip_filter}"],
         *["-f", "rawvideo", "-"],
     ]
 
@@ -200,6 +230,9 @@ def iter_overlay_strips(
     """
     Decode the video and yield the bottom strip of frames sampled at `sample_fps`.
 
+    Strips are scaled to `NOMINAL_FRAME_WIDTH`, so `width` (the frame width) only selects the part
+    of the frame to cut.
+
     Yields
     ------
     tuple[float, GrayImage]
@@ -207,13 +240,14 @@ def iter_overlay_strips(
     """
     cmd = build_strip_reader_command(
         path=path,
+        frame_width=width,
         sample_fps=sample_fps,
         ffmpeg_executable=ffmpeg_executable,
         hwaccel_options=hwaccel_options,
         start_s=start_s,
         duration_s=duration_s,
     )
-    frame_size = width * STRIP_HEIGHT
+    frame_size = NOMINAL_FRAME_WIDTH * STRIP_HEIGHT
 
     # Collect errors in a file: a pipe could fill up and block ffmpeg.
     with tempfile.TemporaryFile() as stderr_file:
@@ -225,7 +259,8 @@ def iter_overlay_strips(
                     frame_bytes = proc.stdout.read(frame_size)
                     if len(frame_bytes) < frame_size:
                         break
-                    strip = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(STRIP_HEIGHT, width)
+                    strip_pixels = np.frombuffer(frame_bytes, dtype=np.uint8)
+                    strip = strip_pixels.reshape(STRIP_HEIGHT, NOMINAL_FRAME_WIDTH)
                     yield start_s + frame_index / sample_fps, strip
                     frame_index += 1
             except GeneratorExit:

@@ -145,6 +145,13 @@ def collapse_readings(
 
 def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config) -> bool:
     """Check a few frames spread over the video for a readable camera clock."""
+    if video_info.width < overlay.MIN_FRAME_WIDTH:
+        LOGGER.warning(
+            f"{video_path.name}: the video is {video_info.width} pixels wide, but the overlay "
+            f"can only be read at {overlay.MIN_FRAME_WIDTH} pixels or more"
+        )
+        return False
+
     layout = overlay.get_nominal_layout()
     clock_count = 0
     for frame_number in range(PROBE_FRAME_COUNT):

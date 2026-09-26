@@ -29,10 +29,17 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 
+# Frame width that all geometry below is measured in. The overlay scales with the frame width, so
+# strips of other videos are scaled to this width before reading.
+NOMINAL_FRAME_WIDTH = 2560
+
+# Narrower frames lose so much detail that characters are misread with high scores.
+MIN_FRAME_WIDTH = 1280
+
 # Height of the strip cut from the bottom of each frame. All coordinates below are relative to it.
 STRIP_HEIGHT = 64
 
-# Character grid geometry (in pixels) for 2560-pixel-wide videos.
+# Character grid geometry (in pixels).
 CELL_PITCH = 18
 CELL_WIDTH = 18
 CELL_HEIGHT = 28
@@ -138,7 +145,7 @@ class OverlayReading:
 
 
 def get_nominal_layout() -> OverlayLayout:
-    """Return the layout of 2560-pixel-wide VIOFO videos (both 1440 and 1600 pixels high)."""
+    """Return the layout of VIOFO strips scaled to `NOMINAL_FRAME_WIDTH` (any frame height)."""
     return OverlayLayout(
         left_field=FieldLayout(*NOMINAL_LEFT_FIELD_ORIGIN, cell_count=LEFT_FIELD_CELL_COUNT),
         right_field=FieldLayout(*NOMINAL_RIGHT_FIELD_ORIGIN, cell_count=RIGHT_FIELD_CELL_COUNT),

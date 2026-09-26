@@ -1,5 +1,7 @@
+import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +12,25 @@ requires_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="ffmpeg not installed",
 )
+
+OVERLAY_FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "overlay"
+OVERLAY_LABELS = json.loads((OVERLAY_FIXTURE_DIR / "labels.json").read_text(encoding="utf-8"))
+
+
+def make_video_from_strip(strip_path: Path, video_path: Path, width: int, height: int) -> None:
+    """Make a 1-second video of a 2560x1440 frame with the strip at the bottom, scaled."""
+    frame_filter = (
+        f"pad=2560:1440:0:{1440 - overlay.STRIP_HEIGHT}:color=gray,scale={width}:{height}"
+    )
+    cmd = [
+        "ffmpeg",
+        *["-v", "error"],
+        *["-loop", "1", "-framerate", "10", "-t", "1", "-i", str(strip_path)],
+        *["-vf", frame_filter],
+        *["-c:v", "libx264", "-pix_fmt", "yuv420p"],
+        str(video_path),
+    ]
+    subprocess.run(cmd, check=True)
 
 
 @pytest.fixture
@@ -122,12 +143,60 @@ def test_iter_overlay_strips_with_invalid_file(tmp_path):
         list(video.iter_overlay_strips(path, 2560, 2, "ffmpeg", ""))
 
 
+@requires_ffmpeg
+@pytest.mark.parametrize("width, height", [(2560, 1440), (1920, 1080), (1280, 720)])
+@pytest.mark.parametrize("filename", ["2024-02-11_60s.png", "2026-09-25_100s.png"])
+def test_iter_overlay_strips_reads_scaled_videos(tmp_path, filename, width, height):
+    # GIVEN a video with a labeled overlay, scaled down from 2560 pixels wide
+    video_path = tmp_path / "scaled.mp4"
+    make_video_from_strip(OVERLAY_FIXTURE_DIR / filename, video_path, width, height)
+
+    # WHEN reading its first strip
+    strips = video.iter_overlay_strips(
+        video_path,
+        width=width,
+        sample_fps=2,
+        ffmpeg_executable="ffmpeg",
+        hwaccel_options="",
+    )
+    _, strip = next(strips)
+    strips.close()
+    reading = overlay.read_overlay(strip, overlay.get_nominal_layout())
+
+    # THEN the strip has the nominal size and both fields match the label
+    assert strip.shape == (overlay.STRIP_HEIGHT, overlay.NOMINAL_FRAME_WIDTH)
+    assert reading.left_text == OVERLAY_LABELS[filename]["left"]
+    assert reading.right_text == OVERLAY_LABELS[filename]["right"]
+    assert reading.is_left_text_reliable
+    assert reading.is_right_text_reliable
+
+
+@pytest.mark.parametrize(
+    "frame_width, expected_filter",
+    [
+        (2560, "crop=iw:64:0:ih-64"),
+        (1920, "crop=iw:48:0:ih-48,scale=2560:64:flags=lanczos,crop=iw:64:0:ih-64"),
+        (1366, "crop=iw:35:0:ih-35,scale=2560:66:flags=lanczos,crop=iw:64:0:ih-64"),
+        (3840, "crop=iw:96:0:ih-96,scale=2560:64:flags=lanczos,crop=iw:64:0:ih-64"),
+    ],
+)
+def test_build_strip_filter(frame_width, expected_filter):
+    # GIVEN a frame width
+
+    # WHEN building the strip filter
+    strip_filter = video.build_strip_filter(frame_width)
+
+    # THEN strips of other widths are cut in proportion and scaled to the nominal width
+    assert strip_filter == expected_filter
+
+
 def test_build_strip_reader_command():
     # GIVEN a hardware acceleration option and a time range
 
     # WHEN building the ffmpeg command
     cmd = video.build_strip_reader_command(
         path=video.Path("/videos/trip.mp4"),
+        frame_width=2560,
         sample_fps=2,
         ffmpeg_executable="ffmpeg",
         hwaccel_options="-hwaccel vulkan",

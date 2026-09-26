@@ -41,7 +41,7 @@ def test_read_overlay_with_blank_strip():
 
 
 def test_read_overlay_with_narrow_strip():
-    # GIVEN a strip narrower than the overlay layout (e.g. a 1080p video)
+    # GIVEN a strip narrower than the overlay layout
     strip = np.full((overlay.STRIP_HEIGHT, 1920), 90, dtype=np.uint8)
 
     # WHEN reading it

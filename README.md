@@ -92,7 +92,7 @@ If you haven't recorded anything yet, set up the camera first:
 - Attach the GPS mount.
 - Turn on the date/time, GPS and speed stamps.
 - Use km/h for the speed unit.
-- Record at a resolution 2560 pixels wide (2560×1440 or 2560×1600).
+- Record at 2560×1440 or 2560×1600.
 - Set the camera clock to local time.
 
 The clip length doesn't matter, since clips are merged anyway.
@@ -215,7 +215,7 @@ The tool was built around one camera and has only been tested with its footage. 
 46 KM/H N49.810205 E24.028992          VIOFO A119 V3          2026/09/23 18:42:06
 ```
 
-**The video is 2560 pixels wide.** The character positions are in pixels for that width (1440 or 1600 pixels high). Anything recorded at another resolution, scaled down or cropped afterwards is treated as having no overlay.
+**The video is at least 1280 pixels wide.** The tool is tested with 2560-pixel-wide recordings and with copies scaled down to 1280 pixels. Narrower videos are treated as having no overlay. Cropped videos and other recording resolutions are untested.
 
 **The burnt-in overlay is the only GPS source.** GPS data that may be embedded in the original SD card files is ignored.
 
@@ -237,7 +237,6 @@ Supporting another camera means teaching the OCR module about the camera's text 
 
 - `import` recognizes a trip it has already encoded only while the trip still has its placeholder name. After renaming, an uncleared SD card produces a duplicate trip on the next import. Delete the videos from the SD card after each import.
 - Renaming from the web app only works when the server listens on `127.0.0.1`.
-- Only videos 2560 pixels wide are supported for now.
 
 ## Development
 
