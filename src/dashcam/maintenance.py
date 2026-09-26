@@ -274,6 +274,15 @@ def check_videos(
     renamed_track_stems = set()
 
     for stem, video_path in sorted(scan.video_paths_by_stem.items()):
+        length_problem = metadata.get_filename_length_problem(video_path.name)
+        if length_problem is not None:
+            findings.append(
+                Finding(
+                    SEVERITY_ERROR,
+                    f"Video '{video_path.name}' has a name that is too long: {length_problem}",
+                )
+            )
+            continue
         if stem not in scan.tracks_by_stem and stem in declared_stems:
             continue
         track = scan.tracks_by_stem.get(stem)
@@ -321,7 +330,7 @@ def check_videos(
     return findings
 
 
-def check_files(store: metadata.MetadataStore) -> list[Finding]:
+def check_files(store: metadata.MetadataStore, library_dir: Path) -> list[Finding]:
     """Check the index, previews, and leftover temporary files."""
     findings = []
 
@@ -362,6 +371,8 @@ def check_files(store: metadata.MetadataStore) -> list[Finding]:
         if directory.is_dir()
         for path in directory.glob(".*.partial*")
     ]
+    if library_dir.is_dir():
+        leftover_files += library_dir.glob(metadata.PARTIAL_FILE_GLOB)
     for path in sorted(orphan_previews + leftover_files):
         findings.append(
             Finding(
@@ -401,7 +412,7 @@ def run_doctor(
             )
 
     # File checks run last, so that the index reflects any renames made above.
-    file_findings = check_files(store)
+    file_findings = check_files(store, library_dir)
     if apply_fixes:
         for finding in file_findings:
             if finding.fix is not None:

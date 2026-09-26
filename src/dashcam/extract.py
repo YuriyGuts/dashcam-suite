@@ -106,6 +106,18 @@ def find_videos(library_dir: Path, include: list[str], exclude: list[str]) -> li
     return video_paths
 
 
+def skip_too_long_names(video_paths: list[Path]) -> list[Path]:
+    """Report and drop the videos whose names do not fit the filename length limit."""
+    kept_paths = []
+    for path in video_paths:
+        problem = metadata.get_filename_length_problem(path.name)
+        if problem is None:
+            kept_paths.append(path)
+        else:
+            LOGGER.error(f"Skipping '{path.name}': the name is too long, {problem}")
+    return kept_paths
+
+
 def collapse_readings(
     readings: list[tuple[float, overlay.OverlayReading]],
 ) -> list[cleaning.RawSample]:
@@ -201,7 +213,7 @@ def read_all_frames(
 def make_preview(video_path: Path, preview_path: Path, config: Config) -> None:
     """Encode a low-resolution H.264 preview of the video."""
     preview_path.parent.mkdir(parents=True, exist_ok=True)
-    partial_path = preview_path.with_name(f".{preview_path.name}.partial")
+    partial_path = metadata.get_partial_path(preview_path)
     cmd = [
         config.ffmpeg_executable,
         "-nostdin",
@@ -450,6 +462,9 @@ def extract_videos(
             LOGGER.warning(f"Video not found in '{library_dir}': {name}")
         force = True
     LOGGER.info(f"Found {len(video_paths)} videos in '{library_dir}'")
+    found_count = len(video_paths)
+    video_paths = skip_too_long_names(video_paths)
+    skipped_count = found_count - len(video_paths)
 
     to_extract = plan_extraction(video_paths, store, force)
     job_defs = [
@@ -460,7 +475,7 @@ def extract_videos(
         remaining_paths = [path for path in video_paths if path not in extracted_paths]
         job_defs += plan_missing_previews(remaining_paths, store, config)
 
-    failed_count = 0
+    failed_count = skipped_count
     if job_defs:
         process_count = min(config.job_count, len(job_defs))
         LOGGER.info(f"Processing {len(job_defs)} videos with {process_count} parallel jobs")

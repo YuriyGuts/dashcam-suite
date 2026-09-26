@@ -8,7 +8,7 @@ Layout of the metadata directory:
     tracks/<video stem>.json    One track per video. Hand-editable.
     previews/<video stem>.mp4   Optional low-resolution previews for browsers without HEVC.
     osm/                        Filtered OSM roads and localities (see `dashcam.osm`).
-    trash/                      Replaced or forgotten tracks and previews.
+    trash/<timestamp>/          Replaced or forgotten tracks and previews.
 
 A track file has a pretty-printed header and one sample per line, so it can be read, edited,
 and diffed in a text editor. The video filename is the only source of truth for the trip name
@@ -20,6 +20,7 @@ import datetime
 import json
 import os
 import re
+import secrets
 import shutil
 import typing as t
 from pathlib import Path
@@ -44,10 +45,51 @@ PREVIEWS_DIR_NAME = "previews"
 TRASH_DIR_NAME = "trash"
 INDEX_FILENAME = "index.json"
 ENCODED_SEGMENTS_FILENAME = "encoded_segments.json"
+TRACK_EXTENSION = ".json"
+PREVIEW_EXTENSION = ".mp4"
+
+# The longest filename in the library and metadata directories, in UTF-8 bytes. This is the
+# limit of eCryptfs, which encrypted NAS shared folders use.
+MAX_FILENAME_BYTES = 143
+
+# Files being written get a short random name, so that their length does not depend on the
+# trip name. `doctor` deletes the ones left behind by an interrupted write.
+PARTIAL_FILE_PREFIX = ".tmp-"
+PARTIAL_FILE_SUFFIX = ".partial"
+PARTIAL_FILE_GLOB = f"{PARTIAL_FILE_PREFIX}*{PARTIAL_FILE_SUFFIX}"
 
 
 class TrackFormatError(ValueError):
     """Raised when a track file cannot be parsed."""
+
+
+def get_partial_path(path: Path) -> Path:
+    """Return a temporary path next to `path`, to write it and then rename it atomically."""
+    return path.with_name(f"{PARTIAL_FILE_PREFIX}{secrets.token_hex(4)}{PARTIAL_FILE_SUFFIX}")
+
+
+def get_max_video_filename_bytes(extension: str) -> int:
+    """Return the longest video filename whose track and preview filenames fit the limit."""
+    longest_extension_length = max(len(TRACK_EXTENSION), len(PREVIEW_EXTENSION), len(extension))
+    return MAX_FILENAME_BYTES - longest_extension_length + len(extension)
+
+
+def get_filename_length_problem(video_filename: str) -> str | None:
+    """
+    Check that a video filename, and the names of its track and preview, fit the limit.
+
+    Returns
+    -------
+    str | None
+        What is wrong with it, or None if it is fine.
+    """
+    max_bytes = get_max_video_filename_bytes(Path(video_filename).suffix)
+    filename_bytes = len(video_filename.encode("utf-8"))
+    if filename_bytes <= max_bytes:
+        return None
+    if video_filename.isascii():
+        return f"use at most {max_bytes} characters ({filename_bytes} now)"
+    return f"use at most {max_bytes} bytes in UTF-8 ({filename_bytes} now)"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -347,17 +389,19 @@ class MetadataStore:
         self.tracks_dir.mkdir(parents=True, exist_ok=True)
 
     def track_path(self, stem: str) -> Path:
-        return self.tracks_dir / f"{stem}.json"
+        return self.tracks_dir / f"{stem}{TRACK_EXTENSION}"
 
     def preview_path(self, stem: str) -> Path:
-        return self.previews_dir / f"{stem}.mp4"
+        return self.previews_dir / f"{stem}{PREVIEW_EXTENSION}"
 
     def list_track_paths(self) -> list[Path]:
         """List the track files, sorted by name."""
         if not self.tracks_dir.is_dir():
             return []
         return sorted(
-            path for path in self.tracks_dir.glob("*.json") if not path.name.startswith(".")
+            path
+            for path in self.tracks_dir.glob(f"*{TRACK_EXTENSION}")
+            if not path.name.startswith(".")
         )
 
     def load_track(self, stem: str) -> Track:
@@ -373,13 +417,15 @@ class MetadataStore:
 
     def write_track_file(self, track: Track, path: Path) -> None:
         """Write a track to the given path atomically."""
-        partial_path = path.with_name(f".{path.name}.partial")
+        partial_path = get_partial_path(path)
         partial_path.write_text(dump_track(track), encoding="utf-8")
         os.replace(partial_path, path)
 
     def move_to_trash(self, stem: str) -> list[Path]:
         """
-        Move the track and preview of a video stem to the trash.
+        Move the track and preview of a video stem to a timestamped folder in the trash.
+
+        The files keep their names, so that they fit the filename length limit.
 
         Returns
         -------
@@ -387,15 +433,26 @@ class MetadataStore:
             The new locations of the moved files.
         """
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        paths = [path for path in (self.track_path(stem), self.preview_path(stem)) if path.exists()]
+        if not paths:
+            return []
+        trash_dir = self.get_free_trash_dir(timestamp, [path.name for path in paths])
+        trash_dir.mkdir(parents=True, exist_ok=True)
         moved_paths = []
-        for path in (self.track_path(stem), self.preview_path(stem)):
-            if not path.exists():
-                continue
-            self.trash_dir.mkdir(parents=True, exist_ok=True)
-            trash_path = self.trash_dir / f"{path.stem} ({timestamp}){path.suffix}"
+        for path in paths:
+            trash_path = trash_dir / path.name
             shutil.move(path, trash_path)
             moved_paths.append(trash_path)
         return moved_paths
+
+    def get_free_trash_dir(self, timestamp: str, filenames: list[str]) -> Path:
+        """Return a trash folder for the timestamp that does not have any of the files yet."""
+        trash_dir = self.trash_dir / timestamp
+        collision_number = 0
+        while any((trash_dir / filename).exists() for filename in filenames):
+            collision_number += 1
+            trash_dir = self.trash_dir / f"{timestamp}-{collision_number}"
+        return trash_dir
 
     def rename_trip(self, old_stem: str, new_video_filename: str) -> None:
         """Rename a track (and its preview) after its video was renamed."""
@@ -451,7 +508,7 @@ class MetadataStore:
         """Rebuild `index.json` from the tracks."""
         index = self.build_index()
         self.root.mkdir(parents=True, exist_ok=True)
-        partial_path = self.index_path.with_name(f".{self.index_path.name}.partial")
+        partial_path = get_partial_path(self.index_path)
         partial_path.write_text(
             json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )

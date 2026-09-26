@@ -5,6 +5,7 @@ import logging
 import pytest
 
 from dashcam import cleaning
+from dashcam import extract
 from dashcam import metadata
 from dashcam import rename
 
@@ -337,6 +338,11 @@ def test_plan_renames_names_trip_without_gps(library, make_track):
 
     # THEN it gets the fallback name
     assert [plan.new_filename for plan in plans] == ["2026-09-25 Trip 11-17 (Car).mp4"]
+
+
+@pytest.mark.parametrize("extension", extract.VIDEO_EXTENSIONS)
+def test_max_filename_length_fits_the_library_limit(extension):
+    assert rename.MAX_FILENAME_LENGTH <= metadata.get_max_video_filename_bytes(extension)
 
 
 @pytest.mark.parametrize(

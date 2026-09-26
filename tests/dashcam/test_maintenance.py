@@ -190,20 +190,24 @@ def test_run_doctor_reports_outdated_track(library_dir, store, add_trip, caplog)
 
 
 def test_run_doctor_deletes_leftover_files(library_dir, store, add_trip):
-    # GIVEN a preview without a track and a temporary file from an interrupted run
+    # GIVEN a preview without a track, and temporary files from interrupted runs
     add_trip("2026-09-25 Trip.mp4")
     store.previews_dir.mkdir()
     orphan_preview_path = store.preview_path("2026-01-01 Deleted")
     orphan_preview_path.write_bytes(b"preview")
-    partial_path = store.tracks_dir / ".2026-09-25 Other.json.partial"
-    partial_path.write_text("{", encoding="utf-8")
+    partial_track_path = store.tracks_dir / ".tmp-0123abcd.partial"
+    partial_track_path.write_text("{", encoding="utf-8")
+    partial_video_path = library_dir / ".tmp-4567cdef.partial"
+    partial_video_path.write_bytes(b"video")
 
     # WHEN running the doctor with fixes
     run_doctor(library_dir, store, apply_fixes=True)
 
-    # THEN both are deleted
+    # THEN they are deleted, and the video is kept
     assert not orphan_preview_path.exists()
-    assert not partial_path.exists()
+    assert not partial_track_path.exists()
+    assert not partial_video_path.exists()
+    assert (library_dir / "2026-09-25 Trip.mp4").exists()
 
 
 def test_run_doctor_deletes_leftover_osm_download(library_dir, store, add_trip):
@@ -219,6 +223,22 @@ def test_run_doctor_deletes_leftover_osm_download(library_dir, store, add_trip):
 
     # THEN the download is deleted
     assert not download_path.exists()
+
+
+def test_run_doctor_reports_too_long_video_name(library_dir, store, add_trip, caplog):
+    # GIVEN a video whose track name would not fit on an encrypted NAS folder
+    add_trip("2026-09-25 Trip.mp4")
+    store.rebuild_index()
+    long_name = "2026-09-25 " + "x" * 128 + ".mp4"
+    (library_dir / long_name).write_bytes(b"long")
+
+    # WHEN running the doctor
+    error_count = run_doctor(library_dir, store)
+
+    # THEN it is reported as an error, without suggesting to extract it
+    assert error_count == 1
+    assert f"Video '{long_name}' has a name that is too long" in caplog.text
+    assert "run `dashcam extract`" not in caplog.text
 
 
 def test_run_doctor_reports_missing_street_list(

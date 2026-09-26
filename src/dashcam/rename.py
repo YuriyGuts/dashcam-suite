@@ -29,7 +29,8 @@ from dashcam import metadata
 from dashcam import terminal
 from dashcam.config import Config
 
-# The longest allowed filename, including the extension.
+# The longest allowed filename, including the extension. Names are ASCII, so this stays below
+# `metadata.get_max_video_filename_bytes`. The web app has the same limit.
 MAX_FILENAME_LENGTH = 140
 
 # Separator between street names.

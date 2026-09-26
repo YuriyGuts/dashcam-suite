@@ -35,6 +35,9 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
   - A command that needs the library directory fails when neither `--library-dir` nor `library_dir` in the config sets it; the error names both. `enrich`, `forget`, and `extract --reclean` only need the metadata directory.
 - Cleaning thresholds are constants, so tracks do not depend on the machine that extracted them.
 - Long-running commands (`encode`, `extract`) prevent OS sleep and run jobs in parallel.
+- Filenames fit in 143 bytes, the eCryptfs limit of encrypted NAS shared folders:
+  - Files are written under short random names (`.tmp-<hex>.partial`) in the target directory and renamed when complete.
+  - A video name has at most 142 bytes in UTF-8, so that its track name (`.json`) fits. `encode range --output-name` rejects longer names, `extract` skips such videos and counts them as failed, and `doctor` reports them.
 
 ## Commands
 
@@ -124,7 +127,8 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | `index.json` stale or missing | Rebuild |
 | Track from an older extractor or cleaning version | Suggest `--reclean` |
 | Street list older than the track or the OSM data | Suggest `enrich` |
-| Orphaned previews or temp files | Delete (listed) |
+| Video name too long for its track name to fit | Report |
+| Orphaned previews or temp files (also in the library) | Delete (listed) |
 
 `--fix` never deletes a track; it moves it to `.metadata/trash/`. `extract` and `serve` run the cheap checks at startup and warn.
 
@@ -151,7 +155,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
   tracks/<video stem>.json      One per trip; hand-editable.
   previews/<video stem>.mp4     Optional.
   osm/                          Filtered road and locality data.
-  trash/                        Replaced or forgotten tracks.
+  trash/<timestamp>/            Replaced or forgotten tracks and previews, under their own names.
 ```
 
 ### Identity and Renames

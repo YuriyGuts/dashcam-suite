@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from dashcam import encode
+from dashcam import metadata
 from dashcam import video
 
 SAMPLE_RAW_VIDEO_DIR = Path(__file__).parents[2] / "video" / "raw-sd" / "DCIM" / "Movie"
@@ -255,11 +256,13 @@ def test_run_encode_job_renames_partial_output_on_success(config, tmp_path, fake
     # WHEN running it
     is_encoded = encode.run_encode_job(job_def)
 
-    # THEN ffmpeg writes to the partial path, which is renamed to the final path
+    # THEN ffmpeg writes to a partial path, which is renamed to the final path
     assert is_encoded
-    assert fake_ffmpeg.calls[-1][-1] == str(encode.get_partial_output_path(output_path))
+    partial_path = Path(fake_ffmpeg.calls[-1][-1])
+    assert partial_path.parent == tmp_path
+    assert partial_path.name.endswith(metadata.PARTIAL_FILE_SUFFIX)
     assert output_path.read_bytes() == b"partial video"
-    assert not encode.get_partial_output_path(output_path).exists()
+    assert list(tmp_path.iterdir()) == [output_path]
 
 
 def test_run_encode_job_removes_partial_output_on_failure(config, tmp_path, fake_ffmpeg):
@@ -277,8 +280,7 @@ def test_run_encode_job_removes_partial_output_on_failure(config, tmp_path, fake
 
     # THEN no output is left behind
     assert not is_encoded
-    assert not output_path.exists()
-    assert not encode.get_partial_output_path(output_path).exists()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_run_encode_job_logs_ffmpeg_errors(config, tmp_path, fake_ffmpeg, caplog):
@@ -761,6 +763,28 @@ def test_encode_range_with_output_name(
 
     # THEN the output uses that name
     assert [path.name for path in library_dir.iterdir()] == ["Road Trip.mp4"]
+
+
+def test_encode_range_rejects_too_long_output_name(config, raw_video_dir, tmp_path, fake_ffmpeg):
+    # GIVEN an output name whose track name would not fit on an encrypted NAS folder
+    output_name = "x" * 139
+
+    # WHEN encoding with it
+    with pytest.raises(RuntimeError, match="is too long: use at most 142 characters"):
+        encode.encode_range(
+            raw_video_dir=raw_video_dir,
+            library_dir=tmp_path / "out",
+            metadata_dir=tmp_path / "metadata",
+            config=config,
+            start_index=1,
+            end_index=1,
+            output_name=output_name,
+            dry_run=False,
+            check_readability=False,
+        )
+
+    # THEN nothing is encoded
+    assert fake_ffmpeg.calls == []
 
 
 @pytest.mark.skipif(not SAMPLE_RAW_VIDEO_DIR.is_dir(), reason="Sample SD card videos not present")

@@ -76,9 +76,6 @@ TRAILING_INDEX_PATTERN = re.compile(r"(?P<index>\d+)$")
 # Container format and extension of the output videos.
 OUTPUT_FORMAT = "mp4"
 
-# Suffix of the videos that are still being encoded.
-PARTIAL_OUTPUT_SUFFIX = ".partial"
-
 # How often (in seconds) to log encoding progress.
 PROGRESS_INTERVAL_S = 10
 
@@ -156,7 +153,7 @@ class EncodedSegmentLog:
     def save(self) -> None:
         """Write the log atomically."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        partial_path = self.path.with_name(f".{self.path.name}.partial")
+        partial_path = metadata.get_partial_path(self.path)
         partial_path.write_text(json.dumps(self.sizes, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(partial_path, self.path)
 
@@ -320,11 +317,6 @@ def group_segments_into_trips(
     return trips
 
 
-def get_partial_output_path(output_path: Path) -> Path:
-    """Return the temporary path under which the output video is written during encoding."""
-    return output_path.with_name(output_path.name + PARTIAL_OUTPUT_SUFFIX)
-
-
 def format_ffmpeg_concat_list(segments: list[RawVideoSegment]) -> str:
     """Build the contents of an ffmpeg concat demuxer list containing the files to concatenate."""
     lines = []
@@ -438,7 +430,7 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
         True if the video was encoded, False if encoding failed.
     """
     output_path = job_def.output_path
-    partial_output_path = get_partial_output_path(output_path)
+    partial_output_path = metadata.get_partial_path(output_path)
     total_duration_s = get_total_duration(job_def.raw_segments)
     duration_text = "" if total_duration_s is None else f", {total_duration_s / 60:.0f} min"
     LOGGER.info(f"Encoding: {output_path.name} ({len(job_def.raw_segments)} files{duration_text})")
@@ -606,6 +598,12 @@ def encode_range(
     int
         The number of failed jobs.
     """
+    if output_name is not None:
+        output_filename = f"{output_name}.{OUTPUT_FORMAT}"
+        problem = metadata.get_filename_length_problem(output_filename)
+        if problem is not None:
+            raise RuntimeError(f"The output name '{output_filename}' is too long: {problem}")
+
     segments = collect_raw_video_segments(
         raw_video_dir=raw_video_dir,
         ffmpeg_executable=config.ffmpeg_executable,

@@ -467,6 +467,32 @@ def test_extract_videos_reports_failures(
     assert store.list_track_paths() == []
 
 
+def test_extract_videos_skips_too_long_names(
+    config, library_dir, store, make_video_file, fake_extract_video, serial_extract_pool, caplog
+):
+    # GIVEN a video with a regular name and one whose track name would be too long
+    make_video_file("2026-09-25 Trip.mp4", b"a")
+    long_name = "2026-09-25 " + "x" * 128 + ".mp4"
+    make_video_file(long_name, b"b")
+
+    # WHEN extracting
+    failed_count = extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=[],
+        exclude=[],
+        only=[],
+        force=False,
+        make_previews=False,
+    )
+
+    # THEN only the regular video is extracted, and the long name is reported as a failure
+    assert failed_count == 1
+    assert fake_extract_video == ["2026-09-25 Trip.mp4"]
+    assert f"Skipping '{long_name}': the name is too long" in caplog.text
+
+
 def test_extract_videos_makes_missing_previews(
     monkeypatch, config, library_dir, store, make_video_file, save_track_for, serial_extract_pool
 ):
@@ -510,6 +536,7 @@ def test_make_preview_renames_partial_output(monkeypatch, config, tmp_path):
     extract.make_preview(tmp_path / "trip.mp4", preview_path, config)
 
     # THEN the result is renamed to the final path
+    assert list(preview_path.parent.iterdir()) == [preview_path]
     assert preview_path.read_bytes() == b"preview"
     assert "scale=-2:480" in commands[0]
 

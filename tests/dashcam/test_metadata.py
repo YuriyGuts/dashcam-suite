@@ -261,11 +261,30 @@ def test_metadata_store_move_to_trash(make_track, store):
     # WHEN moving it to the trash
     moved_paths = store.move_to_trash(track.stem)
 
-    # THEN both files are in the trash
-    assert len(moved_paths) == 2
-    assert all(path.parent == store.trash_dir for path in moved_paths)
+    # THEN both files are in one timestamped trash folder, under their own names
+    assert sorted(path.name for path in moved_paths) == [
+        "2026-09-25 Trip 11-17.json",
+        "2026-09-25 Trip 11-17.mp4",
+    ]
+    assert len({path.parent for path in moved_paths}) == 1
+    assert moved_paths[0].parent.parent == store.trash_dir
     assert not store.track_path(track.stem).exists()
     assert not store.preview_path(track.stem).exists()
+
+
+def test_metadata_store_get_free_trash_dir_skips_taken_names(store):
+    # GIVEN a trash folder that has a track with the same name
+    taken_dir = store.trash_dir / "20260925-111707"
+    taken_dir.mkdir(parents=True)
+    (taken_dir / "2026-09-25 Trip.json").write_text("{}", encoding="utf-8")
+
+    # WHEN choosing a folder for a track and preview of that name in the same second
+    trash_dir = store.get_free_trash_dir(
+        "20260925-111707", ["2026-09-25 Trip.json", "2026-09-25 Trip.mp4"]
+    )
+
+    # THEN a numbered folder is chosen
+    assert trash_dir == store.trash_dir / "20260925-111707-1"
 
 
 def test_metadata_store_rename_trip(make_track, store):
@@ -338,10 +357,59 @@ def test_metadata_store_rebuild_index_with_localities(make_track, store):
 def test_metadata_store_list_track_paths_ignores_temporary_files(make_track, store):
     # GIVEN a track and a leftover temporary file
     store.save_track(make_track())
-    (store.tracks_dir / ".2026-09-25 Other.json.partial").write_text("{", encoding="utf-8")
+    (store.tracks_dir / ".tmp-0123abcd.partial").write_text("{", encoding="utf-8")
 
     # WHEN listing tracks
     paths = store.list_track_paths()
 
     # THEN only the track is listed
     assert [path.name for path in paths] == ["2026-09-25 Trip 11-17.json"]
+
+
+def test_get_partial_path_does_not_depend_on_the_name(tmp_path):
+    # GIVEN a file with a long name
+    path = tmp_path / ("2026-09-25 " + "x" * 127 + ".json")
+
+    # WHEN getting two partial paths for it
+    first_partial_path = metadata.get_partial_path(path)
+    second_partial_path = metadata.get_partial_path(path)
+
+    # THEN they are short, hidden, distinct, and in the same directory
+    assert first_partial_path.parent == tmp_path
+    assert first_partial_path.name.startswith(".")
+    assert first_partial_path.name.endswith(metadata.PARTIAL_FILE_SUFFIX)
+    assert len(first_partial_path.name) < 30
+    assert first_partial_path != second_partial_path
+
+
+@pytest.mark.parametrize(
+    ("video_filename", "problem"),
+    [
+        ("2026-09-25 " + "x" * 127 + ".mp4", None),
+        ("2026-09-25 " + "x" * 128 + ".mp4", "at most 142 characters (143 now)"),
+        ("2026-09-25 " + "в" * 63 + ".mp4", None),
+        ("2026-09-25 " + "в" * 64 + ".mp4", "at most 142 bytes in UTF-8 (143 now)"),
+    ],
+)
+def test_get_filename_length_problem(video_filename, problem):
+    assert metadata.get_filename_length_problem(video_filename) == (
+        None if problem is None else f"use {problem}"
+    )
+
+
+def test_longest_allowed_video_filename_fits_everywhere(make_track, store):
+    # GIVEN a track of a video with the longest allowed name, with a preview
+    video_filename = "2026-09-25 " + "x" * 127 + ".mp4"
+    assert metadata.get_filename_length_problem(video_filename) is None
+    track = make_track(video_filename=video_filename)
+    store.save_track(track)
+    store.previews_dir.mkdir(parents=True)
+    store.preview_path(track.stem).write_bytes(b"preview")
+
+    # WHEN moving it to the trash
+    moved_paths = store.move_to_trash(track.stem)
+
+    # THEN no filename, in the tracks or in the trash, exceeds the limit
+    names = [store.track_path(track.stem).name, store.preview_path(track.stem).name]
+    names += [path.name for path in moved_paths] + [moved_paths[0].parent.name]
+    assert max(len(name.encode("utf-8")) for name in names) <= metadata.MAX_FILENAME_BYTES

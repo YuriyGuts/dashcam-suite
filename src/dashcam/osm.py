@@ -34,6 +34,7 @@ import osmium.filter
 import osmium.io
 import osmium.osm
 
+from dashcam import metadata
 from dashcam import terminal
 
 # Version of the database layout. Databases of other versions must be rebuilt.
@@ -318,8 +319,7 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
     The database is written under a temporary name and replaces the old one only when complete.
     """
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    partial_path = database_path.with_name(f".{database_path.name}.partial")
-    partial_path.unlink(missing_ok=True)
+    partial_path = metadata.get_partial_path(database_path)
 
     started_at = time.monotonic()
     connection = sqlite3.connect(partial_path)
