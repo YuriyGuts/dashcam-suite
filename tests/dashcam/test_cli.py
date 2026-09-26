@@ -233,11 +233,12 @@ def test_run_encode_command_range(config, tmp_path, encode_calls):
     # WHEN running the command
     cli.run_encode_command(parsed_args, config)
 
-    # THEN the range encoder receives the indexes
+    # THEN the range encoder receives the indexes and the metadata directory in the library
     mode, kwargs = encode_calls[0]
     assert mode == "range"
     assert (kwargs["start_index"], kwargs["end_index"]) == (2, 3)
     assert kwargs["check_readability"] is True
+    assert kwargs["metadata_dir"] == tmp_path / ".metadata"
 
 
 def test_main_exits_with_error_on_failed_jobs(monkeypatch, config):

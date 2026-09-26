@@ -174,6 +174,7 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
     for subparser in [parser_trips_cmd, parser_range_cmd]:
         add_raw_video_arguments(subparser, config)
         add_library_dir_argument(subparser, config)
+        add_metadata_dir_argument(subparser, config)
 
 
 def add_metadata_dir_argument(parser: argparse.ArgumentParser, config: Config) -> None:
@@ -485,6 +486,7 @@ def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
         return encode.encode_trips(
             raw_video_dir=parsed_args.raw_video_dir,
             library_dir=parsed_args.library_dir,
+            metadata_dir=parsed_args.metadata_dir,
             config=config,
             min_trip_gap_hours=parsed_args.min_trip_gap_hours,
             job_count=parsed_args.job_count,
@@ -495,6 +497,7 @@ def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
     return encode.encode_range(
         raw_video_dir=parsed_args.raw_video_dir,
         library_dir=parsed_args.library_dir,
+        metadata_dir=parsed_args.metadata_dir,
         config=config,
         start_index=parsed_args.start_index,
         end_index=parsed_args.end_index,

@@ -459,6 +459,7 @@ def test_encode_trips_encodes_each_trip(
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
         library_dir=library_dir,
+        metadata_dir=tmp_path / "metadata",
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -493,6 +494,7 @@ def test_encode_trips_counts_failures(
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
         library_dir=tmp_path,
+        metadata_dir=tmp_path / "metadata",
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -507,6 +509,172 @@ def test_encode_trips_counts_failures(
     ] == ["Encoded 0 videos, 1 failed"]
 
 
+def run_encode_trips(config, raw_video_dir, library_dir, metadata_dir):
+    return encode.encode_trips(
+        raw_video_dir=raw_video_dir,
+        library_dir=library_dir,
+        metadata_dir=metadata_dir,
+        config=config,
+        min_trip_gap_hours=3,
+        job_count=2,
+        dry_run=False,
+        check_readability=False,
+    )
+
+
+def test_encode_trips_skips_encoded_segments_after_rename(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    serial_pool,
+    no_os_sleep_prevention,
+    caplog,
+):
+    # GIVEN a trip that has been encoded and renamed, with its raw videos still on the SD card
+    caplog.set_level(logging.INFO)
+    make_raw_videos("20260925111707_000001.MP4", "20260925111807_000002.MP4")
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+    metadata_dir = tmp_path / "metadata"
+    run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+    (library_dir / "2026-09-25 Trip 11-17.mp4").rename(library_dir / "2026-09-25 Home.mp4")
+
+    # WHEN encoding trips again
+    failed_count = run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # THEN nothing is encoded again
+    assert failed_count == 0
+    assert "Skipping 2 files that have already been encoded" in caplog.text
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Home.mp4"]
+
+
+def test_encode_trips_encodes_new_segments_of_an_encoded_trip(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    serial_pool,
+    no_os_sleep_prevention,
+):
+    # GIVEN an encoded trip, and a raw video recorded later within the trip gap
+    make_raw_videos("20260925111707_000001.MP4")
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+    metadata_dir = tmp_path / "metadata"
+    run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+    make_raw_videos("20260925115000_000002.MP4")
+
+    # WHEN encoding trips again
+    run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # THEN only the new raw video is encoded, as a trip of its own
+    assert sorted(path.name for path in library_dir.iterdir()) == [
+        "2026-09-25 Trip 11-17.mp4",
+        "2026-09-25 Trip 11-50.mp4",
+    ]
+
+
+def test_encode_trips_does_not_log_failed_trips(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    serial_pool,
+    no_os_sleep_prevention,
+):
+    # GIVEN a trip whose encoding failed
+    make_raw_videos("20260925111707_000001.MP4")
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+    metadata_dir = tmp_path / "metadata"
+    fake_ffmpeg.encode_return_code = 1
+    run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # WHEN encoding trips again after the problem is gone
+    fake_ffmpeg.encode_return_code = 0
+    failed_count = run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # THEN the trip is encoded
+    assert failed_count == 0
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
+@pytest.mark.parametrize(
+    "logged_sizes, expected_contains",
+    [
+        ({"20260925111707_000001.MP4": 5}, True),
+        ({"20260925111707_000001.MP4": 7}, False),
+        ({"20260925111707_000002.MP4": 5}, False),
+    ],
+)
+def test_encoded_segment_log_matches_filename_and_size(
+    raw_video_dir, tmp_path, logged_sizes, expected_contains
+):
+    # GIVEN a 5-byte raw video and a log of encoded raw videos
+    path = raw_video_dir / "20260925111707_000001.MP4"
+    path.write_bytes(b"12345")
+    segment = make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7), path=path)
+    encoded_log = encode.EncodedSegmentLog(path=tmp_path / "log.json", sizes=logged_sizes)
+
+    # WHEN checking whether the raw video has been encoded
+    contains = encoded_log.contains(segment)
+
+    # THEN it only matches a logged video with the same filename and size
+    assert contains == expected_contains
+
+
+def test_encoded_segment_log_with_invalid_file(tmp_path):
+    # GIVEN a metadata directory with a broken log
+    (tmp_path / "encoded_segments.json").write_text("{not json", encoding="utf-8")
+
+    # WHEN loading the log
+    # THEN it fails with a readable error
+    with pytest.raises(RuntimeError, match="Cannot read the encoded video log"):
+        encode.EncodedSegmentLog.load(tmp_path)
+
+
+def test_encode_range_encodes_and_logs_encoded_segments(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    serial_pool,
+    no_os_sleep_prevention,
+):
+    # GIVEN a raw video that has already been encoded
+    make_raw_videos("20260925110000_000001.MP4")
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+    metadata_dir = tmp_path / "metadata"
+    run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # WHEN encoding it again as a range with another name
+    encode.encode_range(
+        raw_video_dir=raw_video_dir,
+        library_dir=library_dir,
+        metadata_dir=metadata_dir,
+        config=config,
+        start_index=1,
+        end_index=1,
+        output_name="Road Trip",
+        dry_run=False,
+        check_readability=False,
+    )
+
+    # THEN the range is encoded, and the raw video stays logged
+    assert sorted(path.name for path in library_dir.iterdir()) == [
+        "2026-09-25 Trip 11-00.mp4",
+        "Road Trip.mp4",
+    ]
+    encoded_log = encode.EncodedSegmentLog.load(metadata_dir)
+    assert encoded_log.sizes == {"20260925110000_000001.MP4": 0}
+
+
 def test_encode_trips_dry_run_does_not_run_ffmpeg(
     config, raw_video_dir, make_raw_videos, tmp_path, fake_ffmpeg
 ):
@@ -517,6 +685,7 @@ def test_encode_trips_dry_run_does_not_run_ffmpeg(
     encode.encode_trips(
         raw_video_dir=raw_video_dir,
         library_dir=tmp_path,
+        metadata_dir=tmp_path / "metadata",
         config=config,
         min_trip_gap_hours=3,
         job_count=2,
@@ -550,6 +719,7 @@ def test_encode_range_uses_first_segment_start_time_as_default_name(
     encode.encode_range(
         raw_video_dir=raw_video_dir,
         library_dir=library_dir,
+        metadata_dir=tmp_path / "metadata",
         config=config,
         start_index=2,
         end_index=3,
@@ -580,6 +750,7 @@ def test_encode_range_with_output_name(
     encode.encode_range(
         raw_video_dir=raw_video_dir,
         library_dir=library_dir,
+        metadata_dir=tmp_path / "metadata",
         config=config,
         start_index=1,
         end_index=1,

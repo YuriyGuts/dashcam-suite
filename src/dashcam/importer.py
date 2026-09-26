@@ -44,6 +44,7 @@ def import_trips(
     failed_count = encode.encode_trips(
         raw_video_dir=raw_video_dir,
         library_dir=library_dir,
+        metadata_dir=metadata_dir,
         config=config,
         min_trip_gap_hours=min_trip_gap_hours,
         job_count=job_count,

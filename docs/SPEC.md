@@ -44,8 +44,9 @@ Port of `dashcam-encode`.
 
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
 - `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
-- Options: `--raw-video-dir`, `--library-dir`, `--min-trip-gap-hours`, `--job-count`, `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
+- Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count`, `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
+- Encoded raw videos are logged by filename and size in `.metadata/encoded_segments.json` (logged by the parent process after each successful job). `trips` leaves logged videos out before grouping, so clips left on the card are not encoded again after their trip is renamed, and new clips recorded within the trip gap of an imported trip form a trip of their own. `range` encodes the selected videos regardless and logs them too.
 - Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). Existing outputs are skipped with a warning and never overwritten. Incomplete outputs never appear under the final name.
 
 ### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
@@ -146,6 +147,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
 ```
 .metadata/
   index.json                    Derived from tracks; never edit.
+  encoded_segments.json         Raw videos already encoded: filename → size.
   tracks/<video stem>.json      One per trip; hand-editable.
   previews/<video stem>.mp4     Optional.
   osm/                          Filtered road and locality data.

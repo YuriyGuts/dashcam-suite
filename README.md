@@ -111,7 +111,7 @@ After a few drives, put the SD card in your computer and run:
 dashcam import
 ```
 
-It encodes the new trips into the library, extracts their tracks, matches them to streets, and then shows the suggested names. You can accept all of them, reject them, or go through them one by one. When it's finished, [clear the card](#adding-new-recordings-from-the-sd-card) and start browsing:
+It encodes the new trips into the library, extracts their tracks, matches them to streets, and then shows the suggested names. You can accept all of them, reject them, or go through them one by one. When it's finished, start browsing:
 
 ```sh
 dashcam serve
@@ -154,7 +154,7 @@ dashcam import
 
 Every step skips what's already done, so only the new trips get encoded and processed. If it gets interrupted, running it again picks up the rest.
 
-The tool never deletes anything from the card. Once the import is done and you've checked the new trips, **delete the files on the SD card**. If old clips stay on the card, the next import encodes them again. See [Known limitations](#known-limitations).
+The tool never deletes anything from the card. Clips that have already been imported are skipped, so you can clear the card whenever it suits you.
 
 To look before doing anything, add `--dry-run`. It prints how the clips would be grouped into trips.
 
@@ -178,7 +178,7 @@ Then run `dashcam extract`, `dashcam enrich` and, for the first form, `dashcam r
 
 ## Other things you can do
 
-**Encode a specific range of clips.** `dashcam encode range 15 319 --output-name "Road Trip"` merges clips 15 to 319 (the number after the underscore) into one video, no matter how long the breaks between them are.
+**Encode a specific range of clips.** `dashcam encode range 15 319 --output-name "Road Trip"` merges clips 15 to 319 (the number after the underscore) into one video, even if they span several trips or have been imported before.
 
 **Watch in a browser that can't play HEVC.** Chrome, for example, depends on the OS and hardware for this. `dashcam extract --previews` makes small H.264 copies in `.metadata/previews/`, and the web app uses them when they exist. To make a preview for one trip, add `--include "<file name>"`. The web app shows this command when a video doesn't play.
 
@@ -235,7 +235,6 @@ Supporting another camera means teaching the OCR module about the camera's text 
 
 ## Known limitations
 
-- `import` recognizes a trip it has already encoded only while the trip still has its placeholder name. After renaming, an uncleared SD card produces a duplicate trip on the next import. Delete the videos from the SD card after each import.
 - Renaming from the web app only works when the server listens on `127.0.0.1`.
 
 ## Development

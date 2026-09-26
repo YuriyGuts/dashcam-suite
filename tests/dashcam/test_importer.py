@@ -48,6 +48,7 @@ def test_import_trips_runs_all_steps(tmp_path, config, osm_metadata_dir, step_ca
     assert [name for name, _ in step_calls] == ["encode", "extract", "enrich", "rename"]
     kwargs_by_step = dict(step_calls)
     assert kwargs_by_step["encode"]["library_dir"] == tmp_path / "videos"
+    assert kwargs_by_step["encode"]["metadata_dir"] == osm_metadata_dir
     assert kwargs_by_step["extract"]["library_dir"] == tmp_path / "videos"
     assert kwargs_by_step["extract"]["metadata_dir"] == osm_metadata_dir
     assert kwargs_by_step["enrich"]["update_osm"] is False

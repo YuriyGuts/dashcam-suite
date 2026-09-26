@@ -38,11 +38,17 @@ The tool can operate in two modes:
 
 Existing output videos are never overwritten. While a video is being encoded, it is written
 under a temporary name, so an interrupted run never leaves an incomplete video behind.
+
+Encoded raw videos are logged by filename and size in the metadata directory. The "trips" mode
+skips them, so raw videos left on the SD card are not encoded again after their trip has been
+renamed. The "range" mode encodes the selected videos regardless.
 """
 
 import dataclasses
 import datetime
+import json
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -50,6 +56,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from dashcam import metadata
 from dashcam import terminal
 from dashcam import video
 from dashcam.config import Config
@@ -109,6 +116,49 @@ class Trip:
             f"{self.get_placeholder_name()} / Segments: {start_index}-{end_index} "
             f"({len(self.raw_segments)} files)"
         )
+
+
+@dataclasses.dataclass
+class EncodedSegmentLog:
+    """Raw videos that have been encoded, with their sizes in bytes, keyed by filename."""
+
+    path: Path
+    sizes: dict[str, int]
+
+    @classmethod
+    def load(cls, metadata_dir: Path) -> "EncodedSegmentLog":
+        """
+        Load the log from the metadata directory. A missing log is empty.
+
+        Raises
+        ------
+        RuntimeError
+            If the log cannot be parsed.
+        """
+        path = metadata.MetadataStore(metadata_dir).encoded_segments_path
+        if not path.is_file():
+            return cls(path=path, sizes={})
+        try:
+            sizes = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise RuntimeError(f"Cannot read the encoded video log '{path}': {exc}") from None
+        return cls(path=path, sizes=sizes)
+
+    def contains(self, segment: RawVideoSegment) -> bool:
+        """Check whether the raw video has been encoded, matching its filename and size."""
+        return self.sizes.get(segment.path.name) == segment.path.stat().st_size
+
+    def add(self, segments: list[RawVideoSegment]) -> None:
+        """Record the raw videos as encoded."""
+        for segment in segments:
+            self.sizes[segment.path.name] = segment.path.stat().st_size
+
+    def save(self) -> None:
+        """Write the log atomically."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        partial_path = self.path.with_name(f".{self.path.name}.partial")
+        partial_path.write_text(json.dumps(self.sizes, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(partial_path, self.path)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -186,14 +236,17 @@ def collect_raw_video_segments(
     start_index: int | None = None,
     end_index: int | None = None,
     check_readability: bool = True,
+    encoded_log: EncodedSegmentLog | None = None,
 ) -> list[RawVideoSegment]:
     """
     Scan the raw video directory for files matching the input criteria.
 
+    Files recorded in `encoded_log` are left out.
+
     Returns
     -------
     list[RawVideoSegment]
-        The matching segments, sorted by start time.
+        The matching segments, sorted by start time. Empty if all of them are already encoded.
     """
     LOGGER.info(f"Collecting files from '{raw_video_dir}'")
 
@@ -218,6 +271,15 @@ def collect_raw_video_segments(
 
     if start_index is not None and end_index is not None:
         segments = [segment for segment in segments if start_index <= segment.index <= end_index]
+
+    if encoded_log is not None:
+        new_segments = [segment for segment in segments if not encoded_log.contains(segment)]
+        encoded_count = len(segments) - len(new_segments)
+        if encoded_count:
+            LOGGER.info(f"Skipping {encoded_count} files that have already been encoded")
+        if segments and not new_segments:
+            return []
+        segments = new_segments
 
     if check_readability:
         LOGGER.info("Checking raw video files for readability...")
@@ -436,9 +498,20 @@ def plan_encode_jobs(
     return job_defs
 
 
-def run_encode_jobs(job_defs: list[EncodeJobDefinition], job_count: int) -> int:
+def run_encode_job_with_outcome(
+    job_def: EncodeJobDefinition,
+) -> tuple[EncodeJobDefinition, bool]:
+    """Run an encoding job and return it with its outcome, since pool results come unordered."""
+    return job_def, run_encode_job(job_def)
+
+
+def run_encode_jobs(
+    job_defs: list[EncodeJobDefinition],
+    job_count: int,
+    encoded_log: EncodedSegmentLog,
+) -> int:
     """
-    Run the encoding jobs in parallel.
+    Run the encoding jobs in parallel, recording the raw videos of each encoded one in the log.
 
     Returns
     -------
@@ -454,10 +527,13 @@ def run_encode_jobs(job_defs: list[EncodeJobDefinition], job_count: int) -> int:
     failed_count = 0
     with prevent_os_sleep():
         with worker_pool(process_count) as process_pool:
-            for done_count, is_encoded in enumerate(
-                process_pool.imap_unordered(run_encode_job, job_defs), start=1
+            for done_count, (job_def, is_encoded) in enumerate(
+                process_pool.imap_unordered(run_encode_job_with_outcome, job_defs), start=1
             ):
                 LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
+                if is_encoded:
+                    encoded_log.add(job_def.raw_segments)
+                    encoded_log.save()
                 failed_count += not is_encoded
 
     summary = f"Encoded {len(job_defs) - failed_count} videos, {failed_count} failed"
@@ -471,6 +547,7 @@ def run_encode_jobs(job_defs: list[EncodeJobDefinition], job_count: int) -> int:
 def encode_trips(
     raw_video_dir: Path,
     library_dir: Path,
+    metadata_dir: Path,
     config: Config,
     min_trip_gap_hours: float,
     job_count: int,
@@ -478,17 +555,19 @@ def encode_trips(
     check_readability: bool,
 ) -> int:
     """
-    Encode all videos in the raw video directory, one output video per trip.
+    Encode the new videos in the raw video directory, one output video per trip.
 
     Returns
     -------
     int
         The number of failed jobs.
     """
+    encoded_log = EncodedSegmentLog.load(metadata_dir)
     segments = collect_raw_video_segments(
         raw_video_dir=raw_video_dir,
         ffmpeg_executable=config.ffmpeg_executable,
         check_readability=check_readability and not dry_run,
+        encoded_log=encoded_log,
     )
     trips = group_segments_into_trips(segments, min_trip_gap_hours)
 
@@ -503,12 +582,13 @@ def encode_trips(
         LOGGER.warning("Dry run mode enabled. Not running any encoding jobs.")
         return 0
 
-    return run_encode_jobs(job_defs, job_count)
+    return run_encode_jobs(job_defs, job_count, encoded_log)
 
 
 def encode_range(
     raw_video_dir: Path,
     library_dir: Path,
+    metadata_dir: Path,
     config: Config,
     start_index: int,
     end_index: int,
@@ -518,6 +598,8 @@ def encode_range(
 ) -> int:
     """
     Encode the raw videos in the specified index range as a single output video.
+
+    The videos are encoded even if they have been encoded before, and are recorded in the log.
 
     Returns
     -------
@@ -541,4 +623,4 @@ def encode_range(
         LOGGER.warning("Dry run mode enabled. Not running any encoding jobs.")
         return 0
 
-    return run_encode_jobs(job_defs, job_count=1)
+    return run_encode_jobs(job_defs, job_count=1, encoded_log=EncodedSegmentLog.load(metadata_dir))

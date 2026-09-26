@@ -4,6 +4,7 @@ Store extracted tracks and the trip index.
 Layout of the metadata directory:
 
     index.json                  Summary of all trips, rebuilt from the tracks. Never edit.
+    encoded_segments.json       Raw videos already encoded (see `dashcam.encode`).
     tracks/<video stem>.json    One track per video. Hand-editable.
     previews/<video stem>.mp4   Optional low-resolution previews for browsers without HEVC.
     osm/                        Filtered OSM roads and localities (see `dashcam.osm`).
@@ -42,6 +43,7 @@ TRACKS_DIR_NAME = "tracks"
 PREVIEWS_DIR_NAME = "previews"
 TRASH_DIR_NAME = "trash"
 INDEX_FILENAME = "index.json"
+ENCODED_SEGMENTS_FILENAME = "encoded_segments.json"
 
 
 class TrackFormatError(ValueError):
@@ -338,6 +340,7 @@ class MetadataStore:
         self.previews_dir = root / PREVIEWS_DIR_NAME
         self.trash_dir = root / TRASH_DIR_NAME
         self.index_path = root / INDEX_FILENAME
+        self.encoded_segments_path = root / ENCODED_SEGMENTS_FILENAME
 
     def ensure_dirs(self) -> None:
         """Create the metadata directories if they do not exist."""
