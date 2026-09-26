@@ -48,7 +48,7 @@ Port of `dashcam-encode`.
   - Text whose worst cell scores below 0.6 is unreliable and becomes `unreadable` (genuine text scores above 0.8). It is kept as raw text but never used.
   - Glyph templates are averaged from hand-labeled strips in `tests/fixtures/overlay/` by `scripts/build_glyph_templates.py`.
 - Cleaning (runs on stored raw values; `--reclean` re-runs it without OCR):
-  - A sample is suspect if its date is more than 1 day from the filename date, the clock does not advance ~1 s per video second, the implied speed from neighbouring good points exceeds a threshold (default 250 km/h), or the displayed speed disagrees with the implied speed.
+  - A sample is suspect if its date is more than 1 day from the filename date, the clock does not advance ~1 s per video second, the implied speed from neighboring good points exceeds a threshold (default 250 km/h), or the displayed speed disagrees with the implied speed.
   - The track is split into internally consistent segments, and only segments that chain together plausibly are kept. This catches long spoofs where fake points agree with each other.
   - A forward clock jump up to 12 h between good fixes with plausible positions is a merge gap, not a spoof.
   - Time: the overlay clock is trusted only on good fixes. Elsewhere, time is derived from the video offset anchored to the nearest good sample. Camera-clock jumps (up to 12 h) during no-fix stretches mark merge gaps. Times derived across an uncertain boundary are flagged `time_estimated`.
@@ -116,7 +116,7 @@ Local HTTP server for the static web app, `.metadata/`, and the videos in `DIR`.
 - Leaflet (vendored) with OpenStreetMap tiles. Main browser: Firefox; secondary: Brave.
 - Sidebar: date range, trip name search, street filter, trip list with stats (date, start/end time, distance, duration, average/max speed, GPS coverage badge), aggregate stats for the selection. Filter state lives in the URL hash.
 - Map:
-  - Selected trips drawn together, one colour per trip, or coloured by speed.
+  - Selected trips drawn together, one color per trip, or colored by speed.
   - Long gaps drawn as faint dashed lines, excluded from stats. Spoofed points are never drawn.
   - Coverage mode: all filtered routes as thin translucent lines. Optional heatmap layer.
   - Hover shows the time and video offset.

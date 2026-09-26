@@ -134,7 +134,7 @@ def test_clean_track_interpolates_short_gap(settings):
     # WHEN cleaning it
     samples = cleaning.clean_track(raw_samples, settings)
 
-    # THEN the gap is filled along the line between the neighbouring fixes
+    # THEN the gap is filled along the line between the neighboring fixes
     assert statuses_of(samples[10:20]) == [cleaning.STATUS_INTERPOLATED] * 10
     assert samples[15].lat == pytest.approx(49.8 + 15 * LAT_STEP_30M)
     assert samples[15].kmh is None
@@ -194,7 +194,7 @@ def test_clean_track_interpolates_short_spoofed_stretch(settings):
     # WHEN cleaning it
     samples = cleaning.clean_track(raw_samples, settings)
 
-    # THEN the spoofed values are replaced by interpolation between the neighbouring good fixes
+    # THEN the spoofed values are replaced by interpolation between the neighboring good fixes
     assert statuses_of(samples[20:30]) == [cleaning.STATUS_INTERPOLATED] * 10
     assert samples[25].lat == pytest.approx(49.8 + 25 * LAT_STEP_30M)
     assert samples[25].lon == pytest.approx(24.0)

@@ -2,10 +2,10 @@ r"""
 Evaluate overlay OCR on sample videos using consistency checks instead of hand labels.
 
 Every video is sampled at 2 fps. A reading
-is flagged as a likely OCR error when it disagrees with both of its neighbours while the
-neighbours agree with each other:
+is flagged as a likely OCR error when it disagrees with both of its neighbors while the
+neighbors agree with each other:
 
-* Clock: `camera time - video offset` should stay constant between neighbouring frames.
+* Clock: `camera time - video offset` should stay constant between neighboring frames.
 * GPS: latitude and longitude should change by less than `MAX_COORDINATE_STEP` per frame.
 * Presence: the GPS text should not flicker on or off for a single frame.
 * Speed: the displayed speed should match the speed implied by coordinates one second apart.
@@ -42,7 +42,7 @@ REVIEW_DIR = Path(__file__).parents[1] / ".scratch" / "ocr-review"
 # Frames per second to sample.
 SAMPLE_FPS = 2
 
-# Largest plausible change of latitude or longitude between neighbouring frames (degrees).
+# Largest plausible change of latitude or longitude between neighboring frames (degrees).
 MAX_COORDINATE_STEP = 0.01
 
 # Largest plausible mismatch (in seconds) between clock and video offset changes.
@@ -78,13 +78,13 @@ def clock_offset(offset_s: float, reading: overlay.OverlayReading) -> float | No
 
 
 def is_isolated_outlier(previous_value, value, next_value, tolerance) -> bool:
-    """Check whether a value disagrees with both neighbours while they agree with each other."""
+    """Check whether a value disagrees with both neighbors while they agree with each other."""
     if previous_value is None or value is None or next_value is None:
         return False
-    neighbours_agree = abs(previous_value - next_value) <= tolerance
+    neighbors_agree = abs(previous_value - next_value) <= tolerance
     differs_from_previous = abs(value - previous_value) > tolerance
     differs_from_next = abs(value - next_value) > tolerance
-    return neighbours_agree and differs_from_previous and differs_from_next
+    return neighbors_agree and differs_from_previous and differs_from_next
 
 
 def find_flagged_readings(

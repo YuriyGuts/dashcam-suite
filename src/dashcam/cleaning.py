@@ -42,7 +42,7 @@ STATUS_UNREADABLE = "unreadable"
 # Format of the camera clock text.
 CLOCK_FORMAT = "%Y/%m/%d %H:%M:%S"
 
-# How much (in seconds) `camera time - video offset` may drift between neighbouring samples
+# How much (in seconds) `camera time - video offset` may drift between neighboring samples
 # before it counts as a clock jump. Sampling can shift a reading by up to one second.
 CLOCK_JITTER_S = 1.5
 
