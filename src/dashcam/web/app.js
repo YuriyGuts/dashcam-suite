@@ -62,6 +62,9 @@ const MAX_INTERPOLATION_STEP_S = 3;
 const GOOD_COVERAGE = 0.95;
 const PARTIAL_COVERAGE = 0.7;
 
+// Longest trip video filename, including the extension (see `dashcam rename`).
+const MAX_FILENAME_LENGTH = 140;
+
 // Where the position of the video panel is remembered between visits.
 const VIDEO_PANEL_POSITION_KEY = "dashcam.videoPanelPosition";
 
@@ -89,12 +92,15 @@ const ICON_PATHS = {
   checkCircle: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8.5 12l2.5 2.5 4.5-5",
   alert: "M12 4L2.5 20h19L12 4zM12 10v4M12 17h.01",
   xCircle: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15 9l-6 6M9 9l6 6",
+  pencil: "M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 8.5l3 3",
 };
 
 const state = {
   trips: [],
   tripsById: new Map(),
   videoDir: "",
+  // Whether the server allows renaming trips (only when it listens on localhost).
+  canRename: false,
   // First and last trip dates, as ISO dates and as day numbers. Null without dated trips.
   dateBounds: null,
   // Empty `from` or `to` means the filter is open on that side.
@@ -119,6 +125,10 @@ let drawGeneration = 0;
 
 // Set while a filter change waits for the next animation frame to be rendered.
 let isFilterRenderScheduled = false;
+
+// The trip name being edited: the trip, the text typed so far, the suggested name, and the
+// state of the request. Null while no name is being edited.
+let renameEdit = null;
 
 const video = {
   tripId: null,
@@ -300,12 +310,22 @@ function canPlayVideo(trip) {
   return Object.keys(videoSources(trip)).length > 0;
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
+// Fetches JSON. Errors carry the `error` message of the response if the server sent one.
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error(`${url}: HTTP ${response.status}`);
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.error ?? `${url}: HTTP ${response.status}`);
   }
   return response.json();
+}
+
+function postJson(url, data) {
+  return fetchJson(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(data),
+  });
 }
 
 function readStoredJson(key) {
@@ -1170,6 +1190,229 @@ function formatLocalities(trip) {
   return `${start ?? "?"}${ARROW}${end ?? "?"}`;
 }
 
+/* Renaming a trip. */
+
+function fileExtension(filename) {
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex > 0 ? filename.slice(dotIndex) : "";
+}
+
+function canRenameTrip(trip) {
+  return state.canRename && Boolean(trip.video_url) && Boolean(trip.date);
+}
+
+// The filename a trip gets for the typed name: the date and the extension stay as they are.
+function renamedFilename(trip, name) {
+  return `${trip.date} ${name.trim()}${fileExtension(trip.video_filename)}`;
+}
+
+// The part of a suggested filename between the date and the extension.
+function nameFromFilename(trip, filename) {
+  return filename.slice(trip.date.length + 1, filename.length - fileExtension(filename).length);
+}
+
+function renderTripName(trip) {
+  if (!canRenameTrip(trip)) {
+    return el("h2", {}, trip.name);
+  }
+  return el(
+    "div",
+    {className: "trip-name-row"},
+    el("h2", {}, trip.name),
+    el(
+      "button",
+      {type: "button", className: "icon-button", "aria-label": "Rename trip", title: "Rename trip", onclick: () => startRename(trip.id)},
+      icon("pencil", "icon icon-small"),
+    ),
+  );
+}
+
+function renderRenameForm(trip) {
+  const input = el("input", {
+    type: "text",
+    className: "rename-input",
+    value: renameEdit.draft,
+    spellcheck: false,
+    autocomplete: "off",
+    "aria-label": "Trip name",
+    "aria-invalid": renameEdit.error ? "true" : false,
+    disabled: renameEdit.isSaving,
+  });
+  input.addEventListener("input", () => {
+    renameEdit.draft = input.value;
+    renameEdit.error = null;
+    input.removeAttribute("aria-invalid");
+    updateRenameHints(trip);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveRename();
+    } else if (event.key === "Escape") {
+      event.stopPropagation();
+      cancelRename();
+    }
+  });
+  renameEdit.input = input;
+  renameEdit.lengthNote = el("span", {className: "rename-length"});
+  renameEdit.hint = el("div", {className: "rename-hint"});
+
+  const form = el(
+    "form",
+    {className: "rename-form", onsubmit: (event) => {
+      event.preventDefault();
+      saveRename();
+    }},
+    el(
+      "div",
+      {className: "rename-field"},
+      el("span", {className: "rename-affix"}, trip.date),
+      input,
+      el("span", {className: "rename-affix"}, fileExtension(trip.video_filename)),
+    ),
+    renameEdit.hint,
+    el(
+      "div",
+      {className: "rename-actions"},
+      el("button", {type: "submit", className: "button button-primary", disabled: renameEdit.isSaving}, renameEdit.isSaving ? "Saving..." : "Save"),
+      el("button", {type: "button", className: "button", disabled: renameEdit.isSaving, onclick: cancelRename}, "Cancel"),
+      renameEdit.lengthNote,
+    ),
+  );
+  updateRenameHints(trip);
+  return form;
+}
+
+// Updates the length and the error or suggestion under the field without rebuilding it.
+function updateRenameHints(trip) {
+  const length = renamedFilename(trip, renameEdit.draft).length;
+  renameEdit.lengthNote.textContent = `${length}/${MAX_FILENAME_LENGTH}`;
+  renameEdit.lengthNote.classList.toggle("is-over", length > MAX_FILENAME_LENGTH);
+
+  let hint;
+  if (renameEdit.error) {
+    hint = el("p", {className: "rename-error", role: "alert"}, renameEdit.error);
+  } else if (renameEdit.suggestion === null) {
+    hint = el("p", {}, renameEdit.suggestionError ?? "Loading the suggested name...");
+  } else if (renameEdit.suggestion === renameEdit.draft.trim()) {
+    hint = el("p", {}, "This is the suggested name.");
+  } else {
+    hint = el(
+      "p",
+      {},
+      "Suggested: ",
+      el(
+        "button",
+        {type: "button", className: "link-button rename-suggestion", title: "Use the suggested name", onclick: useSuggestedName},
+        renameEdit.suggestion,
+      ),
+    );
+  }
+  renameEdit.hint.replaceChildren(hint);
+}
+
+function startRename(tripId) {
+  const trip = state.tripsById.get(tripId);
+  renameEdit = {tripId, draft: trip.name, suggestion: null, suggestionError: null, error: null, isSaving: false};
+  renderDetail();
+  renameEdit.input.focus();
+  renameEdit.input.select();
+  const edit = renameEdit;
+  fetchJson(`/api/suggestion?id=${encodeURIComponent(tripId)}`)
+    .then((data) => {
+      edit.suggestion = nameFromFilename(trip, data.filename);
+    })
+    .catch((error) => {
+      edit.suggestionError = `No suggestion: ${error.message}`;
+    })
+    .finally(() => {
+      if (renameEdit === edit) updateRenameHints(trip);
+    });
+}
+
+function useSuggestedName() {
+  const trip = state.tripsById.get(renameEdit.tripId);
+  renameEdit.draft = renameEdit.suggestion;
+  renameEdit.error = null;
+  renameEdit.input.value = renameEdit.draft;
+  renameEdit.input.removeAttribute("aria-invalid");
+  renameEdit.input.focus();
+  updateRenameHints(trip);
+}
+
+function cancelRename() {
+  renameEdit = null;
+  renderDetail();
+}
+
+async function saveRename() {
+  if (!renameEdit || renameEdit.isSaving) {
+    return;
+  }
+  const edit = renameEdit;
+  const trip = state.tripsById.get(edit.tripId);
+  if (!edit.draft.trim()) {
+    edit.error = "Enter a name.";
+    renderDetail();
+    return;
+  }
+  const filename = renamedFilename(trip, edit.draft);
+  if (filename === trip.video_filename) {
+    cancelRename();
+    return;
+  }
+
+  // The video is renamed on disk, so its player is closed and reopened under the new name.
+  const playback = video.tripId === trip.id && video.element
+    ? {startAt: video.element.currentTime, autoplay: !video.element.paused}
+    : null;
+  edit.isSaving = true;
+  closeVideo();
+  renderDetail();
+  let newId;
+  try {
+    newId = (await postJson("/api/rename", {id: trip.id, filename})).id;
+  } catch (error) {
+    edit.isSaving = false;
+    edit.error = error.message;
+    if (playback) openVideo(trip.id, playback);
+    renderDetail();
+    edit.input.focus();
+    return;
+  }
+  renameEdit = null;
+  await reloadTrips({oldId: trip.id, newId});
+  if (playback) openVideo(newId, playback);
+}
+
+// Loads the trip index again after a rename, moving everything keyed by the old trip ID.
+async function reloadTrips({oldId, newId}) {
+  const index = await fetchJson("/api/trips");
+  applyIndex(index);
+  const toNewId = (id) => (id === oldId ? newId : id);
+  state.selectedIds = state.selectedIds.map(toNewId).filter((id) => state.tripsById.has(id));
+  const focusedId = state.focusedId && toNewId(state.focusedId);
+  state.focusedId = state.tripsById.has(focusedId) ? focusedId : null;
+  if (colorSlots.has(oldId)) {
+    colorSlots.set(newId, colorSlots.get(oldId));
+    colorSlots.delete(oldId);
+  }
+  for (const tracks of [trackPromises, loadedTracks]) {
+    if (tracks.has(oldId)) {
+      tracks.set(newId, tracks.get(oldId));
+      tracks.delete(oldId);
+    }
+  }
+  for (const [id, track] of loadedTracks) {
+    track.trip = state.tripsById.get(id) ?? track.trip;
+  }
+  geometryPromise = null;
+  syncColorSlots();
+  renderDateTicks();
+  writeHash();
+  renderAll();
+}
+
 function renderDetail() {
   const trip = state.focusedId ? state.tripsById.get(state.focusedId) : null;
   dom.tripBrowser.hidden = trip !== null;
@@ -1230,6 +1473,7 @@ function renderDetail() {
       );
   const localitiesText = formatLocalities(trip);
   const streetsContainer = el("div", {});
+  const focusedRenameInput = renameEdit?.input === document.activeElement ? renameEdit.input : null;
   dom.tripDetail.replaceChildren(
     el(
       "div",
@@ -1242,7 +1486,7 @@ function renderDetail() {
       el(
         "div",
         {className: "detail-title"},
-        el("h2", {}, trip.name),
+        renameEdit?.tripId === trip.id ? renderRenameForm(trip) : renderTripName(trip),
         el("p", {className: "detail-subtitle"}, [formatDate(trip.date), timeRange].join(DOT)),
         localitiesText ? el("p", {className: "detail-subtitle"}, localitiesText) : null,
       ),
@@ -1257,6 +1501,11 @@ function renderDetail() {
     ),
     streetsContainer,
   );
+  // Rendering replaces the rename field; keep the focus and the cursor in the new one.
+  if (focusedRenameInput && renameEdit?.input) {
+    renameEdit.input.focus();
+    renameEdit.input.setSelectionRange(focusedRenameInput.selectionStart, focusedRenameInput.selectionEnd);
+  }
 
   if (hasGps(trip)) {
     loadTrack(trip.id)
@@ -1729,6 +1978,16 @@ function bindControls() {
   });
 }
 
+function applyIndex(index) {
+  state.trips = index.trips.slice().sort((a, b) =>
+    (b.start_time ?? b.date ?? "").localeCompare(a.start_time ?? a.date ?? ""),
+  );
+  state.tripsById = new Map(state.trips.map((trip) => [trip.id, trip]));
+  state.videoDir = index.video_dir ?? "";
+  state.canRename = Boolean(index.can_rename);
+  state.dateBounds = computeDateBounds(state.trips);
+}
+
 async function start() {
   bindControls();
   let index;
@@ -1739,12 +1998,7 @@ async function start() {
     dom.summary.replaceChildren(el("p", {}, `Cannot load the trips: ${error.message}`));
     return;
   }
-  state.trips = index.trips.slice().sort((a, b) =>
-    (b.start_time ?? b.date ?? "").localeCompare(a.start_time ?? a.date ?? ""),
-  );
-  state.tripsById = new Map(state.trips.map((trip) => [trip.id, trip]));
-  state.videoDir = index.video_dir ?? "";
-  state.dateBounds = computeDateBounds(state.trips);
+  applyIndex(index);
   readHash();
   syncColorSlots();
   renderDateTicks();

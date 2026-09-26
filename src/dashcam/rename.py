@@ -164,6 +164,10 @@ APOSTROPHES = frozenset("'’ʼ`")
 LOGGER = logging.getLogger(__name__)
 
 
+class RenameError(ValueError):
+    """Raised when a trip cannot be renamed as requested."""
+
+
 @dataclasses.dataclass(frozen=True)
 class NamedStretch:
     """A street label with the distance driven on it."""
@@ -413,6 +417,93 @@ def has_usable_street_list(track: metadata.Track) -> bool:
     return enrich.is_enrichment_current(track, osm_timestamp=None)
 
 
+def find_taken_stems(
+    video_paths: list[Path], tracks_by_stem: t.Mapping[str, metadata.Track]
+) -> set[str]:
+    """Return the names (stems, in lowercase) used by videos and tracks."""
+    return {path.stem.lower() for path in video_paths} | {stem.lower() for stem in tracks_by_stem}
+
+
+def load_trip(
+    video_dir: Path, store: metadata.MetadataStore, stem: str
+) -> tuple[Path, metadata.Track]:
+    """
+    Load the track of a trip and find its video.
+
+    Raises
+    ------
+    RenameError
+        If the track is missing or unreadable, or the video is not in the video directory.
+    """
+    try:
+        track = store.load_track(stem)
+    except FileNotFoundError as exc:
+        raise RenameError(f"No track for '{stem}'") from exc
+    except (OSError, metadata.TrackFormatError) as exc:
+        raise RenameError(f"Cannot read the track of '{stem}': {exc}") from exc
+    video_path = video_dir / track.video_filename
+    if not video_path.is_file():
+        raise RenameError(f"'{track.video_filename}' is not in the video directory")
+    return video_path, track
+
+
+def suggest_trip_filename(
+    video_dir: Path, store: metadata.MetadataStore, stem: str, car_model: str
+) -> str:
+    """
+    Suggest a new filename for one trip.
+
+    Raises
+    ------
+    RenameError
+        If the trip cannot be named: no video, no date, or an outdated street list.
+    """
+    video_path, track = load_trip(video_dir, store, stem)
+    if metadata.parse_trip_name(video_path.name).date is None:
+        raise RenameError("The current name does not start with a date")
+    if not has_usable_street_list(track):
+        raise RenameError("The street list is outdated (run `dashcam enrich`)")
+    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
+    return suggest_filename(
+        track, car_model, extension=video_path.suffix, taken_stems=taken_stems - {stem.lower()}
+    )
+
+
+def rename_trip(
+    video_dir: Path, store: metadata.MetadataStore, stem: str, new_filename: str
+) -> str:
+    """
+    Rename one trip to a filename chosen by the user.
+
+    Returns
+    -------
+    str
+        The new stem of the trip.
+
+    Raises
+    ------
+    RenameError
+        If the filename is invalid or taken, or the trip cannot be renamed.
+    """
+    video_path, _ = load_trip(video_dir, store, stem)
+    problem = validate_filename(new_filename, video_path.suffix)
+    if problem is not None:
+        raise RenameError(f"Invalid name: {problem}")
+    new_stem = Path(new_filename).stem
+    video_paths = extract.find_videos(video_dir, include=[], exclude=[])
+    taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
+    if new_stem.lower() in taken_stems - {stem.lower()}:
+        raise RenameError(f"'{new_stem}' is already taken by another video or track")
+    if new_filename != video_path.name:
+        try:
+            apply_rename(RenamePlan(video_path, new_filename), store)
+        except (OSError, metadata.TrackFormatError) as exc:
+            raise RenameError(f"Cannot rename '{video_path.name}': {exc}") from exc
+        LOGGER.info(f"Renamed: {video_path.name} -> {new_filename}")
+    return new_stem
+
+
 def plan_renames(
     video_dir: Path, store: metadata.MetadataStore, car_model: str, include_all: bool
 ) -> list[RenamePlan]:
@@ -423,9 +514,7 @@ def plan_renames(
     """
     tracks_by_stem = extract.load_tracks_by_stem(store)
     video_paths = extract.find_videos(video_dir, include=[], exclude=[])
-    taken_stems = {path.stem.lower() for path in video_paths} | {
-        stem.lower() for stem in tracks_by_stem
-    }
+    taken_stems = find_taken_stems(video_paths, tracks_by_stem)
 
     candidates = []
     for video_path in video_paths:
@@ -489,7 +578,9 @@ def apply_rename(plan: RenamePlan, store: metadata.MetadataStore) -> None:
         If a video with the new name already exists.
     """
     new_path = plan.video_path.with_name(plan.new_filename)
-    if new_path.exists():
+    # On case-insensitive file systems, a rename that only changes the letter case finds the
+    # video itself under the new name.
+    if new_path.exists() and not new_path.samefile(plan.video_path):
         raise FileExistsError(f"'{new_path}' already exists")
     old_stem = plan.video_path.stem
     plan.video_path.rename(new_path)

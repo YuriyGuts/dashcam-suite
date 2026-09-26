@@ -128,6 +128,7 @@ Local HTTP server for the static web app, `.metadata/`, and the videos in `DIR`.
   - Coverage mode: all filtered routes as thin translucent lines. Optional heatmap layer.
   - Hover shows the time and video offset.
 - Trip detail: stats, street list, and a closable video panel that loads nothing until opened. A marker follows playback; clicking the route seeks the video. Disabled when the video is unreachable. Uses the preview if one exists.
+- Renaming: the trip name in the trip detail can be edited in place (date and extension fixed), prefilled with the current name, with the `rename` suggestion one click away. Names are validated like `rename`; errors appear under the field. A playing video is reopened at the same position under the new name. Only available when the server listens on a loopback address, and only for same-origin JSON requests addressed to a loopback host name.
 
 ## Metadata Layout
 

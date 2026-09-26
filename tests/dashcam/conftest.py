@@ -10,6 +10,7 @@ import pytest
 from osmium.osm import mutable
 
 from dashcam import cleaning
+from dashcam import enrich
 from dashcam import metadata
 from dashcam import osm
 from dashcam.config import get_platform_defaults
@@ -237,3 +238,23 @@ def make_track():
         )
 
     return _make_track
+
+
+@pytest.fixture
+def make_named_track(make_track):
+    """Make a track with a street list, enriched from its current samples."""
+
+    def _make_named_track(video_filename, streets, start_hour=11):
+        track = make_track(video_filename=video_filename)
+        for index, sample in enumerate(track.clean_samples):
+            sample.time = datetime.datetime(2026, 9, 25, start_hour, 17, index, tzinfo=KYIV_SUMMER)
+        track.streets = streets
+        track.enrichment = metadata.Enrichment(
+            enricher_version=enrich.ENRICHER_VERSION,
+            osm_timestamp="2026-09-25T20:24:36Z",
+            samples_digest=enrich.compute_samples_digest(track),
+            enriched_at="2026-09-26T20:00:00+03:00",
+        )
+        return track
+
+    return _make_named_track

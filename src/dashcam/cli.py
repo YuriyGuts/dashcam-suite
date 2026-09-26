@@ -514,6 +514,7 @@ def main() -> None:
                 max_interpolation_gap_s=config.max_interpolation_gap_s,
                 host=parsed_args.host,
                 port=parsed_args.port,
+                car_model=config.car_model,
             )
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)

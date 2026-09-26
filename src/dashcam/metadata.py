@@ -365,10 +365,14 @@ class MetadataStore:
         """Write a track atomically, so an interruption never leaves a truncated file."""
         self.ensure_dirs()
         path = self.track_path(track.stem)
+        self.write_track_file(track, path)
+        return path
+
+    def write_track_file(self, track: Track, path: Path) -> None:
+        """Write a track to the given path atomically."""
         partial_path = path.with_name(f".{path.name}.partial")
         partial_path.write_text(dump_track(track), encoding="utf-8")
         os.replace(partial_path, path)
-        return path
 
     def move_to_trash(self, stem: str) -> list[Path]:
         """
@@ -394,9 +398,12 @@ class MetadataStore:
         """Rename a track (and its preview) after its video was renamed."""
         track = self.load_track(old_stem)
         track.video_filename = new_video_filename
-        self.save_track(track)
+        old_track_path = self.track_path(old_stem)
+        # The track is updated under its old name and then renamed, so that a rename that only
+        # changes the letter case works on case-insensitive file systems.
+        self.write_track_file(track, old_track_path)
         if track.stem != old_stem:
-            self.track_path(old_stem).unlink()
+            old_track_path.rename(self.track_path(track.stem))
             old_preview_path = self.preview_path(old_stem)
             if old_preview_path.exists():
                 old_preview_path.rename(self.preview_path(track.stem))

@@ -768,3 +768,263 @@ def test_server_reports_other_errors(app, capsys):
 
     # THEN the traceback is printed
     assert "RuntimeError: boom" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", True),
+        ("127.0.0.2", True),
+        ("::1", True),
+        ("[::1]", True),
+        ("localhost", True),
+        ("LOCALHOST", True),
+        ("0.0.0.0", False),
+        ("", False),
+        ("192.168.1.5", False),
+        ("example.com", False),
+    ],
+)
+def test_is_loopback_host(host, expected):
+    assert serve.is_loopback_host(host) is expected
+
+
+@pytest.mark.parametrize(
+    ("host_header", "expected_host"),
+    [
+        ("127.0.0.1:8765", "127.0.0.1"),
+        ("[::1]:8765", "[::1]"),
+        ("localhost", "localhost"),
+    ],
+)
+def test_split_host_header(host_header, expected_host):
+    assert serve.split_host_header(host_header) == expected_host
+
+
+STUSA = {"name": "вулиця Василя Стуса", "distance_m": 967}
+
+
+@pytest.fixture
+def rename_server(video_dir, store):
+    """Run a server that allows renaming, and yield its base URL."""
+    app = serve.VisualizerApp(
+        video_dir, store.root, max_interpolation_gap_s=60, car_model="CX-5", allow_rename=True
+    )
+    http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
+    thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{http_server.server_address[1]}"
+    http_server.shutdown()
+    http_server.server_close()
+    thread.join()
+
+
+@pytest.fixture
+def add_trip_with_video(video_dir, store, make_named_track):
+    def _add_trip_with_video(video_filename="2026-09-25 Trip 11-17.mp4"):
+        (video_dir / video_filename).write_bytes(b"video")
+        store.save_track(make_named_track(video_filename, [STUSA]))
+
+    return _add_trip_with_video
+
+
+def post_rename(base_url, data, headers=None):
+    """Send a rename request like the web app does, and return the status and parsed body."""
+    body = data if isinstance(data, bytes) else json.dumps(data).encode("utf-8")
+    request_headers = {"Content-Type": "application/json", "Origin": base_url}
+    request_headers.update(headers or {})
+    request = urllib.request.Request(
+        f"{base_url}/api/rename", data=body, headers=request_headers, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def test_server_renames_trip(rename_server, video_dir, store, add_trip_with_video):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN the web app renames it
+    status, body = post_rename(
+        rename_server, {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"}
+    )
+
+    # THEN the files are renamed and the index lists the new trip ID
+    assert (status, body) == (200, {"id": "2026-09-25 To Work"})
+    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+    _, _, trips_body = fetch(f"{rename_server}/api/trips")
+    assert [trip["id"] for trip in json.loads(trips_body)["trips"]] == ["2026-09-25 To Work"]
+
+
+def test_server_reports_rename_conflict(rename_server, add_trip_with_video):
+    # GIVEN two trips
+    add_trip_with_video("2026-09-25 Trip 11-17.mp4")
+    add_trip_with_video("2026-09-25 To Work.mp4")
+
+    # WHEN renaming one to the name of the other
+    status, body = post_rename(
+        rename_server, {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"}
+    )
+
+    # THEN the conflict is explained
+    assert status == 409
+    assert "already taken" in body["error"]
+
+
+def test_server_rejects_rename_when_disabled(server, add_trip_with_video):
+    # GIVEN a server that does not allow renaming
+    add_trip_with_video()
+
+    # WHEN renaming
+    status, body = post_rename(
+        server, {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"}
+    )
+
+    # THEN it is refused
+    assert status == 403
+    assert "localhost" in body["error"]
+
+
+def test_server_rejects_rename_without_json(rename_server, add_trip_with_video):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN a form or another website posts plain text, which needs no CORS preflight
+    status, _ = post_rename(
+        rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Content-Type": "text/plain"},
+    )
+
+    # THEN it is refused
+    assert status == 415
+
+
+def test_server_rejects_cross_origin_rename(rename_server, video_dir, add_trip_with_video):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN another website sends the request
+    status, _ = post_rename(
+        rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Origin": "https://example.com"},
+    )
+
+    # THEN it is refused and nothing is renamed
+    assert status == 403
+    assert [path.name for path in video_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
+def test_server_rejects_rename_with_foreign_host(rename_server, add_trip_with_video):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN the request addresses the server by another name (as after DNS rebinding)
+    status, body = post_rename(
+        rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers={"Host": "attacker.example:8765", "Origin": "http://attacker.example:8765"},
+    )
+
+    # THEN it is refused
+    assert status == 403
+    assert "Host" in body["error"]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"not json",
+        {"id": "2026-09-25 Trip 11-17"},
+        {"id": 5, "filename": "2026-09-25 A.mp4"},
+        b"",
+    ],
+)
+def test_server_rejects_invalid_rename_request(rename_server, add_trip_with_video, data):
+    add_trip_with_video()
+
+    status, _ = post_rename(rename_server, data)
+
+    assert status == 400
+
+
+def test_server_rejects_post_to_other_paths(rename_server):
+    request = urllib.request.Request(
+        f"{rename_server}/api/trips",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(request)
+
+    assert exc_info.value.code == 404
+
+
+def test_server_api_suggestion(rename_server, add_trip_with_video):
+    # GIVEN a trip with streets
+    add_trip_with_video()
+
+    # WHEN asking for a suggested name
+    status, _, body = fetch(f"{rename_server}/api/suggestion?id=2026-09-25%20Trip%2011-17")
+
+    # THEN the suggestion is returned
+    assert status == 200
+    assert json.loads(body) == {"filename": "2026-09-25 Vasylia Stusa (CX-5).mp4"}
+
+
+def test_server_api_suggestion_for_unknown_trip(rename_server):
+    status, _, body = fetch(f"{rename_server}/api/suggestion?id=nope")
+
+    assert status == 409
+    assert "No track" in json.loads(body)["error"]
+
+
+def test_server_api_suggestion_when_disabled(server):
+    status, _, _ = fetch(f"{server}/api/suggestion?id=nope")
+
+    assert status == 403
+
+
+def test_get_trips_reports_whether_renaming_is_allowed(video_dir, store, add_track):
+    # GIVEN apps with and without renaming
+    add_track()
+    rename_app = serve.VisualizerApp(video_dir, store.root, 60, allow_rename=True)
+    read_only_app = serve.VisualizerApp(video_dir, store.root, 60)
+
+    # WHEN listing the trips
+    # THEN the web app learns whether to offer renaming
+    assert rename_app.get_trips()["can_rename"] is True
+    assert read_only_app.get_trips()["can_rename"] is False
+
+
+def test_serve_disables_renaming_on_all_interfaces(video_dir, store, monkeypatch, caplog):
+    # GIVEN a server started on all interfaces, which stops right away
+    caplog.set_level(logging.INFO)
+    started_apps = []
+
+    class FakeServer:
+        server_address = ("0.0.0.0", 8765)
+
+        def __init__(self, server_address, app):
+            started_apps.append(app)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(serve, "VisualizerServer", FakeServer)
+
+    # WHEN running it
+    serve.serve(video_dir, store.root, max_interpolation_gap_s=60, host="0.0.0.0")
+
+    # THEN renaming is disabled
+    assert started_apps[0].allow_rename is False
+    assert "Renaming trips in the browser is disabled" in caplog.text

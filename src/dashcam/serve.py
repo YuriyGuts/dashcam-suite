@@ -6,6 +6,8 @@ Routes:
     /                        The web app (`dashcam/web`).
     /api/trips               The trip index, with the video and preview availability of each trip.
     /api/geometry            Simplified routes of all trips, for the coverage mode.
+    /api/suggestion?id=ID    The suggested new filename of a trip (see `dashcam.rename`).
+    POST /api/rename         Rename a trip: `{"id": ID, "filename": NEW_FILENAME}`.
     /tracks/<stem>.json      Track files.
     /previews/<stem>.mp4     Previews.
     /videos/<filename>       Trip videos from the video directory.
@@ -13,7 +15,11 @@ Routes:
 Files are served with HTTP range requests (`206 Partial Content`), which browsers need to seek
 in videos.
 
-The server binds to `127.0.0.1` by default, so it is only reachable from this machine.
+The server binds to `127.0.0.1` by default, so it is only reachable from this machine. Renaming
+is only enabled on a loopback address, and only for requests from the web app itself: they must
+send JSON (which other websites cannot do without a CORS preflight that the server does not
+allow), come from the same origin, and address the server by a loopback name (which defeats DNS
+rebinding).
 
 Usage example:
 > dashcam serve ~/Videos/Dashcam --port 8765
@@ -21,6 +27,7 @@ Usage example:
 
 import dataclasses
 import http.server
+import ipaddress
 import json
 import logging
 import os
@@ -35,6 +42,7 @@ from dashcam import cleaning
 from dashcam import extract
 from dashcam import geo
 from dashcam import metadata
+from dashcam import rename
 
 # Default bind address and port.
 DEFAULT_HOST = "127.0.0.1"
@@ -69,6 +77,12 @@ CONTENT_TYPES = {
     ".avi": "video/x-msvideo",
 }
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
+
+# The largest request body accepted, in bytes.
+MAX_REQUEST_BODY_SIZE = 16 * 1024
+
+# Host names that always refer to this machine.
+LOOPBACK_HOST_NAMES = frozenset(["localhost"])
 
 # Sample statuses that have coordinates.
 LOCATED_STATUSES = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
@@ -135,6 +149,24 @@ def safe_join(root: Path, relative_path: str) -> Path | None:
         if not segment or segment.startswith(".") or "\\" in segment or "\0" in segment:
             return None
     return root.joinpath(*segments)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Check whether a host name or address refers to this machine only."""
+    host = host.strip("[]").lower()
+    if host in LOOPBACK_HOST_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def split_host_header(host_header: str) -> str:
+    """Return the host part of a `Host` header (`name:port`, or `[address]:port` for IPv6)."""
+    if host_header.startswith("["):
+        return host_header[: host_header.find("]") + 1]
+    return host_header.rsplit(":", 1)[0] if ":" in host_header else host_header
 
 
 def get_content_type(path: Path) -> str:
@@ -286,10 +318,19 @@ def is_index_stale(store: metadata.MetadataStore) -> bool:
 class VisualizerApp:
     """Data behind the HTTP routes."""
 
-    def __init__(self, video_dir: Path, metadata_dir: Path, max_interpolation_gap_s: float):
+    def __init__(
+        self,
+        video_dir: Path,
+        metadata_dir: Path,
+        max_interpolation_gap_s: float,
+        car_model: str = "",
+        allow_rename: bool = False,
+    ):
         self.video_dir = video_dir
         self.store = metadata.MetadataStore(metadata_dir)
         self.max_interpolation_gap_s = max_interpolation_gap_s
+        self.car_model = car_model
+        self.allow_rename = allow_rename
         self.summaries = TrackSummaryCache(self.store)
         self.index_lock = threading.Lock()
 
@@ -316,6 +357,7 @@ class VisualizerApp:
         """
         index = self.load_index()
         index["video_dir"] = str(self.video_dir.resolve())
+        index["can_rename"] = self.allow_rename
         for trip in index["trips"]:
             video_path = self.video_path(trip["video_filename"])
             is_video_available = video_path is not None and video_path.is_file()
@@ -346,6 +388,37 @@ class VisualizerApp:
             if summary is not None:
                 geometry[trip["id"]] = summary.geometry
         return {"trips": geometry}
+
+    def suggest_filename(self, trip_id: str) -> str:
+        """
+        Suggest a new filename for a trip.
+
+        Raises
+        ------
+        rename.RenameError
+            If the trip cannot be named.
+        """
+        with self.index_lock:
+            return rename.suggest_trip_filename(self.video_dir, self.store, trip_id, self.car_model)
+
+    def rename_trip(self, trip_id: str, new_filename: str) -> str:
+        """
+        Rename a trip and rebuild the index.
+
+        Returns
+        -------
+        str
+            The new ID of the trip.
+
+        Raises
+        ------
+        rename.RenameError
+            If the trip cannot be renamed to this filename.
+        """
+        with self.index_lock:
+            new_id = rename.rename_trip(self.video_dir, self.store, trip_id, new_filename)
+            self.store.rebuild_index(self.max_interpolation_gap_s)
+        return new_id
 
     def warn_about_library(self) -> None:
         """Run the cheap consistency checks and log what the user may want to fix."""
@@ -413,12 +486,68 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self.handle_request(send_body=False)
 
+    def do_POST(self) -> None:
+        url_path = urllib.parse.urlsplit(self.path).path
+        if url_path != "/api/rename":
+            self.send_json_error(404, "Not found")
+            return
+        rejection = self.check_rename_request()
+        if rejection is not None:
+            self.send_json_error(*rejection)
+            return
+        try:
+            body_size = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            body_size = -1
+        if not 0 < body_size <= MAX_REQUEST_BODY_SIZE:
+            self.send_json_error(400, "Invalid request body size")
+            return
+        try:
+            request = json.loads(self.rfile.read(body_size))
+            trip_id = request["id"]
+            new_filename = request["filename"]
+            if not isinstance(trip_id, str) or not isinstance(new_filename, str):
+                raise TypeError("'id' and 'filename' must be strings")
+        except (ValueError, KeyError, TypeError) as exc:
+            self.send_json_error(400, f"Invalid request: {exc}")
+            return
+        try:
+            new_id = self.app.rename_trip(trip_id, new_filename.strip())
+        except rename.RenameError as exc:
+            self.send_json_error(409, str(exc))
+            return
+        self.send_json({"id": new_id}, send_body=True)
+
+    def check_rename_request(self) -> tuple[int, str] | None:
+        """
+        Check that renaming is enabled and that the request comes from the web app.
+
+        Returns
+        -------
+        tuple[int, str] | None
+            The HTTP status and message of the rejection, or None to accept the request.
+        """
+        if not self.app.allow_rename:
+            return 403, "Renaming is only available when the server listens on localhost"
+        host_header = self.headers.get("Host") or ""
+        if not is_loopback_host(split_host_header(host_header)):
+            return 403, "Unexpected Host header"
+        origin = self.headers.get("Origin")
+        if origin is not None and origin != f"http://{host_header}":
+            return 403, "Cross-origin requests are not allowed"
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            return 415, "Expected a JSON request"
+        return None
+
     def handle_request(self, send_body: bool) -> None:
         """Dispatch a GET or HEAD request."""
         url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         try:
             if url_path == "/api/trips":
                 self.send_json(self.app.get_trips(), send_body)
+            elif url_path == "/api/suggestion":
+                self.send_suggestion(send_body)
             elif url_path == "/api/geometry":
                 self.send_json(self.app.get_geometry(), send_body)
             elif url_path.startswith("/videos/"):
@@ -439,10 +568,30 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
             # Browsers abort video requests all the time, e.g. when seeking.
             self.close_connection = True
 
-    def send_json(self, data: t.Any, send_body: bool) -> None:
+    def send_suggestion(self, send_body: bool) -> None:
+        """Send the suggested filename of the trip given by the `id` query parameter."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        trip_id = (query.get("id") or [""])[0]
+        if not self.app.allow_rename:
+            self.send_json_error(
+                403, "Renaming is only available when the server listens on localhost"
+            )
+            return
+        try:
+            filename = self.app.suggest_filename(trip_id)
+        except rename.RenameError as exc:
+            self.send_json_error(409, str(exc), send_body)
+            return
+        self.send_json({"filename": filename}, send_body)
+
+    def send_json_error(self, status: int, message: str, send_body: bool = True) -> None:
+        """Send an error as a JSON response with an `error` message."""
+        self.send_json({"error": message}, send_body, status=status)
+
+    def send_json(self, data: t.Any, send_body: bool, status: int = 200) -> None:
         """Send a JSON response."""
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", CONTENT_TYPES[".json"])
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -513,15 +662,25 @@ def serve(
     max_interpolation_gap_s: float,
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
+    car_model: str = "",
 ) -> None:
     """Run the visualizer server until interrupted."""
-    app = VisualizerApp(video_dir, metadata_dir, max_interpolation_gap_s)
+    allow_rename = is_loopback_host(host)
+    app = VisualizerApp(
+        video_dir,
+        metadata_dir,
+        max_interpolation_gap_s,
+        car_model=car_model,
+        allow_rename=allow_rename,
+    )
     app.warn_about_library()
     trip_count = len(app.load_index()["trips"])
 
     server = VisualizerServer((host, port), app)
     bound_port = server.server_address[1]
     LOGGER.info(f"Serving {trip_count} trips at {format_server_url(host, int(bound_port))}")
+    if not allow_rename:
+        LOGGER.info("Renaming trips in the browser is disabled on non-loopback addresses")
     LOGGER.info("Press Ctrl+C to stop")
     try:
         server.serve_forever()

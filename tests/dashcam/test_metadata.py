@@ -285,6 +285,21 @@ def test_metadata_store_rename_trip(make_track, store):
     assert store.preview_path("2026-09-25 Horodotska (CX-5)").read_bytes() == b"preview"
 
 
+def test_metadata_store_rename_trip_changing_only_letter_case(make_track, store):
+    # GIVEN a track with a preview (the test directory may be on a case-insensitive file system)
+    store.save_track(make_track(video_filename="2026-09-25 to work.mp4"))
+    store.previews_dir.mkdir()
+    store.preview_path("2026-09-25 to work").write_bytes(b"preview")
+
+    # WHEN renaming it to the same name in another letter case
+    store.rename_trip("2026-09-25 to work", "2026-09-25 To Work.mp4")
+
+    # THEN the track and preview exist once, under the new name
+    assert [path.name for path in store.list_track_paths()] == ["2026-09-25 To Work.json"]
+    assert store.load_track("2026-09-25 To Work").video_filename == "2026-09-25 To Work.mp4"
+    assert [path.name for path in store.previews_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
+
+
 def test_metadata_store_rebuild_index(make_track, store):
     # GIVEN a good track, a track without an overlay, and an unreadable track
     store.save_track(make_track())
