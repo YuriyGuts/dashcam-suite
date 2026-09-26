@@ -25,6 +25,7 @@ from pathlib import Path
 
 from dashcam import encode
 from dashcam import extract
+from dashcam import maintenance
 from dashcam.config import Config
 from dashcam.config import load_config
 from dashcam.system import configure_logging
@@ -230,6 +231,37 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
     )
     add_extract_arguments(extract_parser, config)
 
+    status_parser = subparsers.add_parser(
+        name="status",
+        help="List trips, unprocessed videos, and unreachable tracks.",
+    )
+    add_video_dir_argument(status_parser)
+    add_metadata_dir_argument(status_parser, config)
+
+    forget_parser = subparsers.add_parser(
+        name="forget",
+        help="Move the tracks (and previews) of the given videos to the trash.",
+    )
+    forget_parser.add_argument(
+        "names",
+        metavar="VIDEO",
+        help="Video filename or name without extension.",
+        nargs="+",
+    )
+    add_metadata_dir_argument(forget_parser, config)
+
+    doctor_parser = subparsers.add_parser(
+        name="doctor",
+        help="Check the metadata for problems and optionally fix the safe ones.",
+    )
+    add_video_dir_argument(doctor_parser)
+    add_metadata_dir_argument(doctor_parser, config)
+    doctor_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply safe fixes: reconnect renamed videos, rebuild the index, delete leftovers.",
+    )
+
     parsed_args = parser.parse_args(args)
     return parsed_args
 
@@ -295,6 +327,21 @@ def main() -> None:
             failed_count = run_encode_command(parsed_args, config)
         elif parsed_args.command == "extract":
             failed_count = run_extract_command(parsed_args, config)
+        elif parsed_args.command == "status":
+            maintenance.print_status(
+                parsed_args.video_dir, parsed_args.metadata_dir, config.max_interpolation_gap_s
+            )
+        elif parsed_args.command == "forget":
+            failed_count = maintenance.forget_trips(
+                parsed_args.names, parsed_args.metadata_dir, config.max_interpolation_gap_s
+            )
+        elif parsed_args.command == "doctor":
+            failed_count = maintenance.run_doctor(
+                video_dir=parsed_args.video_dir,
+                metadata_dir=parsed_args.metadata_dir,
+                max_interpolation_gap_s=config.max_interpolation_gap_s,
+                apply_fixes=parsed_args.fix,
+            )
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)
         sys.exit(1)

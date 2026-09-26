@@ -151,6 +151,9 @@ def recorded_calls(monkeypatch):
 
     monkeypatch.setattr("dashcam.cli.extract.extract_videos", recorder("extract_videos"))
     monkeypatch.setattr("dashcam.cli.extract.reclean_tracks", recorder("reclean_tracks"))
+    monkeypatch.setattr("dashcam.cli.maintenance.print_status", recorder("print_status", None))
+    monkeypatch.setattr("dashcam.cli.maintenance.forget_trips", recorder("forget_trips"))
+    monkeypatch.setattr("dashcam.cli.maintenance.run_doctor", recorder("run_doctor"))
     return calls
 
 
@@ -214,3 +217,48 @@ def test_main_runs_reclean(monkeypatch, config, recorded_calls):
     # THEN only recleaning runs
     assert [call[0] for call in recorded_calls] == ["reclean_tracks"]
     assert recorded_calls[0][1][0] == Path("meta")
+
+
+def test_main_runs_status(monkeypatch, config, recorded_calls):
+    # GIVEN `status` with a directory
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["status", "videos"])
+
+    # THEN the status is printed for that directory
+    assert exit_code == 0
+    assert recorded_calls[0][0] == "print_status"
+    assert recorded_calls[0][1][0] == Path("videos")
+
+
+def test_main_runs_forget(monkeypatch, config, recorded_calls):
+    # GIVEN `forget` with two names
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["forget", "a.mp4", "b"])
+
+    # THEN both names are forgotten
+    assert recorded_calls[0][0] == "forget_trips"
+    assert recorded_calls[0][1][0] == ["a.mp4", "b"]
+
+
+def test_main_runs_doctor_with_fix(monkeypatch, config, recorded_calls):
+    # GIVEN `doctor --fix`
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["doctor", "--fix"])
+
+    # THEN fixes are applied
+    assert recorded_calls[0][0] == "run_doctor"
+    assert recorded_calls[0][2]["apply_fixes"] is True
+
+
+def test_main_exits_with_error_when_doctor_finds_errors(monkeypatch, config):
+    # GIVEN a doctor run that finds an error
+    monkeypatch.setattr("dashcam.cli.maintenance.run_doctor", lambda **kwargs: 1)
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["doctor"])
+
+    # THEN the exit code signals failure
+    assert exit_code == 1
