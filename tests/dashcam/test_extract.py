@@ -247,7 +247,7 @@ def test_plan_extraction_with_changed_content(store, make_video_file, save_track
 
     # THEN it is extracted again, without the old overrides, and the old track is in the trash
     assert [item.video_path for item in planned] == [video_path]
-    assert planned[0].overrides == cleaning.Overrides()
+    assert planned[0].previous_track is None
     assert not store.track_path(video_path.stem).exists()
     assert len(list(store.trash_dir.iterdir())) == 1
 
@@ -293,7 +293,45 @@ def test_plan_extraction_with_force_keeps_overrides(store, make_video_file, save
 
     # THEN it is extracted again with the same overrides
     assert [item.video_path for item in planned] == [video_path]
-    assert planned[0].overrides == overrides
+    assert planned[0].previous_track is not None
+    assert planned[0].previous_track.overrides == overrides
+
+
+def test_make_extract_job_keeps_previous_track_data(tmp_path, config, make_track):
+    # GIVEN a planned re-extraction of a track with overrides and a street list
+    previous_track = make_track()
+    previous_track.streets = [{"name": "Horodotska", "distance_m": 900}]
+    previous_track.localities = {"start": {"name": "Lviv", "place": "city"}, "end": None}
+    previous_track.enrichment = metadata.Enrichment(
+        enricher_version=1,
+        osm_timestamp="2026-09-25T20:24:36Z",
+        samples_digest="abc",
+        enriched_at="2026-09-26T20:00:00+03:00",
+    )
+    planned = extract.PlannedExtraction(tmp_path / "trip.mp4", "100:abc", previous_track)
+
+    # WHEN defining the job
+    job_def = extract.make_extract_job(planned, tmp_path, config, make_preview=False)
+
+    # THEN the job carries the overrides and the street data
+    assert job_def.overrides == previous_track.overrides
+    assert job_def.streets == previous_track.streets
+    assert job_def.localities == previous_track.localities
+    assert job_def.enrichment == previous_track.enrichment
+
+
+def test_make_extract_job_for_new_video(tmp_path, config):
+    # GIVEN a planned extraction without a previous track
+    planned = extract.PlannedExtraction(tmp_path / "trip.mp4", "100:abc")
+
+    # WHEN defining the job
+    job_def = extract.make_extract_job(planned, tmp_path, config, make_preview=True)
+
+    # THEN the job starts with no overrides and no street data
+    assert job_def.overrides == cleaning.Overrides()
+    assert job_def.streets == []
+    assert job_def.enrichment is None
+    assert job_def.make_preview
 
 
 def test_plan_extraction_skips_unreadable_tracks(store, make_video_file):
@@ -507,6 +545,29 @@ def test_reclean_tracks_applies_overrides(config, store, make_track):
     recleaned_track = store.load_track(track.stem)
     assert failed_count == 0
     assert {sample.status for sample in recleaned_track.clean_samples} == {cleaning.STATUS_SPOOFED}
+
+
+def test_reclean_tracks_keeps_street_data(config, store, make_track):
+    # GIVEN an enriched track
+    track = make_track()
+    track.streets = [{"name": "Городоцька", "distance_m": 900}]
+    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    track.enrichment = metadata.Enrichment(
+        enricher_version=1,
+        osm_timestamp="2026-09-25T20:24:36Z",
+        samples_digest="0123456789abcdef",
+        enriched_at="2026-09-26T20:00:00+03:00",
+    )
+    store.save_track(track)
+
+    # WHEN recleaning
+    extract.reclean_tracks(store.root, config)
+
+    # THEN the street data is kept for `enrich` to check
+    recleaned_track = store.load_track(track.stem)
+    assert recleaned_track.streets == track.streets
+    assert recleaned_track.localities == track.localities
+    assert recleaned_track.enrichment == track.enrichment
 
 
 def test_reclean_tracks_reports_unreadable_tracks(config, store):

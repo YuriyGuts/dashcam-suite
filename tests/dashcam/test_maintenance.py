@@ -1,11 +1,14 @@
+import dataclasses
 import json
 import logging
 
 import pytest
 
 from dashcam import cleaning
+from dashcam import enrich
 from dashcam import maintenance
 from dashcam import metadata
+from dashcam import osm
 from dashcam import video
 
 
@@ -203,6 +206,67 @@ def test_run_doctor_deletes_leftover_files(video_dir, store, add_trip):
     # THEN both are deleted
     assert not orphan_preview_path.exists()
     assert not partial_path.exists()
+
+
+def test_run_doctor_deletes_leftover_osm_download(video_dir, store, add_trip):
+    # GIVEN a partial OSM download from an interrupted `enrich --update-osm`
+    add_trip("2026-09-25 Trip.mp4")
+    osm_dir = store.root / osm.OSM_DIR_NAME
+    osm_dir.mkdir()
+    download_path = osm_dir / ".download.partial.osm.pbf"
+    download_path.write_bytes(b"pbf")
+
+    # WHEN running the doctor with fixes
+    run_doctor(video_dir, store, apply_fixes=True)
+
+    # THEN the download is deleted
+    assert not download_path.exists()
+
+
+def test_run_doctor_reports_missing_street_list(
+    video_dir, store, add_trip, osm_metadata_dir, caplog
+):
+    # GIVEN OSM data and a track that was never enriched
+    add_trip("2026-09-25 Trip.mp4")
+
+    # WHEN running the doctor
+    run_doctor(video_dir, store)
+
+    # THEN enriching is suggested
+    assert "has no street list (run `dashcam enrich`)" in caplog.text
+
+
+def test_run_doctor_reports_street_list_from_older_osm_data(
+    video_dir, store, add_trip, osm_metadata_dir, road_database, caplog
+):
+    # GIVEN a track enriched against OSM data other than the current one
+    _, track = add_trip("2026-09-25 Trip.mp4")
+    enrich.enrich_track(track, road_database)
+    track.enrichment = dataclasses.replace(track.enrichment, osm_timestamp="2025-01-01T00:00:00Z")
+    store.save_track(track)
+
+    # WHEN running the doctor
+    run_doctor(video_dir, store)
+
+    # THEN enriching is suggested
+    assert "has an outdated street list (run `dashcam enrich`)" in caplog.text
+
+
+def test_run_doctor_accepts_current_street_list(
+    video_dir, store, add_trip, osm_metadata_dir, road_database, caplog
+):
+    # GIVEN a track enriched against the current OSM data
+    _, track = add_trip("2026-09-25 Trip.mp4")
+    enrich.enrich_track(track, road_database)
+    store.save_track(track)
+    store.rebuild_index(60)
+
+    # WHEN running the doctor
+    error_count = run_doctor(video_dir, store)
+
+    # THEN no problems are found
+    assert error_count == 0
+    assert "No problems found" in caplog.text
 
 
 def test_run_doctor_rebuilds_stale_index(video_dir, store, add_trip):

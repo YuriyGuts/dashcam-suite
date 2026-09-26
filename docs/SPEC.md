@@ -61,11 +61,14 @@ Port of `dashcam-encode`.
 - `--metadata-dir` defaults to `.metadata` in the current directory (config: `metadata_dir`).
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
 
-### `dashcam enrich [--update-osm]`
+### `dashcam enrich [--metadata-dir PATH] [--update-osm] [--osm-file PBF] [--force]`
 
-- `--update-osm` downloads the Geofabrik Ukraine extract once, keeps only named roads and localities in `.metadata/osm/`, and deletes the raw download.
-- Map matching: nearest named road consistent with the direction of travel, using a spatial index.
-- Produces an ordered street list per trip (with distance per street) and the start/end localities, stored in the track. Incremental.
+- `--update-osm` downloads the Geofabrik Ukraine extract (config: `osm_extract_url`), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
+- Storage: SQLite with R*Tree indexes. OSM ways are cut into chunks of up to 8 nodes so that index boxes stay small. Tags kept: `name`, `name:en`, `ref`, `highway`; localities also keep `place` and `population`.
+- Map matching: a hidden Markov model over the `ok` and `interpolated` samples. Candidates are streets (same `name` and `ref`) within 50 m. The cost grows with the distance to the road and the angle to the direction of travel; switching streets has a fixed cost, so GPS noise does not flicker between streets. Runs are split at gaps and position jumps.
+- Street list: stretches in travel order, with off-road and sub-50 m stretches dropped and consecutive repeats merged.
+- Localities: the place with the smallest distance relative to its radius (by place type, growing with population); none if the point is outside all radii.
+- Incremental: a track is re-enriched when it has no street list, its located samples changed, the OSM data changed, or the enricher version increased. `--force` re-enriches all tracks. `extract --reclean` and `--only` keep the street list; `enrich` and `doctor` detect whether it is outdated.
 
 ### `dashcam rename --suggest [--all]`
 
@@ -152,7 +155,11 @@ One JSON file. Header pretty-printed, one sample per line.
   "fingerprint": "252181145:9f2c41...",
   "extractor_version": 1,
   "overrides": {"bad_ranges_s": [], "good_ranges_s": []},
-  "streets": [],
+  "streets": [
+    {"name": "вулиця Івана Франка", "name_en": "Ivana Franka Street", "highway": "secondary", "distance_m": 401, "start_t": 117.0, "end_t": 173.0}
+  ],
+  "localities": {"start": {"name": "Львів", "name_en": "Lviv", "place": "city"}, "end": null},
+  "enrichment": {"enricher_version": 1, "osm_timestamp": "2026-09-25T20:24:36Z", "samples_digest": "3f0c...", "enriched_at": "2026-09-26T20:40:11+03:00"},
   "samples": [
     {"t": 0.0, "time": "2026-09-25T10:22:28+03:00", "lat": 49.828035, "lon": 24.00494, "kmh": 28, "status": "ok", "raw": "28 KM/H N49.828035 E24.004940 | 2026/09/25 10:22:28", "scores": [0.97, 0.99]}
   ]
@@ -162,6 +169,7 @@ One JSON file. Header pretty-printed, one sample per line.
 - `overrides.bad_ranges_s` / `overrides.good_ranges_s`: lists of `[start, end]` video-second ranges forced to spoofed or trusted. User-editable; survive `--reclean`.
 - `scores` are the lowest OCR cell scores of the GPS and clock fields; they decide which raw text is reliable.
 - `time_estimated: true` appears on samples whose time was derived across samples without a trustworthy clock.
+- `streets[].name` is the OSM `name`, or the `ref` for roads without a name. `ref` appears when the road has one. The other street fields come from the road driven the longest in the stretch.
 - Everything else is derived. `--reclean` regenerates `time`, `lat`, `lon`, and `status` from `raw` and `scores`.
 
 ## Validation
@@ -169,6 +177,7 @@ One JSON file. Header pretty-printed, one sample per line.
 - OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Ten hand-labeled strips are kept as a regression fixture.
 - Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
 - Encode: grouping, parsing, and naming tests against `video/raw-sd`.
+- Enrich: tests against a synthetic OSM map (intersections, GPS noise, ref-only highways, footways, localities); street lists of the sample trips checked against the map by eye.
 - Visualizer: browser smoke test.
 
 ## Build Order

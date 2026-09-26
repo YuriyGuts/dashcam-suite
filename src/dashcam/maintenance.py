@@ -7,8 +7,10 @@ import typing as t
 from pathlib import Path
 
 from dashcam import cleaning
+from dashcam import enrich
 from dashcam import extract
 from dashcam import metadata
+from dashcam import osm
 from dashcam import video
 
 # Severity levels of doctor findings.
@@ -149,9 +151,21 @@ def forget_trips(names: list[str], metadata_dir: Path, max_interpolation_gap_s: 
     return missing_count
 
 
+def read_osm_timestamp(store: metadata.MetadataStore) -> str | None:
+    """Return the timestamp of the OSM data, or None if there is no usable OSM data."""
+    database = osm.open_database(store.root)
+    if database is None:
+        return None
+    try:
+        return database.osm_timestamp
+    finally:
+        database.close()
+
+
 def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Finding]:
-    """Check track contents: format, names, versions, and suspicious results."""
+    """Check track contents: format, names, versions, street lists, and suspicious results."""
     findings = []
+    osm_timestamp = read_osm_timestamp(store)
     for stem, error in sorted(scan.unreadable_tracks.items()):
         findings.append(Finding(SEVERITY_ERROR, f"Track '{stem}.json' is unreadable: {error}"))
 
@@ -182,6 +196,19 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
                     f"Track '{stem}' was made by an older version "
                     f"(run `dashcam extract --reclean`, or `--only` to re-extract)",
                 )
+            )
+
+        # Street lists are only expected once there is OSM data to make them from.
+        is_extracted = track.extraction_status == metadata.EXTRACTION_OK
+        has_outdated_streets = (
+            is_extracted
+            and osm_timestamp is not None
+            and not enrich.is_enrichment_current(track, osm_timestamp)
+        )
+        if has_outdated_streets:
+            reason = "no street list" if track.enrichment is None else "an outdated street list"
+            findings.append(
+                Finding(SEVERITY_INFO, f"Track '{stem}' has {reason} (run `dashcam enrich`)")
             )
 
         has_gps_text = any(sample.left_text for sample in track.raw_samples)
@@ -307,11 +334,12 @@ def check_files(store: metadata.MetadataStore, max_interpolation_gap_s: float) -
             for path in store.previews_dir.glob("*.mp4")
             if not path.name.startswith(".") and path.stem not in track_stems
         ]
+    osm_dir = store.root / osm.OSM_DIR_NAME
     leftover_files = [
         path
-        for directory in (store.root, store.tracks_dir, store.previews_dir)
+        for directory in (store.root, store.tracks_dir, store.previews_dir, osm_dir)
         if directory.is_dir()
-        for path in directory.glob(".*.partial")
+        for path in directory.glob(".*.partial*")
     ]
     for path in sorted(orphan_previews + leftover_files):
         findings.append(

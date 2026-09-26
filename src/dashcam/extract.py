@@ -72,6 +72,12 @@ class ExtractJobDefinition:
     # Manual overrides kept from the previous track of the same content.
     overrides: cleaning.Overrides = dataclasses.field(default_factory=cleaning.Overrides)
 
+    # Street data kept from the previous track of the same content. `enrich` updates it if the
+    # new samples differ.
+    streets: list[dict] = dataclasses.field(default_factory=list)
+    localities: dict[str, dict | None] = dataclasses.field(default_factory=dict)
+    enrichment: metadata.Enrichment | None = None
+
 
 @dataclasses.dataclass(frozen=True)
 class ExtractJobResult:
@@ -248,7 +254,9 @@ def extract_video(job_def: ExtractJobDefinition) -> metadata.Track:
         video_height=video_info.height,
         duration_s=video_info.duration_s,
         overrides=job_def.overrides,
-        streets=[],
+        streets=job_def.streets,
+        localities=job_def.localities,
+        enrichment=job_def.enrichment,
         raw_samples=raw_samples,
         clean_samples=clean_samples,
     )
@@ -306,11 +314,11 @@ def load_tracks_by_stem(store: metadata.MetadataStore) -> dict[str, metadata.Tra
 
 @dataclasses.dataclass(frozen=True)
 class PlannedExtraction:
-    """A video to extract, with its fingerprint and the overrides to keep."""
+    """A video to extract, with its fingerprint and the previous track of the same content."""
 
     video_path: Path
     fingerprint: str
-    overrides: cleaning.Overrides
+    previous_track: metadata.Track | None = None
 
 
 def plan_extraction(
@@ -351,9 +359,9 @@ def plan_extraction(
             if fingerprint != track.fingerprint:
                 LOGGER.info(f"Content changed: {video_path.name} (old track moved to trash)")
                 store.move_to_trash(video_path.stem)
-                to_extract.append(PlannedExtraction(video_path, fingerprint, cleaning.Overrides()))
+                to_extract.append(PlannedExtraction(video_path, fingerprint))
             else:
-                to_extract.append(PlannedExtraction(video_path, fingerprint, track.overrides))
+                to_extract.append(PlannedExtraction(video_path, fingerprint, track))
             continue
 
         fingerprint = video.compute_fingerprint(video_path)
@@ -369,9 +377,35 @@ def plan_extraction(
                 f"Duplicate: '{video_path.name}' has the same content as '{old_stem}'; skipping"
             )
             continue
-        to_extract.append(PlannedExtraction(video_path, fingerprint, cleaning.Overrides()))
+        to_extract.append(PlannedExtraction(video_path, fingerprint))
 
     return to_extract
+
+
+def make_extract_job(
+    planned: PlannedExtraction, metadata_dir: Path, config: Config, make_preview: bool
+) -> ExtractJobDefinition:
+    """Define the job for a planned extraction, keeping what the previous track had."""
+    previous_track = planned.previous_track
+    if previous_track is None:
+        return ExtractJobDefinition(
+            video_path=planned.video_path,
+            fingerprint=planned.fingerprint,
+            metadata_dir=metadata_dir,
+            config=config,
+            make_preview=make_preview,
+        )
+    return ExtractJobDefinition(
+        video_path=planned.video_path,
+        fingerprint=planned.fingerprint,
+        metadata_dir=metadata_dir,
+        config=config,
+        make_preview=make_preview,
+        overrides=previous_track.overrides,
+        streets=previous_track.streets,
+        localities=previous_track.localities,
+        enrichment=previous_track.enrichment,
+    )
 
 
 def extract_videos(
@@ -406,15 +440,7 @@ def extract_videos(
 
     to_extract = plan_extraction(video_paths, store, force)
     job_defs = [
-        ExtractJobDefinition(
-            video_path=planned.video_path,
-            fingerprint=planned.fingerprint,
-            metadata_dir=metadata_dir,
-            config=config,
-            make_preview=make_previews,
-            overrides=planned.overrides,
-        )
-        for planned in to_extract
+        make_extract_job(planned, metadata_dir, config, make_previews) for planned in to_extract
     ]
     if make_previews:
         extracted_paths = {planned.video_path for planned in to_extract}

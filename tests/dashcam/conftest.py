@@ -1,15 +1,102 @@
 import contextlib
 import dataclasses
 import datetime
+import math
 import subprocess
 
+import osmium
+import osmium.io
 import pytest
+from osmium.osm import mutable
 
 from dashcam import cleaning
 from dashcam import metadata
+from dashcam import osm
 from dashcam.config import get_platform_defaults
 
 KYIV_SUMMER = datetime.timezone(datetime.timedelta(hours=3))
+
+# Origin of the synthetic map in `osm_pbf_path`, and its OSM data timestamp.
+MAP_ORIGIN = (49.8, 24.0)
+OSM_TIMESTAMP = "2026-09-25T20:24:36Z"
+
+# Roads of the synthetic map, as (tags, points in meters east and north of the origin).
+SYNTHETIC_ROADS = [
+    ({"highway": "primary", "name": "Main", "name:en": "Main Street"}, [(0, 0), (500, 0)]),
+    ({"highway": "primary", "name": "Main"}, [(500, 0), (1000, 0)]),
+    ({"highway": "residential", "name": "Cross"}, [(500, -500), (500, 0), (500, 500)]),
+    ({"highway": "residential", "name": "Parallel"}, [(0, 80), (1000, 80)]),
+    ({"highway": "trunk", "ref": "M06"}, [(0, -1000), (1000, -1000)]),
+    ({"highway": "footway", "name": "Path"}, [(0, -300), (1000, -300)]),
+    ({"highway": "residential"}, [(0, -600), (1000, -600)]),
+]
+
+# Localities of the synthetic map, as (tags, point in meters east and north of the origin).
+SYNTHETIC_LOCALITIES = [
+    ({"place": "city", "name": "Львів", "name:en": "Lviv", "population": "720 000"}, (0, 0)),
+    ({"place": "village", "name": "Сокільники"}, (0, -12000)),
+    ({"place": "suburb", "name": "Сихів"}, (1000, 0)),
+]
+
+
+def local_to_lat_lon(east_m, north_m):
+    """Convert meters east and north of the synthetic map origin to latitude and longitude."""
+    meters_per_degree = 6_371_000 * math.pi / 180
+    lat = MAP_ORIGIN[0] + north_m / meters_per_degree
+    lon = MAP_ORIGIN[1] + east_m / (meters_per_degree * math.cos(math.radians(MAP_ORIGIN[0])))
+    return lat, lon
+
+
+@pytest.fixture
+def to_lat_lon():
+    return local_to_lat_lon
+
+
+@pytest.fixture
+def osm_timestamp():
+    return OSM_TIMESTAMP
+
+
+@pytest.fixture
+def osm_pbf_path(tmp_path):
+    """Write a small OSM file with the synthetic roads and localities."""
+    pbf_path = tmp_path / "synthetic.osm.pbf"
+    header = osmium.io.Header()
+    header.set("osmosis_replication_timestamp", OSM_TIMESTAMP)
+    writer = osmium.SimpleWriter(str(pbf_path), header=header)
+    node_ids = {}
+    ways = []
+    for way_id, (tags, points) in enumerate(SYNTHETIC_ROADS, start=1):
+        for point in points:
+            if point not in node_ids:
+                node_ids[point] = len(node_ids) + 1
+        ways.append(mutable.Way(id=way_id, nodes=[node_ids[point] for point in points], tags=tags))
+    for (east_m, north_m), node_id in node_ids.items():
+        lat, lon = local_to_lat_lon(east_m, north_m)
+        writer.add_node(mutable.Node(id=node_id, location=(lon, lat)))
+    for index, (tags, (east_m, north_m)) in enumerate(SYNTHETIC_LOCALITIES):
+        lat, lon = local_to_lat_lon(east_m, north_m)
+        writer.add_node(mutable.Node(id=1000 + index, location=(lon, lat), tags=tags))
+    for way in ways:
+        writer.add_way(way)
+    writer.close()
+    return pbf_path
+
+
+@pytest.fixture
+def osm_metadata_dir(tmp_path, osm_pbf_path):
+    """A metadata directory with the synthetic map as its OSM data."""
+    metadata_dir = tmp_path / ".metadata"
+    osm.build_database(osm_pbf_path, osm.get_database_path(metadata_dir), source="test")
+    return metadata_dir
+
+
+@pytest.fixture
+def road_database(osm_metadata_dir):
+    database = osm.open_database(osm_metadata_dir)
+    assert database is not None
+    yield database
+    database.close()
 
 
 @pytest.fixture
@@ -143,6 +230,8 @@ def make_track():
             duration_s=float(sample_count),
             overrides=cleaning.Overrides(bad_ranges_s=[(1.0, 2.0)]),
             streets=[],
+            localities={},
+            enrichment=None,
             raw_samples=raw_samples,
             clean_samples=clean_samples,
         )

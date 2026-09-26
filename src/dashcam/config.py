@@ -72,6 +72,9 @@ class Config:
     max_merge_gap_hours: float
     max_interpolation_gap_s: float
 
+    # OpenStreetMap extract downloaded by `enrich --update-osm`.
+    osm_extract_url: str
+
 
 def get_platform_defaults() -> Config:
     """Return the default settings for the current platform."""
@@ -91,6 +94,7 @@ def get_platform_defaults() -> Config:
         "max_clock_date_diff_days": 1,
         "max_merge_gap_hours": 12,
         "max_interpolation_gap_s": 60,
+        "osm_extract_url": "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf",
     }
 
     if sys.platform == "darwin":

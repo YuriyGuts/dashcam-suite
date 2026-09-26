@@ -155,6 +155,7 @@ def recorded_calls(monkeypatch):
     monkeypatch.setattr("dashcam.cli.maintenance.forget_trips", recorder("forget_trips"))
     monkeypatch.setattr("dashcam.cli.maintenance.run_doctor", recorder("run_doctor"))
     monkeypatch.setattr("dashcam.cli.serve.serve", recorder("serve", None))
+    monkeypatch.setattr("dashcam.cli.enrich.enrich_tracks", recorder("enrich_tracks"))
     return calls
 
 
@@ -252,6 +253,45 @@ def test_main_runs_doctor_with_fix(monkeypatch, config, recorded_calls):
     # THEN fixes are applied
     assert recorded_calls[0][0] == "run_doctor"
     assert recorded_calls[0][2]["apply_fixes"] is True
+
+
+def test_main_runs_enrich_with_update_osm(monkeypatch, config, recorded_calls):
+    # GIVEN `enrich --update-osm`
+
+    # WHEN running the tool
+    exit_code = run_main(monkeypatch, config, ["enrich", "--update-osm"])
+
+    # THEN the OSM data is updated before enriching
+    name, _, kwargs = recorded_calls[0]
+    assert exit_code == 0
+    assert name == "enrich_tracks"
+    assert kwargs["update_osm"] is True
+    assert kwargs["osm_file"] is None
+    assert kwargs["force"] is False
+    assert kwargs["metadata_dir"] == Path(config.metadata_dir)
+
+
+def test_main_runs_enrich_with_osm_file_and_force(monkeypatch, config, recorded_calls):
+    # GIVEN `enrich` with a local OSM file and `--force`
+
+    # WHEN running the tool
+    run_main(monkeypatch, config, ["enrich", "--osm-file", "lviv.osm.pbf", "--force"])
+
+    # THEN the options are passed on
+    kwargs = recorded_calls[0][2]
+    assert kwargs["update_osm"] is False
+    assert kwargs["osm_file"] == Path("lviv.osm.pbf")
+    assert kwargs["force"] is True
+
+
+def test_main_exits_with_error_without_osm_data(monkeypatch, config, tmp_path):
+    # GIVEN a metadata directory without OSM data
+
+    # WHEN running `enrich`
+    exit_code = run_main(monkeypatch, config, ["enrich", "--metadata-dir", str(tmp_path)])
+
+    # THEN the tool fails
+    assert exit_code == 1
 
 
 def test_main_exits_with_error_when_doctor_finds_errors(monkeypatch, config):

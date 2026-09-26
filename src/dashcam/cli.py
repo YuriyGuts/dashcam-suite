@@ -17,6 +17,10 @@ Encode raw video files labeled from #15 to #319 and save them as a single output
 named "Road Trip.mp4" in the specified directory:
 > dashcam encode range 15 319 --output-name "Road Trip" --output-dir ~/Videos/Dashcam
 
+Download the OpenStreetMap data, then match all tracks in the default metadata directory
+(see `dashcam.config`) to streets:
+> dashcam enrich --update-osm
+
 Browse the trips in ~/Videos/Dashcam on a map at http://127.0.0.1:8765/:
 > dashcam serve ~/Videos/Dashcam
 """
@@ -27,6 +31,7 @@ import sys
 from pathlib import Path
 
 from dashcam import encode
+from dashcam import enrich
 from dashcam import extract
 from dashcam import maintenance
 from dashcam import serve
@@ -235,6 +240,31 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
     )
     add_extract_arguments(extract_parser, config)
 
+    enrich_parser = subparsers.add_parser(
+        name="enrich",
+        help="Match tracks to named roads and find where trips start and end.",
+    )
+    add_metadata_dir_argument(enrich_parser, config)
+    enrich_parser.add_argument(
+        "--update-osm",
+        action="store_true",
+        help=(
+            f"Download the OpenStreetMap extract ('{config.osm_extract_url}'), keep only named "
+            f"roads and localities, and delete the download."
+        ),
+    )
+    enrich_parser.add_argument(
+        "--osm-file",
+        metavar="PATH",
+        help="Build the OSM data from this local .osm.pbf file instead of downloading it.",
+        type=Path,
+    )
+    enrich_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Enrich all tracks, including those whose street lists are up to date.",
+    )
+
     status_parser = subparsers.add_parser(
         name="status",
         help="List trips, unprocessed videos, and unreachable tracks.",
@@ -354,6 +384,14 @@ def main() -> None:
             failed_count = run_encode_command(parsed_args, config)
         elif parsed_args.command == "extract":
             failed_count = run_extract_command(parsed_args, config)
+        elif parsed_args.command == "enrich":
+            failed_count = enrich.enrich_tracks(
+                metadata_dir=parsed_args.metadata_dir,
+                config=config,
+                update_osm=parsed_args.update_osm,
+                osm_file=parsed_args.osm_file,
+                force=parsed_args.force,
+            )
         elif parsed_args.command == "status":
             maintenance.print_status(
                 parsed_args.video_dir, parsed_args.metadata_dir, config.max_interpolation_gap_s

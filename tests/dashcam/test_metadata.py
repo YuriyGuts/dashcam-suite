@@ -23,6 +23,51 @@ def test_dump_track_round_trip(make_track):
     assert loaded_track == track
 
 
+def test_dump_track_round_trip_with_street_data(make_track):
+    # GIVEN an enriched track
+    track = make_track()
+    track.streets = [{"name": "Городоцька", "distance_m": 900}]
+    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    track.enrichment = metadata.Enrichment(
+        enricher_version=1,
+        osm_timestamp="2026-09-25T20:24:36Z",
+        samples_digest="0123456789abcdef",
+        enriched_at="2026-09-26T20:00:00+03:00",
+    )
+
+    # WHEN serializing and parsing it
+    loaded_track = metadata.load_track_text(metadata.dump_track(track))
+
+    # THEN it is unchanged, with the names written as UTF-8 text
+    assert loaded_track == track
+    assert "Городоцька" in metadata.dump_track(track)
+
+
+def test_load_track_text_without_street_data(make_track):
+    # GIVEN a track file written before `enrich` existed
+    data = json.loads(metadata.dump_track(make_track()))
+    del data["localities"]
+    del data["enrichment"]
+
+    # WHEN parsing it
+    track = metadata.load_track_text(json.dumps(data))
+
+    # THEN it has no street data
+    assert track.localities == {}
+    assert track.enrichment is None
+
+
+def test_load_track_text_with_invalid_enrichment(make_track):
+    # GIVEN a track whose enrichment lacks a field
+    data = json.loads(metadata.dump_track(make_track()))
+    data["enrichment"] = {"enricher_version": 1}
+
+    # WHEN parsing it
+    # THEN the error names the missing field
+    with pytest.raises(metadata.TrackFormatError, match="osm_timestamp"):
+        metadata.load_track_text(json.dumps(data))
+
+
 def test_dump_track_writes_one_sample_per_line(make_track):
     # GIVEN a track with three samples
     track = make_track(sample_count=3)
@@ -259,6 +304,20 @@ def test_metadata_store_rebuild_index(make_track, store):
     assert "distance_km" in trips_by_id["2026-09-25 Trip 11-17"]
     assert "distance_km" not in trips_by_id["2023-01-01 Old Camera"]
     assert json.loads(store.index_path.read_text(encoding="utf-8")) == index
+
+
+def test_metadata_store_rebuild_index_with_localities(make_track, store):
+    # GIVEN a track with a start locality and an unknown end locality
+    track = make_track()
+    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    store.save_track(track)
+
+    # WHEN rebuilding the index
+    index = store.rebuild_index(60)
+
+    # THEN the trip has the locality names
+    assert index["trips"][0]["start_locality"] == "Львів"
+    assert index["trips"][0]["end_locality"] is None
 
 
 def test_metadata_store_list_track_paths_ignores_temporary_files(make_track, store):

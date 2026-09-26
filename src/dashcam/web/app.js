@@ -75,6 +75,7 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 // Separators in text.
 const DOT = " \u00b7 ";
 const DASH = "\u2013";
+const ARROW = " \u2192 ";
 
 // Stroke icons on a 24 x 24 grid, drawn with the current text color.
 const ICON_PATHS = {
@@ -1161,6 +1162,14 @@ function renderStreets(container, track) {
   );
 }
 
+// Start and end localities, e.g. "Lviv -> Stryi", or one name for a trip within a locality.
+function formatLocalities(trip) {
+  const {start_locality: start, end_locality: end} = trip;
+  if (!start && !end) return null;
+  if (start === end) return start;
+  return `${start ?? "?"}${ARROW}${end ?? "?"}`;
+}
+
 function renderDetail() {
   const trip = state.focusedId ? state.tripsById.get(state.focusedId) : null;
   dom.tripBrowser.hidden = trip !== null;
@@ -1219,6 +1228,7 @@ function renderDetail() {
         el("code", {}, state.videoDir || "the video directory"),
         ".",
       );
+  const localitiesText = formatLocalities(trip);
   const streetsContainer = el("div", {});
   dom.tripDetail.replaceChildren(
     el(
@@ -1234,6 +1244,7 @@ function renderDetail() {
         {className: "detail-title"},
         el("h2", {}, trip.name),
         el("p", {className: "detail-subtitle"}, [formatDate(trip.date), timeRange].join(DOT)),
+        localitiesText ? el("p", {className: "detail-subtitle"}, localitiesText) : null,
       ),
     ),
     el("div", {className: "detail-actions"}, withoutEmpty([playButton, zoomButton, missingVideoNote])),

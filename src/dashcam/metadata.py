@@ -6,6 +6,7 @@ Layout of the metadata directory:
     index.json                  Summary of all trips, rebuilt from the tracks. Never edit.
     tracks/<video stem>.json    One track per video. Hand-editable.
     previews/<video stem>.mp4   Optional low-resolution previews for browsers without HEVC.
+    osm/                        Filtered OSM roads and localities (see `dashcam.osm`).
     trash/                      Replaced or forgotten tracks and previews.
 
 A track file has a pretty-printed header and one sample per line, so it can be read, edited,
@@ -47,6 +48,16 @@ class TrackFormatError(ValueError):
     """Raised when a track file cannot be parsed."""
 
 
+@dataclasses.dataclass(frozen=True)
+class Enrichment:
+    """What a street list was made from, to tell when it is outdated."""
+
+    enricher_version: int
+    osm_timestamp: str
+    samples_digest: str
+    enriched_at: str
+
+
 @dataclasses.dataclass
 class Track:
     """Everything extracted from one video."""
@@ -64,6 +75,8 @@ class Track:
     duration_s: float
     overrides: cleaning.Overrides
     streets: list[dict[str, t.Any]]
+    localities: dict[str, dict[str, t.Any] | None]
+    enrichment: Enrichment | None
     raw_samples: list[cleaning.RawSample]
     clean_samples: list[cleaning.CleanSample]
 
@@ -157,6 +170,8 @@ def dump_track(track: Track) -> str:
             "good_ranges_s": [list(time_range) for time_range in track.overrides.good_ranges_s],
         },
         "streets": track.streets,
+        "localities": track.localities,
+        "enrichment": dataclasses.asdict(track.enrichment) if track.enrichment else None,
     }
     header_json = json.dumps(header, indent=2, ensure_ascii=False)
 
@@ -184,6 +199,20 @@ def parse_time_ranges(value: t.Any, field_name: str) -> list[tuple[float, float]
             raise TrackFormatError(f"'{field_name}' has a range with start > end: {time_range!r}")
         time_ranges.append((float(start), float(end)))
     return time_ranges
+
+
+def parse_enrichment(value: t.Any) -> Enrichment | None:
+    """Validate and convert the `enrichment` field."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TrackFormatError("'enrichment' must be an object or null")
+    return Enrichment(
+        enricher_version=int(value["enricher_version"]),
+        osm_timestamp=str(value["osm_timestamp"]),
+        samples_digest=str(value["samples_digest"]),
+        enriched_at=str(value["enriched_at"]),
+    )
 
 
 def load_track_text(text: str) -> Track:
@@ -234,6 +263,8 @@ def load_track_text(text: str) -> Track:
             duration_s=float(data["video"]["duration_s"]),
             overrides=overrides,
             streets=list(data.get("streets") or []),
+            localities=dict(data.get("localities") or {}),
+            enrichment=parse_enrichment(data.get("enrichment")),
             raw_samples=raw_samples,
             clean_samples=clean_samples,
         )
@@ -288,6 +319,14 @@ def compute_trip_stats(track: Track, max_interpolation_gap_s: float) -> dict[str
         "status_counts": status_counts,
         "bbox": [min(lats), min(lons), max(lats), max(lons)] if lats else None,
     }
+
+
+def get_locality_name(track: Track, key: str) -> str | None:
+    """Return the name of the start or end locality of a track, if known."""
+    locality = track.localities.get(key)
+    if not isinstance(locality, dict):
+        return None
+    return locality.get("name")
 
 
 class MetadataStore:
@@ -386,6 +425,8 @@ class MetadataStore:
                 "extraction_status": track.extraction_status,
                 "has_preview": self.preview_path(track.stem).exists(),
                 "street_count": len(track.streets),
+                "start_locality": get_locality_name(track, "start"),
+                "end_locality": get_locality_name(track, "end"),
             }
             if track.extraction_status == EXTRACTION_OK:
                 trip.update(compute_trip_stats(track, max_interpolation_gap_s))
