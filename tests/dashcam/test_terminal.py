@@ -18,9 +18,11 @@ RECORD_TIME = time.mktime((2026, 9, 25, 14, 3, 11, 0, 0, -1))
 
 
 def test_configure_output_encoding_writes_utf8_to_a_redirected_stdout(monkeypatch):
-    # GIVEN stdout redirected to a file in a legacy Windows code page
+    # GIVEN stdout redirected to a file in a legacy Windows code page, with line endings kept as
+    # they are, so that the output is the same on every platform
     redirected_bytes = io.BytesIO()
-    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(redirected_bytes, encoding="cp1252"))
+    redirected_stdout = io.TextIOWrapper(redirected_bytes, encoding="cp1252", newline="\n")
+    monkeypatch.setattr(sys, "stdout", redirected_stdout)
 
     line = f"{terminal.ARROW} 2026-09-25 Вулиця.mp4"
 
