@@ -399,6 +399,8 @@ class VisualizerServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, server_address: tuple[str, int], app: VisualizerApp):
+        if ":" in server_address[0]:
+            self.address_family = socket.AF_INET6
         super().__init__(server_address, VisualizerRequestHandler)
         self.app = app
 

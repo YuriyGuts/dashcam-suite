@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 import threading
 import urllib.error
@@ -447,6 +448,37 @@ def test_format_server_url(host, expected_url):
 
     # THEN it is a browsable URL
     assert url == expected_url
+
+
+def can_bind_ipv6_loopback():
+    try:
+        with socket.socket(socket.AF_INET6) as ipv6_socket:
+            ipv6_socket.bind(("::1", 0))
+    except OSError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not can_bind_ipv6_loopback(), reason="IPv6 is not available")
+def test_server_listens_on_ipv6_address(app):
+    # GIVEN a server on the IPv6 loopback address
+    http_server = serve.VisualizerServer(("::1", 0), app)
+    thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    thread.start()
+
+    # WHEN requesting the web app
+    connection = http.client.HTTPConnection("::1", http_server.server_address[1])
+    try:
+        connection.request("GET", "/")
+        status = connection.getresponse().status
+    finally:
+        connection.close()
+        http_server.shutdown()
+        http_server.server_close()
+        thread.join()
+
+    # THEN it is served
+    assert status == 200
 
 
 def test_server_serves_web_app(server):
