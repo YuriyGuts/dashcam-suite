@@ -69,7 +69,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
   - The track is split into internally consistent segments, and only segments that chain together plausibly are kept. This catches long spoofs where fake points agree with each other.
   - Consecutive segments joined by jumps of at most 1000 km/h are one place. If most readable clocks in a place show an implausible date, all its segments are rejected. This catches spoofs that show the real date before switching the camera clock to their own.
   - A forward clock jump up to 12 h between good fixes with plausible positions is a merge gap, not a spoof.
-  - Time: the overlay clock is trusted only on good fixes. Elsewhere, time is derived from the video offset anchored to the nearest good sample. Camera-clock jumps (up to 12 h) during no-fix stretches mark merge gaps. Times derived across an uncertain boundary are flagged `time_estimated`.
+  - Time: the overlay clock is trusted only on good fixes. Elsewhere, time is derived from the video offset anchored to the previous or next good sample, preferring the one reached without crossing untrusted clocks, then the nearer one. Camera-clock jumps (up to 12 h) during no-fix stretches mark merge gaps. Times derived across an uncertain boundary are flagged `time_estimated`.
   - Gaps up to 60 s are interpolated linearly, including short spoofed or unreadable stretches. Longer gaps stay gaps.
   - Manual overrides from the track are applied last (see Track Format).
   - Sample statuses: `ok`, `interpolated`, `no_fix`, `spoofed`, `unreadable`.
@@ -132,7 +132,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Video name too long for its track name to fit | Report |
 | Orphaned previews or temp files (also in the library) | Delete (listed) |
 
-`--fix` never deletes a track; it moves it to `.metadata/trash/`. `extract` and `serve` run the cheap checks at startup and warn.
+`--fix` never deletes or moves a track anywhere but to its proper name. `extract` and `serve` run the cheap checks at startup and warn.
 
 ### `dashcam serve [-d DIR] [--host ADDRESS] [--port PORT] [--allow-rename]`
 
@@ -203,7 +203,7 @@ One JSON file. Header pretty-printed, one sample per line.
 ## Validation
 
 - OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Twelve hand-labeled strips (two with day-first dates) are kept as a regression fixture, and are also read back from synthetic videos scaled to 1920 and 1280 px. An end-to-end extraction test runs on a 6-second clip of a sample trip, with the picture above the overlay blacked out.
-- Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
+- Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), snow (camera glitches), and spoofed-only trips.
 - Encode: grouping, parsing, and naming tests, plus a readability check of ffmpeg-generated segments.
 - Enrich: tests against a synthetic OSM map (intersections, GPS noise, ref-only highways, footways, localities); street lists of the sample trips checked against the map by eye.
 - Visualizer: tests for every server route; the web app is checked by hand in the browser.

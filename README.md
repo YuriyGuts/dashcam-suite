@@ -46,7 +46,7 @@ Set the `DASHCAM_CONFIG` environment variable to use a different file.
 
 `dashcam config` prints the effective settings.
 
-Here is a full config with the default values:
+Here is a full config. The values are the defaults, except for `library_dir`, `raw_video_dir` and `hwaccel_options`, which depend on your machine:
 
 ```toml
 # Where the merged, encoded trip videos will go.
