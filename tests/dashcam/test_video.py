@@ -161,14 +161,14 @@ def test_iter_overlay_strips_reads_scaled_videos(tmp_path, filename, width, heig
     )
     _, strip = next(strips)
     strips.close()
-    reading = overlay.read_overlay(strip, overlay.get_nominal_layout())
+    reading = overlay.read_overlay(strip)
 
-    # THEN the strip has the nominal size and both fields match the label
+    # THEN the strip has the nominal size and both texts match the label
     assert strip.shape == (overlay.STRIP_HEIGHT, overlay.NOMINAL_FRAME_WIDTH)
-    assert reading.left_text == OVERLAY_LABELS[filename]["left"]
-    assert reading.right_text == OVERLAY_LABELS[filename]["right"]
-    assert reading.is_left_text_reliable
-    assert reading.is_right_text_reliable
+    assert reading.gps_text == OVERLAY_LABELS[filename]["gps"]
+    assert reading.clock_text == OVERLAY_LABELS[filename]["clock"]
+    assert reading.is_gps_text_reliable
+    assert reading.is_clock_text_reliable
 
 
 @pytest.mark.parametrize(

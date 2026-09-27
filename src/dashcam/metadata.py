@@ -162,23 +162,23 @@ def sample_to_dict(raw_sample: cleaning.RawSample, clean_sample: cleaning.CleanS
     }
     if clean_sample.time_estimated:
         sample_dict["time_estimated"] = True
-    sample_dict["raw"] = f"{raw_sample.left_text} | {raw_sample.right_text}"
-    sample_dict["scores"] = [round(raw_sample.left_score, 2), round(raw_sample.right_score, 2)]
+    sample_dict["raw"] = f"{raw_sample.gps_text} | {raw_sample.clock_text}"
+    sample_dict["scores"] = [round(raw_sample.gps_score, 2), round(raw_sample.clock_score, 2)]
     return sample_dict
 
 
 def samples_from_dict(sample_dict: dict) -> tuple[cleaning.RawSample, cleaning.CleanSample]:
     """Convert a track file line back to a raw and a clean sample."""
-    left_text, separator, right_text = sample_dict["raw"].partition(" | ")
+    gps_text, separator, clock_text = sample_dict["raw"].partition(" | ")
     if not separator:
         raise TrackFormatError(f"Invalid raw text: {sample_dict['raw']!r}")
-    left_score, right_score = sample_dict["scores"]
+    gps_score, clock_score = sample_dict["scores"]
     raw_sample = cleaning.RawSample(
         t=float(sample_dict["t"]),
-        left_text=left_text,
-        right_text=right_text,
-        left_score=float(left_score),
-        right_score=float(right_score),
+        gps_text=gps_text,
+        clock_text=clock_text,
+        gps_score=float(gps_score),
+        clock_score=float(clock_score),
     )
     time_text = sample_dict.get("time")
     clean_sample = cleaning.CleanSample(

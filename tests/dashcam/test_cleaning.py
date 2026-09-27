@@ -24,24 +24,24 @@ def settings():
     )
 
 
-def gps_text(lat, lon, kmh):
+def format_gps_text(lat, lon, kmh):
     lat_text = f"{'N' if lat >= 0 else 'S'}{abs(lat):.6f}"
     lon_text = f"{'E' if lon >= 0 else 'W'}{abs(lon):.6f}"
     return f"{kmh} KM/H {lat_text} {lon_text}"
 
 
-def clock_text(clock):
-    return clock.strftime(cleaning.CLOCK_FORMAT)
+def format_clock_text(clock):
+    return clock.strftime("%Y/%m/%d %H:%M:%S")
 
 
-def make_sample(t, clock, lat=None, lon=None, kmh=0, left_score=0.95, right_score=0.95):
-    left_text = gps_text(lat, lon, kmh) if lat is not None else ""
+def make_sample(t, clock, lat=None, lon=None, kmh=0, gps_score=0.95, clock_score=0.95):
+    gps_text = format_gps_text(lat, lon, kmh) if lat is not None else ""
     return cleaning.RawSample(
         t=t,
-        left_text=left_text,
-        right_text=clock_text(clock),
-        left_score=left_score if left_text else 0.1,
-        right_score=right_score,
+        gps_text=gps_text,
+        clock_text=format_clock_text(clock),
+        gps_score=gps_score if gps_text else 0.1,
+        clock_score=clock_score,
     )
 
 
@@ -278,10 +278,10 @@ def test_clean_track_flags_unreliable_text_as_unreadable(settings):
     bad_sample = raw_samples[5]
     raw_samples[5] = cleaning.RawSample(
         t=bad_sample.t,
-        left_text=bad_sample.left_text,
-        right_text=bad_sample.right_text,
-        left_score=0.3,
-        right_score=bad_sample.right_score,
+        gps_text=bad_sample.gps_text,
+        clock_text=bad_sample.clock_text,
+        gps_score=0.3,
+        clock_score=bad_sample.clock_score,
     )
 
     # WHEN cleaning it
@@ -297,10 +297,10 @@ def test_clean_track_marks_unparseable_text_as_unreadable(settings):
     raw_samples = make_drive(0, TRIP_START, 49.8, count=5)
     raw_samples[0] = cleaning.RawSample(
         t=0,
-        left_text="1 KM/H",
-        right_text=raw_samples[0].right_text,
-        left_score=0.9,
-        right_score=0.9,
+        gps_text="1 KM/H",
+        clock_text=raw_samples[0].clock_text,
+        gps_score=0.9,
+        clock_score=0.9,
     )
 
     # WHEN cleaning it
@@ -383,13 +383,118 @@ def test_clean_track_with_empty_input(settings):
 
 def test_parse_clock_text_with_invalid_date():
     # GIVEN a clock text with an impossible date
-    right_text = "2026/13/45 10:00:00"
+    clock_text = "2026/13/45 10:00:00"
 
     # WHEN parsing it
-    clock = cleaning.parse_clock_text(right_text)
+    clock = cleaning.parse_clock_text(clock_text)
 
     # THEN it is rejected
     assert clock is None
+
+
+@pytest.mark.parametrize(
+    ("clock_text", "is_day_first", "expected"),
+    [
+        ("2026/09/25 10:00:05", True, datetime.datetime(2026, 9, 25, 10, 0, 5)),
+        ("2026.9.5 7:00:05", False, datetime.datetime(2026, 9, 5, 7, 0, 5)),
+        ("25/09/2026 10:00:05", True, datetime.datetime(2026, 9, 25, 10, 0, 5)),
+        ("05/09/2026 10:00:05", True, datetime.datetime(2026, 9, 5, 10, 0, 5)),
+        ("05/09/2026 10:00:05", False, datetime.datetime(2026, 5, 9, 10, 0, 5)),
+        ("5.9.2026 10:00:05", True, datetime.datetime(2026, 9, 5, 10, 0, 5)),
+        ("25/09/2026 10:00:05", False, None),
+        ("25/09/26 10:00:05", True, None),
+        ("2026/09/25", True, None),
+        ("10:00:05", True, None),
+    ],
+)
+def test_parse_clock_text_with_date_format(clock_text, is_day_first, expected):
+    # GIVEN a clock text in one of the supported date formats, or a malformed one
+
+    # WHEN parsing it with the given date order
+    clock = cleaning.parse_clock_text(clock_text, is_day_first)
+
+    # THEN the date and time (or None) are returned
+    assert clock == expected
+
+
+@pytest.mark.parametrize(
+    ("clock_texts", "trip_date", "expected"),
+    [
+        # A number above 12 comes first.
+        (["05/09/2026 10:00:00", "13/09/2026 10:00:00"], None, True),
+        # A number above 12 comes second.
+        (["09/05/2026 10:00:00", "09/13/2026 10:00:00"], TRIP_DATE, False),
+        # Only ambiguous dates: the trip date decides.
+        (["09/05/2026 10:00:00"], datetime.date(2026, 9, 5), False),
+        (["09/05/2026 10:00:00"], datetime.date(2026, 5, 9), True),
+        # Only ambiguous dates and no trip date, or no dates with the year last.
+        (["09/05/2026 10:00:00"], None, True),
+        (["2026/09/25 10:00:00"], TRIP_DATE, True),
+    ],
+)
+def test_infer_day_first(clock_texts, trip_date, expected):
+    # GIVEN the clock texts of a video and its trip date
+
+    # WHEN inferring the date order
+    is_day_first = cleaning.infer_day_first(clock_texts, trip_date)
+
+    # THEN the order that fits the dates is chosen
+    assert is_day_first == expected
+
+
+def with_clock_format(raw_samples, clock_format):
+    return [
+        dataclasses.replace(
+            raw_sample,
+            clock_text=datetime.datetime.strptime(
+                raw_sample.clock_text, "%Y/%m/%d %H:%M:%S"
+            ).strftime(clock_format),
+        )
+        for raw_sample in raw_samples
+    ]
+
+
+def test_clean_track_with_month_first_clock(settings):
+    # GIVEN a drive whose camera shows the date month first (09/25/2026)
+    raw_samples = with_clock_format(make_drive(0, TRIP_START, 49.8, count=10), "%m/%d/%Y %H:%M:%S")
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, settings)
+
+    # THEN the fixes are accepted and timed by the camera clock
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 10
+    assert samples[0].time is not None
+    assert samples[0].time.replace(tzinfo=None) == TRIP_START
+
+
+def test_clean_track_with_ambiguous_day_first_clock(settings):
+    # GIVEN a drive on 5 September whose camera shows the date day first (05/09/2026)
+    start = datetime.datetime(2026, 9, 5, 10, 0, 0)
+    dated_settings = dataclasses.replace(settings, trip_date=start.date())
+    raw_samples = with_clock_format(make_drive(0, start, 49.8, count=10), "%d/%m/%Y %H:%M:%S")
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, dated_settings)
+
+    # THEN the date is read day first, matching the trip date
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 10
+    assert samples[0].time is not None
+    assert samples[0].time.replace(tzinfo=None) == start
+
+
+def test_clean_track_without_displayed_speed(settings):
+    # GIVEN a drive whose camera shows coordinates without the speed
+    raw_samples = [
+        dataclasses.replace(raw_sample, gps_text=raw_sample.gps_text.split(" KM/H ")[1])
+        for raw_sample in make_drive(0, TRIP_START, 49.8, count=20)
+    ]
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, settings)
+
+    # THEN the fixes are accepted without a speed
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 20
+    assert [sample.kmh for sample in samples] == [None] * 20
 
 
 def load_fixture_track(name):

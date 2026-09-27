@@ -27,8 +27,14 @@ from dashcam import overlay
 FIXTURE_DIR = Path(__file__).parents[1] / "tests" / "fixtures" / "overlay"
 LABELS_PATH = FIXTURE_DIR / "labels.json"
 
-# Width of a character cell including the shift padding on both sides.
-PADDED_CELL_WIDTH = overlay.CELL_WIDTH + 2 * overlay.MAX_GLYPH_SHIFT
+# Position of the labeled texts in the fixture strips: the GPS text starts at the left margin,
+# and the clock text ends at the right margin.
+FIXTURE_TEXT_TOP = 18
+FIXTURE_GPS_TEXT_LEFT = 18
+FIXTURE_CLOCK_TEXT_RIGHT = 2542
+
+# How far (in pixels) a labeled cell may be shifted when aligning it with the others.
+MAX_ALIGNMENT_SHIFT = 3
 
 # Number of align-and-average passes.
 REFINEMENT_PASS_COUNT = 3
@@ -38,6 +44,17 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)8s | %
 LOGGER = logging.getLogger(__name__)
 
 FloatImage = npt.NDArray[np.float32]
+
+
+def cut_padded_cell(strip: npt.NDArray[np.uint8], x: int) -> FloatImage:
+    """Cut the cell starting at `x`, with `MAX_ALIGNMENT_SHIFT` pixels of padding."""
+    shift = MAX_ALIGNMENT_SHIFT
+    padded_strip = cv2.copyMakeBorder(
+        strip, shift, shift, shift, shift, cv2.BORDER_REPLICATE
+    ).astype(np.float32)
+    padded_height = overlay.CELL_HEIGHT + 2 * MAX_ALIGNMENT_SHIFT
+    padded_width = overlay.CELL_WIDTH + 2 * MAX_ALIGNMENT_SHIFT
+    return padded_strip[FIXTURE_TEXT_TOP : FIXTURE_TEXT_TOP + padded_height, x : x + padded_width]
 
 
 def collect_labeled_cells() -> dict[str, list[tuple[str, FloatImage]]]:
@@ -50,21 +67,19 @@ def collect_labeled_cells() -> dict[str, list[tuple[str, FloatImage]]]:
         Padded cells per character, each with a description of where it came from.
     """
     labels = json.loads(LABELS_PATH.read_text(encoding="utf-8"))
-    layout = overlay.get_nominal_layout()
     cells_by_character: dict[str, list[tuple[str, FloatImage]]] = {}
 
     for filename, label in labels.items():
         strip = overlay.read_strip_image(FIXTURE_DIR / filename)
-        for field, text in [
-            (layout.left_field, label["left"]),
-            (layout.right_field, label["right"]),
+        clock_text_left = FIXTURE_CLOCK_TEXT_RIGHT - len(label["clock"]) * overlay.CELL_PITCH
+        for text_left, text in [
+            (FIXTURE_GPS_TEXT_LEFT, label["gps"]),
+            (clock_text_left, label["clock"]),
         ]:
-            region = overlay.cut_field_region(strip, field)
             for cell_index, character in enumerate(text):
                 if character == " ":
                     continue
-                cell_left = cell_index * overlay.CELL_PITCH
-                padded_cell = region[:, cell_left : cell_left + PADDED_CELL_WIDTH]
+                padded_cell = cut_padded_cell(strip, text_left + cell_index * overlay.CELL_PITCH)
                 origin = f"{filename} cell {cell_index}"
                 cells_by_character.setdefault(character, []).append((origin, padded_cell))
 
@@ -73,8 +88,8 @@ def collect_labeled_cells() -> dict[str, list[tuple[str, FloatImage]]]:
 
 def crop_center(padded_cell: FloatImage, dx: int = 0, dy: int = 0) -> FloatImage:
     """Crop an unpadded cell from a padded one, shifted by (dx, dy)."""
-    top = overlay.MAX_GLYPH_SHIFT + dy
-    left = overlay.MAX_GLYPH_SHIFT + dx
+    top = MAX_ALIGNMENT_SHIFT + dy
+    left = MAX_ALIGNMENT_SHIFT + dx
     return padded_cell[top : top + overlay.CELL_HEIGHT, left : left + overlay.CELL_WIDTH]
 
 
@@ -86,8 +101,8 @@ def build_template(padded_cells: list[FloatImage]) -> FloatImage:
         for padded_cell in padded_cells:
             response = cv2.matchTemplate(padded_cell, template, cv2.TM_CCOEFF_NORMED)
             _, _, _, (best_x, best_y) = cv2.minMaxLoc(response)
-            dx = best_x - overlay.MAX_GLYPH_SHIFT
-            dy = best_y - overlay.MAX_GLYPH_SHIFT
+            dx = best_x - MAX_ALIGNMENT_SHIFT
+            dy = best_y - MAX_ALIGNMENT_SHIFT
             aligned_cells.append(crop_center(padded_cell, dx, dy))
         template = np.mean(aligned_cells, axis=0).astype(np.float32)
     return template
@@ -104,13 +119,12 @@ def verify_labeled_strips() -> int:
     """
     overlay.load_glyph_templates.cache_clear()
     labels = json.loads(LABELS_PATH.read_text(encoding="utf-8"))
-    layout = overlay.get_nominal_layout()
     mismatch_count = 0
     for filename, label in labels.items():
-        reading = overlay.read_overlay(overlay.read_strip_image(FIXTURE_DIR / filename), layout)
-        if (reading.left_text, reading.right_text) != (label["left"], label["right"]):
+        reading = overlay.read_overlay(overlay.read_strip_image(FIXTURE_DIR / filename))
+        if (reading.gps_text, reading.clock_text) != (label["gps"], label["clock"]):
             LOGGER.warning(
-                f"{filename}: read {reading.raw!r}, labeled {label['left']} | {label['right']}"
+                f"{filename}: read {reading.raw!r}, labeled {label['gps']} | {label['clock']}"
             )
             mismatch_count += 1
     LOGGER.info(f"Verified {len(labels)} labeled strips, {mismatch_count} mismatches")

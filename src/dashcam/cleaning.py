@@ -5,7 +5,8 @@ Cleaning runs on the raw readings stored in a track, so it can be repeated witho
 the video again. The steps are:
 
 1. Parse every reading. Blank GPS text means no fix. GPS text that cannot be trusted or parsed
-   is unreadable. The rest are candidate fixes.
+   is unreadable. The rest are candidate fixes. A camera clock date with the year last is read
+   as day/month or month/day, whichever the video's dates show (see `infer_day_first`).
 2. Split the candidate fixes into segments in which consecutive points are physically
    reachable from each other (implied speed at most `MAX_SPEED_KMH`).
 3. Reject segments whose camera clock shows a date too far from the date in the filename, and
@@ -25,6 +26,7 @@ and good ranges are accepted after step 4.
 
 import dataclasses
 import datetime
+import re
 import statistics
 import zoneinfo
 
@@ -39,8 +41,15 @@ STATUS_NO_FIX = "no_fix"
 STATUS_SPOOFED = "spoofed"
 STATUS_UNREADABLE = "unreadable"
 
-# Format of the camera clock text.
-CLOCK_FORMAT = "%Y/%m/%d %H:%M:%S"
+# Camera clock text: a date with the year first or last, and a 24-hour time.
+CLOCK_TEXT_PATTERN = re.compile(
+    r"^(?P<date_first>\d{1,4})[/.](?P<date_middle>\d{1,2})[/.](?P<date_last>\d{1,4}) "
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2}):(?P<second>\d{2})$"
+)
+YEAR_DIGIT_COUNT = 4
+
+# Highest month number. A larger value in a date with the year last must be the day.
+MAX_MONTH = 12
 
 # How much (in seconds) `camera time - video offset` may drift between neighboring samples
 # before it counts as a clock jump. Sampling can shift a reading by up to one second.
@@ -71,18 +80,18 @@ class RawSample:
     """One overlay reading per camera clock tick."""
 
     t: float
-    left_text: str
-    right_text: str
-    left_score: float
-    right_score: float
+    gps_text: str
+    clock_text: str
+    gps_score: float
+    clock_score: float
 
     @property
-    def is_left_text_reliable(self) -> bool:
-        return bool(self.left_text) and self.left_score >= overlay.MIN_RELIABLE_CELL_SCORE
+    def is_gps_text_reliable(self) -> bool:
+        return bool(self.gps_text) and self.gps_score >= overlay.MIN_RELIABLE_CELL_SCORE
 
     @property
-    def is_right_text_reliable(self) -> bool:
-        return bool(self.right_text) and self.right_score >= overlay.MIN_RELIABLE_CELL_SCORE
+    def is_clock_text_reliable(self) -> bool:
+        return bool(self.clock_text) and self.clock_score >= overlay.MIN_RELIABLE_CELL_SCORE
 
 
 @dataclasses.dataclass(frozen=True)
@@ -135,12 +144,73 @@ class ParsedSample:
     initial_status: str
 
 
-def parse_clock_text(right_text: str) -> datetime.datetime | None:
-    """Parse the camera clock text, or return None if it is not a valid date and time."""
+def split_year_last_date(clock_text: str) -> tuple[int, int] | None:
+    """Return the first two date numbers if the clock text has the year last, or None."""
+    match = CLOCK_TEXT_PATTERN.match(clock_text)
+    if match is None or len(match["date_last"]) != YEAR_DIGIT_COUNT:
+        return None
+    return int(match["date_first"]), int(match["date_middle"])
+
+
+def parse_clock_text(clock_text: str, is_day_first: bool = True) -> datetime.datetime | None:
+    """
+    Parse the camera clock text, or return None if it is not a valid date and time.
+
+    A date with the year first is year/month/day. A date with the year last is day/month/year
+    if `is_day_first`, and month/day/year otherwise.
+    """
+    match = CLOCK_TEXT_PATTERN.match(clock_text)
+    if match is None:
+        return None
+    if len(match["date_first"]) == YEAR_DIGIT_COUNT and len(match["date_last"]) <= 2:
+        year, month, day = match["date_first"], match["date_middle"], match["date_last"]
+    elif len(match["date_last"]) == YEAR_DIGIT_COUNT and len(match["date_first"]) <= 2:
+        year = match["date_last"]
+        if is_day_first:
+            day, month = match["date_first"], match["date_middle"]
+        else:
+            month, day = match["date_first"], match["date_middle"]
+    else:
+        return None
+
     try:
-        return datetime.datetime.strptime(right_text, CLOCK_FORMAT)
+        return datetime.datetime(
+            int(year),
+            int(month),
+            int(day),
+            int(match["hour"]),
+            int(match["minute"]),
+            int(match["second"]),
+        )
     except ValueError:
         return None
+
+
+def infer_day_first(clock_texts: list[str], trip_date: datetime.date | None) -> bool:
+    """
+    Decide whether the dates with the year last show the day or the month first.
+
+    A number above 12 can only be the day, so the position where such numbers appear decides.
+    If every date is ambiguous (e.g. `05/04/2024`), the order whose dates fall on the trip date
+    more often wins. Day first is the default.
+    """
+    year_last_dates = [
+        date_numbers
+        for clock_text in clock_texts
+        if (date_numbers := split_year_last_date(clock_text)) is not None
+    ]
+    day_first_votes = sum(first > MAX_MONTH for first, _ in year_last_dates)
+    month_first_votes = sum(middle > MAX_MONTH for _, middle in year_last_dates)
+    if day_first_votes or month_first_votes:
+        return day_first_votes >= month_first_votes
+    if trip_date is None:
+        return True
+
+    def count_trip_date_matches(is_day_first: bool) -> int:
+        clocks = [parse_clock_text(clock_text, is_day_first) for clock_text in clock_texts]
+        return sum(clock is not None and clock.date() == trip_date for clock in clocks)
+
+    return count_trip_date_matches(True) >= count_trip_date_matches(False)
 
 
 def parse_samples(
@@ -149,17 +219,22 @@ def parse_samples(
     overrides: Overrides,
 ) -> list[ParsedSample]:
     """Parse the raw readings and assign initial statuses."""
+    reliable_clock_texts = [
+        raw_sample.clock_text for raw_sample in raw_samples if raw_sample.is_clock_text_reliable
+    ]
+    is_day_first = infer_day_first(reliable_clock_texts, settings.trip_date)
+
     parsed_samples = []
     for raw_sample in raw_samples:
         gps = None
-        if raw_sample.is_left_text_reliable:
-            gps = overlay.parse_gps_text(raw_sample.left_text)
+        if raw_sample.is_gps_text_reliable:
+            gps = overlay.parse_gps_text(raw_sample.gps_text)
 
         clock = None
-        if raw_sample.is_right_text_reliable:
-            clock = parse_clock_text(raw_sample.right_text)
+        if raw_sample.is_clock_text_reliable:
+            clock = parse_clock_text(raw_sample.clock_text, is_day_first)
 
-        if not raw_sample.left_text:
+        if not raw_sample.gps_text:
             initial_status = STATUS_NO_FIX
         elif gps is None:
             initial_status = STATUS_UNREADABLE
@@ -258,9 +333,13 @@ def has_speed_mismatch(segment: list[int], parsed_samples: list[ParsedSample]) -
         assert start_gps is not None and end_gps is not None
         distance_m = geo.haversine_m(start_gps.lat, start_gps.lon, end_gps.lat, end_gps.lon)
         duration_s = parsed_samples[segment[end_position]].t - start.t
+        displayed_speeds = [
+            gps.speed_kmh for gps in span_gps if gps is not None and gps.speed_kmh is not None
+        ]
+        if not displayed_speeds:
+            continue
         implied_kmh = geo.implied_speed_kmh(distance_m, duration_s)
-        displayed_kmh = statistics.mean(gps.speed_kmh for gps in span_gps if gps is not None)
-        mismatches.append(abs(implied_kmh - displayed_kmh))
+        mismatches.append(abs(implied_kmh - statistics.mean(displayed_speeds)))
 
     if len(mismatches) < MIN_SPEED_CHECK_COUNT:
         return False

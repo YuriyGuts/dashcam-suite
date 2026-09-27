@@ -212,10 +212,10 @@ def make_track():
             raw_samples.append(
                 cleaning.RawSample(
                     t=float(index),
-                    left_text=f"30 KM/H N{lat:.6f} E24.000000",
-                    right_text=f"2026/09/25 11:17:{index:02d}",
-                    left_score=0.97,
-                    right_score=0.99,
+                    gps_text=f"30 KM/H N{lat:.6f} E24.000000",
+                    clock_text=f"2026/09/25 11:17:{index:02d}",
+                    gps_score=0.97,
+                    clock_score=0.99,
                 )
             )
             clean_samples.append(

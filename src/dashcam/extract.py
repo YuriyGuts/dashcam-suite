@@ -133,20 +133,20 @@ def collapse_readings(
 
     def flush_group() -> None:
         first_offset_s = group[0][0]
-        reliable_readings = [reading for _, reading in group if reading.is_left_text_reliable]
+        reliable_readings = [reading for _, reading in group if reading.is_gps_text_reliable]
         chosen = reliable_readings[-1] if reliable_readings else group[-1][1]
         raw_samples.append(
             cleaning.RawSample(
                 t=first_offset_s,
-                left_text=chosen.left_text,
-                right_text=chosen.right_text,
-                left_score=chosen.left_min_score,
-                right_score=chosen.right_min_score,
+                gps_text=chosen.gps_text,
+                clock_text=chosen.clock_text,
+                gps_score=chosen.gps_min_score,
+                clock_score=chosen.clock_min_score,
             )
         )
 
     for offset_s, reading in readings:
-        if group and group[-1][1].right_text != reading.right_text:
+        if group and group[-1][1].clock_text != reading.clock_text:
             flush_group()
             group = []
         group.append((offset_s, reading))
@@ -172,7 +172,6 @@ def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config)
         )
         return False
 
-    layout = overlay.get_nominal_layout()
     clock_count = 0
     missing_frame_count = 0
     for frame_number in range(PROBE_FRAME_COUNT):
@@ -192,7 +191,7 @@ def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config)
             missing_frame_count += 1
             continue
         _, strip = first_frame
-        if overlay.read_overlay(strip, layout).is_right_text_reliable:
+        if overlay.read_overlay(strip).is_clock_text_reliable:
             clock_count += 1
         if clock_count >= PROBE_MIN_CLOCK_COUNT:
             return True
@@ -211,7 +210,6 @@ def read_all_frames(
     config: Config,
 ) -> list[tuple[float, overlay.OverlayReading]]:
     """Decode the whole video and read the overlay of every sampled frame."""
-    layout = overlay.get_nominal_layout()
     readings = []
     next_progress_s = PROGRESS_INTERVAL_S
     for offset_s, strip in video.iter_overlay_strips(
@@ -221,7 +219,7 @@ def read_all_frames(
         ffmpeg_executable=config.ffmpeg_executable,
         hwaccel_options=config.hwaccel_options,
     ):
-        readings.append((offset_s, overlay.read_overlay(strip, layout)))
+        readings.append((offset_s, overlay.read_overlay(strip)))
         if offset_s >= next_progress_s:
             percent = min(100, round(offset_s / video_info.duration_s * 100))
             LOGGER.info(f"{video_path.name}: {percent}%", extra=terminal.PROGRESS)

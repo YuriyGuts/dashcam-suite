@@ -92,8 +92,8 @@ audio_codec_options = "-c:a aac -b:a 128k"
 If you haven't recorded anything yet, set up the camera first:
 
 - Attach the GPS mount.
-- Turn on the date/time, GPS and speed stamps.
-- Use km/h for the speed unit.
+- Turn on the date/time and GPS stamps. The speed stamp is optional.
+- Use km/h for the speed unit and the 24-hour clock.
 - Record at 2560×1440 or 2560×1600.
 - Set the camera clock to local time.
 
@@ -211,11 +211,13 @@ Then run `dashcam extract --reclean` and `dashcam enrich`.
 
 The tool was built around one camera and has only been tested with its footage. It will work for you only if all of the following are true.
 
-**The overlay is the VIOFO A119 V3 one.** Text is read by matching each character against templates of this camera's font, at fixed positions along the bottom edge of the frame. The expected formats are:
+**The overlay uses the VIOFO A119 V3 font.** Text is read by matching each character against templates of this camera's font along the bottom edge of the frame. For example:
 
 ```
 46 KM/H N49.810205 E24.028992          VIOFO A119 V3          2026/09/23 18:42:06
 ```
+
+The position, order and spacing of the values don't matter, and neither do other texts such as the model name. The tool tries to be robust to different value formats.
 
 **The video is at least 1280 pixels wide.** The tool is tested with 2560-pixel-wide recordings and with copies scaled down to 1280 pixels. Narrower videos are treated as having no overlay. Cropped videos and other recording resolutions are untested.
 

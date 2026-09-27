@@ -26,7 +26,7 @@ def make_driven_track(make_track, to_lat_lon):
             is_located = status in enrich.LOCATED_STATUSES
             track.raw_samples.append(
                 cleaning.RawSample(
-                    t=float(index), left_text="", right_text="", left_score=1.0, right_score=1.0
+                    t=float(index), gps_text="", clock_text="", gps_score=1.0, clock_score=1.0
                 )
             )
             track.clean_samples.append(

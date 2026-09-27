@@ -230,7 +230,7 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
                 Finding(SEVERITY_INFO, f"Track '{stem}' has {reason} (run `dashcam enrich`)")
             )
 
-        has_gps_text = any(sample.left_text for sample in track.raw_samples)
+        has_gps_text = any(sample.gps_text for sample in track.raw_samples)
         has_good_fix = any(sample.status == cleaning.STATUS_OK for sample in track.clean_samples)
         if has_gps_text and not has_good_fix:
             findings.append(

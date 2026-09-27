@@ -28,6 +28,7 @@ from pathlib import Path
 
 import cv2
 
+from dashcam import cleaning
 from dashcam import overlay
 from dashcam.config import load_config
 from dashcam.video import iter_overlay_strips
@@ -61,17 +62,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)8s | %
 LOGGER = logging.getLogger(__name__)
 
 
-def parse_clock(right_text: str) -> datetime.datetime | None:
-    """Parse the camera clock text, or return None if it is not a valid date."""
-    try:
-        return datetime.datetime.strptime(right_text, "%Y/%m/%d %H:%M:%S")
-    except ValueError:
-        return None
-
-
 def clock_offset(offset_s: float, reading: overlay.OverlayReading) -> float | None:
     """Return `camera time - video offset` in seconds, or None if the clock is unreadable."""
-    clock = parse_clock(reading.right_text)
+    clock = cleaning.parse_clock_text(reading.clock_text)
     if clock is None:
         return None
     return clock.timestamp() - offset_s
@@ -104,7 +97,7 @@ def find_flagged_readings(
             index - 1 : index + 2
         ]
 
-        if not current.right_text:
+        if not current.clock_text:
             flagged.append((index, "clock unreadable"))
         elif is_isolated_outlier(
             clock_offset(previous_offset, previous),
@@ -114,15 +107,15 @@ def find_flagged_readings(
         ):
             flagged.append((index, "clock outlier"))
 
-        presence = [bool(reading.left_text) for reading in (previous, current, following)]
+        presence = [bool(reading.gps_text) for reading in (previous, current, following)]
         if presence[0] == presence[2] != presence[1]:
             flagged.append((index, "GPS presence flicker"))
             continue
 
         gps_values = [
-            overlay.parse_gps_text(reading.left_text) for reading in (previous, current, following)
+            overlay.parse_gps_text(reading.gps_text) for reading in (previous, current, following)
         ]
-        if current.left_text and gps_values[1] is None:
+        if current.gps_text and gps_values[1] is None:
             flagged.append((index, "GPS text unparseable"))
             continue
         if None in gps_values:
@@ -162,8 +155,8 @@ def find_speed_mismatches(
     """
     samples = []
     for offset_s, reading in readings:
-        gps_value = overlay.parse_gps_text(reading.left_text)
-        clock = parse_clock(reading.right_text)
+        gps_value = overlay.parse_gps_text(reading.gps_text)
+        clock = cleaning.parse_clock_text(reading.clock_text)
         if gps_value is not None and clock is not None:
             samples.append((offset_s, clock, gps_value))
 
@@ -178,6 +171,8 @@ def find_speed_mismatches(
         if following is None:
             continue
         next_gps_value = following[2]
+        if gps_value.speed_kmh is None or next_gps_value.speed_kmh is None:
+            continue
         implied_kmh = (
             haversine_m(gps_value.lat, gps_value.lon, next_gps_value.lat, next_gps_value.lon) * 3.6
         )
@@ -192,7 +187,6 @@ def evaluate_video(path: Path) -> None:
     config = load_config()
     video_info = probe_video(path, config.ffprobe_executable)
     templates = overlay.load_glyph_templates()
-    layout = overlay.get_nominal_layout()
 
     strips = []
     readings: list[tuple[float, overlay.OverlayReading]] = []
@@ -205,7 +199,7 @@ def evaluate_video(path: Path) -> None:
         hwaccel_options=config.hwaccel_options,
     ):
         strips.append(strip)
-        readings.append((offset_s, overlay.read_overlay(strip, layout, templates)))
+        readings.append((offset_s, overlay.read_overlay(strip, templates)))
     elapsed_s = time.monotonic() - started_at
     LOGGER.info(f"{path.name}: {len(strips)} frames in {elapsed_s:.0f} s")
 
@@ -213,10 +207,10 @@ def evaluate_video(path: Path) -> None:
     unreliable = [
         (index, "unreliable text")
         for index, (_, reading) in enumerate(readings)
-        if (reading.left_text and not reading.is_left_text_reliable)
-        or not reading.is_right_text_reliable
+        if (reading.gps_text and not reading.is_gps_text_reliable)
+        or not reading.is_clock_text_reliable
     ]
-    gps_count = sum(reading.is_left_text_reliable for _, reading in readings)
+    gps_count = sum(reading.is_gps_text_reliable for _, reading in readings)
     LOGGER.info(
         f"  {len(flagged)} flagged, {len(unreliable)} unreliable, "
         f"{gps_count}/{len(readings)} with reliable GPS text"
@@ -233,7 +227,7 @@ def evaluate_video(path: Path) -> None:
         offset_s, reading = readings[index]
         LOGGER.info(
             f"    {offset_s:7.1f}s {reason:<22} {reading.raw!r} "
-            f"(scores {reading.left_min_score:.2f}/{reading.right_min_score:.2f})"
+            f"(scores {reading.gps_min_score:.2f}/{reading.clock_min_score:.2f})"
         )
         review_path = REVIEW_DIR / f"{path.stem[:10]}_{offset_s:07.1f}.png"
         cv2.imwrite(str(review_path), strips[index])

@@ -60,12 +60,12 @@ def save_track_for(store, make_track):
     return _save_track_for
 
 
-def make_reading(left_text, right_text, left_score=0.95, right_score=0.95):
+def make_reading(gps_text, clock_text, gps_score=0.95, clock_score=0.95):
     return overlay.OverlayReading(
-        left_text=left_text,
-        right_text=right_text,
-        left_min_score=left_score,
-        right_min_score=right_score,
+        gps_text=gps_text,
+        clock_text=clock_text,
+        gps_min_score=gps_score,
+        clock_min_score=clock_score,
     )
 
 
@@ -111,7 +111,7 @@ def test_collapse_readings_keeps_one_sample_per_clock_tick():
     raw_samples = extract.collapse_readings(readings)
 
     # THEN each tick starts at its first frame and uses its last GPS reading
-    assert [(sample.t, sample.left_text) for sample in raw_samples] == [
+    assert [(sample.t, sample.gps_text) for sample in raw_samples] == [
         (0.0, "11 KM/H N49.800100 E24.000000"),
         (1.0, "12 KM/H N49.800200 E24.000000"),
     ]
@@ -121,15 +121,15 @@ def test_collapse_readings_prefers_reliable_gps_text():
     # GIVEN a tick whose last reading is unreliable
     readings = [
         (0.0, make_reading("10 KM/H N49.800000 E24.000000", "2026/09/25 10:00:00")),
-        (0.5, make_reading("169 KM/H N24.000110 E0.248983", "2026/09/25 10:00:00", left_score=0.2)),
+        (0.5, make_reading("169 KM/H N24.000110 E0.248983", "2026/09/25 10:00:00", gps_score=0.2)),
     ]
 
     # WHEN collapsing them
     raw_samples = extract.collapse_readings(readings)
 
     # THEN the reliable reading is used
-    assert raw_samples[0].left_text == "10 KM/H N49.800000 E24.000000"
-    assert raw_samples[0].left_score == 0.95
+    assert raw_samples[0].gps_text == "10 KM/H N49.800000 E24.000000"
+    assert raw_samples[0].gps_score == 0.95
 
 
 def test_collapse_readings_with_repeated_clock_later():

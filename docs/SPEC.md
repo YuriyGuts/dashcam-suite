@@ -15,8 +15,8 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Overlay (bottom of frame, fixed monospace font, updates at 1 Hz):
   - Left: `46 KM/H N49.810205 E24.028992`. Blank when there is no GPS fix.
   - Middle: `VIOFO A119 V3` (optional; absent in some videos).
-  - Right: `2026/09/23 18:42:06` (camera clock, local time, always present).
-- Resolutions vary (2560×1440, 2560×1600). Both share the same overlay layout: text 20–44 px above the bottom edge, 18 px character grid, left field at x≈18, right field at x≈2200. The overlay scales with the frame width, so videos scaled down after recording keep the layout in proportion.
+  - Right: `2026/09/23 18:42:06` (camera clock, local time, always present). The date format is a camera setting: some videos show `27/04/2024`.
+- Resolutions vary (2560×1440, 2560×1600). Both put the text 20–44 px above the bottom edge on an 18 px character pitch. The overlay scales with the frame width, so videos scaled down after recording keep the layout in proportion.
 - The camera occasionally renders garbage for a second (e.g. `169 KM/H E24.000110 10.248983`).
 - GPS spoofing happens: coordinates jump to another continent, the displayed speed is ~200 km/h, and the camera clock jumps to a fake date and may run backwards. A spoof can last most of a trip.
 - A trip video may contain gaps between merged segments (up to 12 h).
@@ -59,8 +59,11 @@ Port of `dashcam-encode`.
 - OCR:
   - Frames are sampled at 2 fps from the bottom 64 px strip, decoded with `ffmpeg` (hardware acceleration from the config), and collapsed to one sample per camera clock tick. For other widths, a strip of proportional height is cut and scaled (Lanczos) to 2560 px wide.
   - Below 1280 px, glyphs are too small: characters are misread with scores above the reliability threshold. At 1280 px, a few readings per clip fall below it and are interpolated; at 1920 px, readings match the originals.
-  - Each cell is matched against glyph templates with normalized cross-correlation over the glyph fill and its 1 px dark outline only, so the background (night, snow, glare) does not matter.
-  - Fields are decoded with their known formats: `dddd/dd/dd dd:dd:dd` for the clock, and the 18 digit-count variants of `d KM/H hd.dddddd vd.dddddd` for GPS. A blank field means no fix.
+  - Every horizontal position of the strip is matched against glyph templates with normalized cross-correlation over the glyph fill and its 1 px dark outline only, so the background (night, snow, glare) does not matter. Each glyph may shift ±3 px vertically and ±2 px horizontally.
+  - The text is read as tokens, each found anywhere along the line on its own 18 px grid, so the position, order, padding and spacing of the values do not matter: speed (`d{1,3} KM/H`), latitude and longitude (hemisphere letter before or after `d.dddd` with 4–8 decimals, the same style for both), date (year first or last, `/` or `.`, unpadded day and month allowed), and time (`d{1,2}:dd:dd`). Up to two spaces may separate the parts of a token, and they must be blank. Each cell only considers the characters its pattern allows there. The best-scoring match of each kind is extended to the longest match covering it, so a token is read in full; added cells must score 0.6 or more. A `.` is accepted only where no other glyph (except `:`) matches. Date and time cells are excluded from the GPS search.
+  - The GPS text is stored as `46 KM/H N49.810205 E24.028992` (speed optional) and the clock text as `<date> <time>` with the date as displayed. No GPS tokens means no fix.
+  - Dates with the year last are day/month or month/day. Cleaning decides per video: a number above 12 shows the order; if all dates are ambiguous, the order that matches the filename date wins; otherwise day first.
+  - Only glyphs in the template atlas can be read, so formats that need other characters (`MPH`, `AM`/`PM`, degree signs) need new labeled strips.
   - Text whose worst cell scores below 0.6 is unreliable and becomes `unreadable` (genuine text scores above 0.8). It is kept as raw text but never used.
   - Glyph templates are averaged from hand-labeled strips in `tests/fixtures/overlay/` by `scripts/build_glyph_templates.py`.
 - Cleaning (runs on stored raw values; `--reclean` re-runs it without OCR):
@@ -196,7 +199,7 @@ One JSON file. Header pretty-printed, one sample per line.
 
 ## Validation
 
-- OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Ten hand-labeled strips are kept as a regression fixture, and are also read back from synthetic videos scaled to 1920 and 1280 px.
+- OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Twelve hand-labeled strips (two with day-first dates) are kept as a regression fixture, and are also read back from synthetic videos scaled to 1920 and 1280 px.
 - Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
 - Encode: grouping, parsing, and naming tests against `video/raw-sd`.
 - Enrich: tests against a synthetic OSM map (intersections, GPS noise, ref-only highways, footways, localities); street lists of the sample trips checked against the map by eye.
