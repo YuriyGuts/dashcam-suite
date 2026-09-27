@@ -314,14 +314,14 @@ def test_get_trips_with_unreachable_video_and_preview(app, store, add_track):
 def test_get_trips_includes_street_names(app, store, make_track):
     # GIVEN a track with streets
     track = make_track()
-    track.streets = [{"name": "Zelena", "distance_m": 700}, {"name": "Stryiska"}]
+    track.streets = [{"name": "Lesi Ukrainky", "distance_m": 700}, {"name": "Hrushevskoho"}]
     store.save_track(track)
 
     # WHEN listing the trips
     trip = app.get_trips()["trips"][0]
 
     # THEN the street names are listed
-    assert trip["streets"] == ["Zelena", "Stryiska"]
+    assert trip["streets"] == ["Lesi Ukrainky", "Hrushevskoho"]
 
 
 def test_get_trips_does_not_read_tracks_when_index_is_current(app, store, add_track, monkeypatch):

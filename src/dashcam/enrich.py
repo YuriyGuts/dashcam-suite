@@ -65,7 +65,7 @@ MIN_STRETCH_M = 50.0
 
 # Localities: a point belongs to the locality with the smallest distance relative to its
 # radius, if that is at most 1. The radius depends on the place type and grows with the
-# population (Lviv, 720,000 people, gets about 8.5 km).
+# population (a city of 720,000 people gets about 8.5 km).
 LOCALITY_RADII_M = {"city": 5000.0, "town": 2500.0, "village": 1200.0, "hamlet": 500.0}
 LOCALITY_POPULATION_RADIUS_FACTOR = 10.0
 MAX_LOCALITY_RADIUS_M = 25000.0

@@ -432,12 +432,12 @@ def test_main_runs_enrich_with_osm_file_and_force(monkeypatch, config, recorded_
     # GIVEN `enrich` with a local OSM file and `--force`
 
     # WHEN running the tool
-    run_main(monkeypatch, config, ["enrich", "--osm-file", "lviv.osm.pbf", "--force"])
+    run_main(monkeypatch, config, ["enrich", "--osm-file", "ukraine.osm.pbf", "--force"])
 
     # THEN the options are passed on
     kwargs = recorded_calls[0][2]
     assert kwargs["update_osm"] is False
-    assert kwargs["osm_file"] == Path("lviv.osm.pbf")
+    assert kwargs["osm_file"] == Path("ukraine.osm.pbf")
     assert kwargs["force"] is True
 
 

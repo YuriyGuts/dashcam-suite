@@ -346,7 +346,7 @@ def test_plan_extraction_with_renamed_video(store, make_video_file, save_track_f
     # GIVEN a track whose video was renamed
     old_path = make_video_file("2026-09-25 Trip 11-17.mp4")
     save_track_for(old_path)
-    new_path = old_path.rename(old_path.with_name("2026-09-25 Horodotska (Car).mp4"))
+    new_path = old_path.rename(old_path.with_name("2026-09-25 Khreshchatyk (Car).mp4"))
 
     # WHEN planning
     planned = extract.plan_extraction([new_path], store, force=False)
@@ -441,8 +441,8 @@ def test_plan_extraction_with_force_keeps_overrides(store, make_video_file, save
 def test_make_extract_job_keeps_previous_track_data(tmp_path, config, make_track):
     # GIVEN a planned re-extraction of a track with overrides and a street list
     previous_track = make_track()
-    previous_track.streets = [{"name": "Horodotska", "distance_m": 900}]
-    previous_track.localities = {"start": {"name": "Lviv", "place": "city"}, "end": None}
+    previous_track.streets = [{"name": "Khreshchatyk", "distance_m": 900}]
+    previous_track.localities = {"start": {"name": "Kyiv", "place": "city"}, "end": None}
     previous_track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",
@@ -726,8 +726,8 @@ def test_reclean_tracks_applies_overrides(config, store, make_track):
 def test_reclean_tracks_keeps_street_data(config, store, make_track):
     # GIVEN an enriched track
     track = make_track()
-    track.streets = [{"name": "Городоцька", "distance_m": 900}]
-    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    track.streets = [{"name": "Хрещатик", "distance_m": 900}]
+    track.localities = {"start": {"name": "Київ", "place": "city"}, "end": None}
     track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",

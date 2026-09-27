@@ -443,7 +443,7 @@ function computeDateBounds(trips) {
   return {first, last, firstDay: isoDateToDay(first), lastDay: isoDateToDay(last)};
 }
 
-// A query holds one or more comma-separated terms, e.g. "Stryiska, Zelena". A trip matches if each
+// A query holds one or more comma-separated terms, e.g. "Khreshchatyk, Lesi Ukrainky". A trip matches if each
 // term is part of its name, one of its street names, or its start or end locality.
 function queryTerms(query) {
   return query
@@ -1505,7 +1505,7 @@ function renderStreets(container, track) {
   );
 }
 
-// Start and end localities, e.g. "Lviv -> Stryi", or one name for a trip within a locality.
+// Start and end localities, e.g. "Kyiv -> Brovary", or one name for a trip within a locality.
 function formatLocalities(trip) {
   const {start_locality: start, end_locality: end} = trip;
   if (!start && !end) return null;

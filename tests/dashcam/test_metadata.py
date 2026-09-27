@@ -41,8 +41,8 @@ def test_dump_track_round_trip(make_track):
 def test_dump_track_round_trip_with_street_data(make_track):
     # GIVEN an enriched track
     track = make_track()
-    track.streets = [{"name": "Городоцька", "distance_m": 900}]
-    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    track.streets = [{"name": "Хрещатик", "distance_m": 900}]
+    track.localities = {"start": {"name": "Київ", "place": "city"}, "end": None}
     track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",
@@ -55,7 +55,7 @@ def test_dump_track_round_trip_with_street_data(make_track):
 
     # THEN it is unchanged, with the names written as UTF-8 text
     assert loaded_track == track
-    assert "Городоцька" in metadata.dump_track(track)
+    assert "Хрещатик" in metadata.dump_track(track)
 
 
 def test_load_track_text_without_street_data(make_track):
@@ -176,10 +176,10 @@ def test_parse_trip_name():
     # GIVEN a video filename with a date and a name
 
     # WHEN parsing it
-    trip_name = metadata.parse_trip_name("2026-09-25 Horodotska, M06 (Car).mp4")
+    trip_name = metadata.parse_trip_name("2026-09-25 Khreshchatyk, M06 (Car).mp4")
 
     # THEN the date and name are split
-    assert trip_name == metadata.TripName(datetime.date(2026, 9, 25), "Horodotska, M06 (Car)")
+    assert trip_name == metadata.TripName(datetime.date(2026, 9, 25), "Khreshchatyk, M06 (Car)")
 
 
 def test_parse_trip_name_without_date():
@@ -434,13 +434,13 @@ def test_metadata_store_rename_trip(make_track, store):
     store.preview_path(track.stem).write_bytes(b"preview")
 
     # WHEN its video is renamed
-    store.rename_trip(track.stem, "2026-09-25 Horodotska (Car).mp4")
+    store.rename_trip(track.stem, "2026-09-25 Khreshchatyk (Car).mp4")
 
     # THEN the track and preview follow the new name
-    renamed_track = store.load_track("2026-09-25 Horodotska (Car)")
-    assert renamed_track.video_filename == "2026-09-25 Horodotska (Car).mp4"
+    renamed_track = store.load_track("2026-09-25 Khreshchatyk (Car)")
+    assert renamed_track.video_filename == "2026-09-25 Khreshchatyk (Car).mp4"
     assert not store.track_path(track.stem).exists()
-    assert store.preview_path("2026-09-25 Horodotska (Car)").read_bytes() == b"preview"
+    assert store.preview_path("2026-09-25 Khreshchatyk (Car)").read_bytes() == b"preview"
 
 
 def test_metadata_store_rename_trip_changing_only_letter_case(make_track, store):
@@ -482,14 +482,14 @@ def test_metadata_store_rebuild_index(make_track, store):
 def test_metadata_store_rebuild_index_with_localities(make_track, store):
     # GIVEN a track with a start locality and an unknown end locality
     track = make_track()
-    track.localities = {"start": {"name": "Львів", "place": "city"}, "end": None}
+    track.localities = {"start": {"name": "Київ", "place": "city"}, "end": None}
     store.save_track(track)
 
     # WHEN rebuilding the index
     index = store.rebuild_index()
 
     # THEN the trip has the locality names
-    assert index["trips"][0]["start_locality"] == "Львів"
+    assert index["trips"][0]["start_locality"] == "Київ"
     assert index["trips"][0]["end_locality"] is None
 
 
@@ -497,9 +497,9 @@ def test_get_street_names_lists_each_name_once(make_track):
     # GIVEN streets as dictionaries and strings, with a repeat and entries without a name
     track = make_track()
     track.streets = [
-        {"name": "Lychakivska", "distance_m": 900},
-        "Zelena",
-        {"name": "Lychakivska"},
+        {"name": "Khreshchatyk", "distance_m": 900},
+        "Lesi Ukrainky",
+        {"name": "Khreshchatyk"},
         {"distance_m": 10},
         "",
     ]
@@ -508,13 +508,13 @@ def test_get_street_names_lists_each_name_once(make_track):
     street_names = metadata.get_street_names(track)
 
     # THEN each name appears once, in travel order
-    assert street_names == ["Lychakivska", "Zelena"]
+    assert street_names == ["Khreshchatyk", "Lesi Ukrainky"]
 
 
 def test_metadata_store_rebuild_index_writes_streets_and_geometry(make_track, store):
     # GIVEN a trip with streets and a video without an overlay
     track = make_track()
-    track.streets = [{"name": "Zelena", "distance_m": 700}, {"name": "Stryiska"}]
+    track.streets = [{"name": "Lesi Ukrainky", "distance_m": 700}, {"name": "Hrushevskoho"}]
     store.save_track(track)
     no_overlay_track = make_track("2023-01-01 Old Camera.mp4", sample_count=0)
     no_overlay_track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
@@ -526,7 +526,7 @@ def test_metadata_store_rebuild_index_writes_streets_and_geometry(make_track, st
     # THEN the index has the street names, and the geometry file has the route of the GPS trip
     trips_by_id = {trip["id"]: trip for trip in index["trips"]}
     assert index["format_version"] == metadata.INDEX_FORMAT_VERSION
-    assert trips_by_id["2026-09-25 Trip 11-17"]["streets"] == ["Zelena", "Stryiska"]
+    assert trips_by_id["2026-09-25 Trip 11-17"]["streets"] == ["Lesi Ukrainky", "Hrushevskoho"]
     assert trips_by_id["2023-01-01 Old Camera"]["streets"] == []
     geometry = store.load_geometry()
     assert geometry["format_version"] == metadata.INDEX_FORMAT_VERSION

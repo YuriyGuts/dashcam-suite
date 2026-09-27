@@ -104,8 +104,8 @@ def test_find_localities_skips_suburbs(road_database, to_lat_lon):
     localities = road_database.find_localities(min_lat, max_lat, min_lon, max_lon)
 
     # THEN only the city is found, with its parsed population
-    assert [(locality.name, locality.population) for locality in localities] == [("Львів", 720000)]
-    assert localities[0].name_en == "Lviv"
+    assert [(locality.name, locality.population) for locality in localities] == [("Київ", 2950000)]
+    assert localities[0].name_en == "Kyiv"
 
 
 def test_open_database_without_data(tmp_path):

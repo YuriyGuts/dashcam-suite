@@ -37,9 +37,9 @@ SYNTHETIC_ROADS = [
 
 # Localities of the synthetic map, as (tags, point in meters east and north of the origin).
 SYNTHETIC_LOCALITIES = [
-    ({"place": "city", "name": "Львів", "name:en": "Lviv", "population": "720 000"}, (0, 0)),
-    ({"place": "village", "name": "Сокільники"}, (0, -12000)),
-    ({"place": "suburb", "name": "Сихів"}, (1000, 0)),
+    ({"place": "city", "name": "Київ", "name:en": "Kyiv", "population": "2 950 000"}, (0, 0)),
+    ({"place": "village", "name": "Гатне"}, (0, -12000)),
+    ({"place": "suburb", "name": "Оболонь"}, (1000, 0)),
 ]
 
 

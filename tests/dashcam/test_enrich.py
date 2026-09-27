@@ -196,8 +196,8 @@ def test_enrich_track_finds_start_and_end_localities(make_driven_track, road_dat
 
     # THEN the trip starts in the city and ends in the village
     assert track.localities == {
-        "start": {"name": "Львів", "name_en": "Lviv", "place": "city"},
-        "end": {"name": "Сокільники", "place": "village"},
+        "start": {"name": "Київ", "name_en": "Kyiv", "place": "city"},
+        "end": {"name": "Гатне", "place": "village"},
     }
 
 
@@ -396,8 +396,8 @@ def test_enrich_tracks_enriches_and_rebuilds_index(enrich_store, config, make_dr
     assert street_names(enrich_store.load_track("2026-09-25 Trip 11-17")) == ["Main"]
     index = json.loads(enrich_store.index_path.read_text(encoding="utf-8"))
     assert index["trips"][0]["streets"] == ["Main"]
-    assert index["trips"][0]["start_locality"] == "Львів"
-    assert index["trips"][0]["end_locality"] == "Львів"
+    assert index["trips"][0]["start_locality"] == "Київ"
+    assert index["trips"][0]["end_locality"] == "Київ"
 
 
 def test_enrich_tracks_skips_current_tracks(enrich_store, config, make_driven_track, caplog):

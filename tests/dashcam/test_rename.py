@@ -82,9 +82,9 @@ def test_get_street_label_uses_ref_of_road_without_name():
 
 
 def test_get_street_label_keeps_name_of_city_street_with_ref():
-    street = {"name": "Городоцька вулиця", "ref": "М11", "highway": "primary"}
+    street = {"name": "Велика Васильківська вулиця", "ref": "М11", "highway": "primary"}
 
-    assert rename.get_street_label(street) == "Horodotska"
+    assert rename.get_street_label(street) == "Velyka Vasylkivska"
 
 
 def test_get_street_label_with_only_street_type_words():
