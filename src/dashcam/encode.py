@@ -53,7 +53,6 @@ import re
 import shlex
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 
 from dashcam import metadata
@@ -366,58 +365,15 @@ def get_total_duration(segments: list[RawVideoSegment], ffprobe_executable: str)
         return None
 
 
-def format_video_time(time_s: float) -> str:
-    """Format a video time as `M:SS`, or `H:MM:SS` from one hour."""
-    total_s = int(time_s)
-    hours, minutes, seconds = total_s // 3600, total_s % 3600 // 60, total_s % 60
-    if hours:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes}:{seconds:02d}"
-
-
-def format_encode_progress(
-    output_name: str,
-    progress: video.FfmpegProgress,
-    total_duration_s: float | None,
-) -> str:
-    """
-    Describe the progress of an encoding job.
-
-    E.g. `Trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)`, or `Trip.mp4: 1:23 encoded, 1.2x`
-    when the total duration is unknown.
-    """
-    output_time_text = format_video_time(progress.output_time_s)
-    speed_text = "" if progress.speed is None else f", {progress.speed:.1f}x"
-    if not total_duration_s:
-        return f"{output_name}: {output_time_text} encoded{speed_text}"
-
-    percent = min(100, round(progress.output_time_s / total_duration_s * 100))
-    time_left_text = ""
-    if progress.speed is not None:
-        remaining_s = max(0.0, total_duration_s - progress.output_time_s) / progress.speed
-        if remaining_s < 60:
-            time_left_text = ", <1 min left"
-        else:
-            time_left_text = f", ~{round(remaining_s / 60)} min left"
-    return (
-        f"{output_name}: {percent}% ({output_time_text} of {format_video_time(total_duration_s)}"
-        f"{speed_text}{time_left_text})"
-    )
-
-
 def run_ffmpeg_with_progress(
     cmd: list[str], output_name: str, total_duration_s: float | None
 ) -> None:
     """Run the encoding command, logging its progress every `PROGRESS_INTERVAL_S`."""
-    next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
+    progress_logger = terminal.ProgressLogger(
+        LOGGER, output_name, total_duration_s, "encoded", PROGRESS_INTERVAL_S
+    )
     for progress in video.iter_ffmpeg_progress(cmd):
-        if time.monotonic() < next_progress_at:
-            continue
-        LOGGER.info(
-            format_encode_progress(output_name, progress, total_duration_s),
-            extra=terminal.PROGRESS,
-        )
-        next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
+        progress_logger.update(progress.output_time_s, progress.speed)
 
 
 def run_encode_job(job_def: EncodeJobDefinition) -> bool:

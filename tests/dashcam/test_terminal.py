@@ -210,3 +210,106 @@ def test_worker_pool_forwards_worker_logs_to_parent(caplog):
     ]
     assert all(record.marker == "success" for record in worker_records)
     assert multiprocessing.active_children() == []
+
+
+def test_format_progress_with_total_and_speed():
+    # GIVEN 1:23 of a 6-minute video done at 1.2x
+
+    # WHEN describing the progress
+    text = terminal.format_progress("trip.mp4", 83.0, 360.0, 1.2, "encoded")
+
+    # THEN it has the percentage, times, speed, and the time left in minutes
+    assert text == "trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)"
+
+
+def test_format_progress_before_speed_is_known():
+    # GIVEN the first report, without a speed
+
+    # WHEN describing the progress
+    text = terminal.format_progress("trip.mp4", 0.0, 360.0, None, "encoded")
+
+    # THEN the speed and the time left are left out
+    assert text == "trip.mp4: 0% (0:00 of 6:00)"
+
+
+def test_format_progress_without_total_duration():
+    # GIVEN a job whose total duration is unknown
+
+    # WHEN describing the progress
+    text = terminal.format_progress("trip.mp4", 83.0, None, 1.2, "encoded")
+
+    # THEN the time done and the speed are shown
+    assert text == "trip.mp4: 1:23 encoded, 1.2x"
+
+
+def test_format_video_time_from_one_hour():
+    assert terminal.format_video_time(3723.9) == "1:02:03"
+
+
+def test_format_video_time_under_one_hour():
+    assert terminal.format_video_time(83.0) == "1:23"
+
+
+@pytest.fixture
+def wall_clock(monkeypatch):
+    clock = {"now_s": 1000.0}
+    monkeypatch.setattr("dashcam.terminal.time.monotonic", lambda: clock["now_s"])
+    return clock
+
+
+def progress_messages(caplog):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if getattr(record, "marker", None) == "progress"
+    ]
+
+
+def test_progress_logger_logs_at_fixed_interval(wall_clock, caplog):
+    # GIVEN a progress logger with a 30-second interval, updated every 10 seconds
+    caplog.set_level(logging.INFO)
+    progress_logger = terminal.ProgressLogger(
+        logging.getLogger("test"), "trip.mp4", 3600.0, "read", interval_s=30
+    )
+
+    # WHEN a job advances 5 minutes of video every 10 seconds, for 70 seconds
+    for step in range(1, 8):
+        wall_clock["now_s"] += 10
+        progress_logger.update(step * 300.0)
+
+    # THEN the progress is logged every 30 seconds, with the average speed so far
+    assert progress_messages(caplog) == [
+        "trip.mp4: 25% (15:00 of 1:00:00, 30.0x, ~2 min left)",
+        "trip.mp4: 50% (30:00 of 1:00:00, 30.0x, ~1 min left)",
+    ]
+
+
+def test_progress_logger_prefers_given_speed(wall_clock, caplog):
+    # GIVEN a progress logger past its interval
+    caplog.set_level(logging.INFO)
+    progress_logger = terminal.ProgressLogger(
+        logging.getLogger("test"), "trip.mp4", 600.0, "encoded", interval_s=10
+    )
+    wall_clock["now_s"] += 10
+
+    # WHEN updating it with a speed reported by ffmpeg
+    progress_logger.update(60.0, speed=2.0)
+
+    # THEN that speed is shown
+    assert progress_messages(caplog) == ["trip.mp4: 10% (1:00 of 10:00, 2.0x, ~4 min left)"]
+
+
+def test_item_progress_logger_logs_at_fixed_interval(wall_clock, caplog):
+    # GIVEN a progress logger over 100 items with a 10-second interval
+    caplog.set_level(logging.INFO)
+    progress_logger = terminal.ItemProgressLogger(
+        logging.getLogger("test"), "Loading tracks", 100, interval_s=10
+    )
+
+    # WHEN one item is done every 3 seconds
+    for done_count in range(1, 10):
+        wall_clock["now_s"] += 3
+        progress_logger.update(done_count)
+
+    # THEN the count is logged every 10 seconds
+    assert progress_messages(caplog) == ["Loading tracks: 4/100", "Loading tracks: 8/100"]

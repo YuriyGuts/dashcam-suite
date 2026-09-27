@@ -45,8 +45,9 @@ SAMPLE_FPS = 2
 PROBE_FRAME_COUNT = 10
 PROBE_MIN_CLOCK_COUNT = 3
 
-# How often (in seconds of video) to log extraction progress.
-PROGRESS_INTERVAL_S = 300
+# How often (in seconds) to log the progress of reading a video or making its preview. Several
+# videos are extracted in parallel, so this is longer than for encoding.
+PROGRESS_INTERVAL_S = 30
 
 # Preview encoding for browsers that cannot play HEVC.
 PREVIEW_VIDEO_OPTIONS = "-vf scale=-2:480 -c:v libx264 -preset veryfast -crf 28"
@@ -92,6 +93,7 @@ class ExtractJobResult:
 
 def find_videos(library_dir: Path, include: list[str], exclude: list[str]) -> list[Path]:
     """List trip videos in the directory whose names match the include and exclude patterns."""
+    LOGGER.info(f"Scanning '{library_dir}' for videos")
     video_paths = []
     for path in sorted(library_dir.iterdir()):
         if not path.is_file() or path.name.startswith("."):
@@ -211,7 +213,9 @@ def read_all_frames(
 ) -> list[tuple[float, overlay.OverlayReading]]:
     """Decode the whole video and read the overlay of every sampled frame."""
     readings = []
-    next_progress_s = PROGRESS_INTERVAL_S
+    progress_logger = terminal.ProgressLogger(
+        LOGGER, video_path.name, video_info.duration_s, "read", PROGRESS_INTERVAL_S
+    )
     for offset_s, strip in video.iter_overlay_strips(
         video_path,
         width=video_info.width,
@@ -220,21 +224,21 @@ def read_all_frames(
         hwaccel_options=config.hwaccel_options,
     ):
         readings.append((offset_s, overlay.read_overlay(strip)))
-        if offset_s >= next_progress_s:
-            percent = min(100, round(offset_s / video_info.duration_s * 100))
-            LOGGER.info(f"{video_path.name}: {percent}%", extra=terminal.PROGRESS)
-            next_progress_s += PROGRESS_INTERVAL_S
+        progress_logger.update(offset_s)
     return readings
 
 
-def make_preview(video_path: Path, preview_path: Path, config: Config) -> None:
-    """Encode a low-resolution H.264 preview of the video."""
+def make_preview(
+    video_path: Path, preview_path: Path, config: Config, duration_s: float | None
+) -> None:
+    """Encode a low-resolution H.264 preview of the video, logging the progress."""
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     partial_path = metadata.get_partial_path(preview_path)
     cmd = [
         config.ffmpeg_executable,
         "-nostdin",
-        *["-v", "error"],
+        # Report errors only, and the progress as `key=value` lines on stdout.
+        *["-v", "error", "-nostats", "-progress", "pipe:1"],
         *shlex.split(config.hwaccel_options),
         *["-i", str(video_path)],
         *shlex.split(PREVIEW_VIDEO_OPTIONS),
@@ -242,8 +246,12 @@ def make_preview(video_path: Path, preview_path: Path, config: Config) -> None:
         *["-movflags", "+faststart", "-f", "mp4", "-y", str(partial_path)],
     ]
     LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)
+    progress_logger = terminal.ProgressLogger(
+        LOGGER, f"{video_path.name} (preview)", duration_s, "encoded", PROGRESS_INTERVAL_S
+    )
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        for progress in video.iter_ffmpeg_progress(cmd):
+            progress_logger.update(progress.output_time_s, progress.speed)
     except subprocess.CalledProcessError as exc:
         partial_path.unlink(missing_ok=True)
         raise RuntimeError(
@@ -317,7 +325,9 @@ def run_extract_job(job_def: ExtractJobDefinition) -> ExtractJobResult:
             track = store.load_track(job_def.video_path.stem)
         if job_def.make_preview and track.extraction_status == metadata.EXTRACTION_OK:
             LOGGER.info(f"Making preview: {video_filename}")
-            make_preview(job_def.video_path, store.preview_path(track.stem), job_def.config)
+            make_preview(
+                job_def.video_path, store.preview_path(track.stem), job_def.config, track.duration_s
+            )
     except (OSError, RuntimeError, subprocess.CalledProcessError, metadata.TrackFormatError) as exc:
         LOGGER.error(f"Extraction failed for '{video_filename}': {exc}")
         return ExtractJobResult(
@@ -344,11 +354,14 @@ def run_extract_job(job_def: ExtractJobDefinition) -> ExtractJobResult:
 def load_tracks_by_stem(store: metadata.MetadataStore) -> dict[str, metadata.Track]:
     """Load all readable tracks. Unreadable ones are reported and skipped."""
     tracks = {}
-    for path in store.list_track_paths():
-        try:
-            tracks[path.stem] = metadata.load_track_text(path.read_text(encoding="utf-8"))
-        except (OSError, metadata.TrackFormatError) as exc:
-            LOGGER.warning(f"Skipping unreadable track '{path.name}': {exc} (see `dashcam doctor`)")
+    for track_file in store.iter_track_files():
+        if track_file.track is None:
+            LOGGER.warning(
+                f"Skipping unreadable track '{track_file.path.name}': {track_file.error} "
+                f"(see `dashcam doctor`)"
+            )
+            continue
+        tracks[track_file.path.stem] = track_file.track
     return tracks
 
 
@@ -382,7 +395,9 @@ def plan_extraction(
     stems_by_fingerprint = {track.fingerprint: stem for stem, track in tracks_by_stem.items()}
 
     to_extract = []
-    for video_path in video_paths:
+    progress_logger = terminal.ItemProgressLogger(LOGGER, "Checking videos", len(video_paths))
+    for checked_count, video_path in enumerate(video_paths, start=1):
+        progress_logger.update(checked_count - 1)
         stat = video_path.stat()
         track = tracks_by_stem.get(video_path.stem)
 

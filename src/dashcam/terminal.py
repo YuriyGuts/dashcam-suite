@@ -12,12 +12,16 @@ Colors are only used on a terminal. `NO_COLOR` and `FORCE_COLOR` are honored.
 import copy
 import logging
 import multiprocessing.queues
+import time
 import typing as t
 
 from rich.console import Console
 from rich.highlighter import RegexHighlighter
 from rich.text import Text
 from rich.theme import Theme
+
+# How often (in seconds) to log the progress of a loop over many items, such as loading tracks.
+ITEM_PROGRESS_INTERVAL_S = 10
 
 # Markers that change how a log line looks, passed as `extra` to a log call.
 SUCCESS = {"marker": "success"}
@@ -184,3 +188,106 @@ def ask(prompt: str) -> str:
 def print_line(*parts: str | tuple[str, str] | Text) -> None:
     """Print a line to stdout, made of plain strings and (text, style) pairs."""
     STDOUT.print(Text.assemble(*parts), soft_wrap=True)
+
+
+def format_video_time(time_s: float) -> str:
+    """Format a video time as `M:SS`, or `H:MM:SS` from one hour."""
+    total_s = int(time_s)
+    hours, minutes, seconds = total_s // 3600, total_s % 3600 // 60, total_s % 60
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def format_progress(
+    name: str,
+    position_s: float,
+    total_duration_s: float | None,
+    speed: float | None,
+    done_verb: str,
+) -> str:
+    """
+    Describe the progress of a job through a video.
+
+    E.g. `Trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)`, or `Trip.mp4: 1:23 encoded, 1.2x`
+    when the total duration is unknown.
+    """
+    position_text = format_video_time(position_s)
+    speed_text = "" if speed is None else f", {speed:.1f}x"
+    if not total_duration_s:
+        return f"{name}: {position_text} {done_verb}{speed_text}"
+
+    percent = min(100, round(position_s / total_duration_s * 100))
+    time_left_text = ""
+    if speed is not None:
+        remaining_s = max(0.0, total_duration_s - position_s) / speed
+        if remaining_s < 60:
+            time_left_text = ", <1 min left"
+        else:
+            time_left_text = f", ~{round(remaining_s / 60)} min left"
+    return (
+        f"{name}: {percent}% ({position_text} of {format_video_time(total_duration_s)}"
+        f"{speed_text}{time_left_text})"
+    )
+
+
+class ProgressLogger:
+    """Log the progress of a job through a video at a fixed interval of wall-clock time."""
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        name: str,
+        total_duration_s: float | None,
+        done_verb: str,
+        interval_s: float,
+    ) -> None:
+        self.logger = logger
+        self.name = name
+        self.total_duration_s = total_duration_s
+        self.done_verb = done_verb
+        self.interval_s = interval_s
+        self.started_at = time.monotonic()
+        self.next_report_at = self.started_at + interval_s
+
+    def update(self, position_s: float, speed: float | None = None) -> None:
+        """
+        Log the position if the interval has passed since the last report.
+
+        Without `speed`, the average speed since the start is shown.
+        """
+        now = time.monotonic()
+        if now < self.next_report_at:
+            return
+        if speed is None and position_s > 0:
+            speed = position_s / (now - self.started_at)
+        self.logger.info(
+            format_progress(self.name, position_s, self.total_duration_s, speed, self.done_verb),
+            extra=PROGRESS,
+        )
+        self.next_report_at = now + self.interval_s
+
+
+class ItemProgressLogger:
+    """Log how many of several items are done, at a fixed interval of wall-clock time."""
+
+    def __init__(
+        self,
+        logger: logging.Logger,
+        description: str,
+        total_count: int,
+        interval_s: float = ITEM_PROGRESS_INTERVAL_S,
+    ) -> None:
+        self.logger = logger
+        self.description = description
+        self.total_count = total_count
+        self.interval_s = interval_s
+        self.next_report_at = time.monotonic() + interval_s
+
+    def update(self, done_count: int) -> None:
+        """Log the count if the interval has passed since the last report."""
+        now = time.monotonic()
+        if now < self.next_report_at:
+            return
+        self.logger.info(f"{self.description}: {done_count}/{self.total_count}", extra=PROGRESS)
+        self.next_report_at = now + self.interval_s

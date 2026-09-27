@@ -59,11 +59,11 @@ def scan_library(library_dir: Path, store: metadata.MetadataStore) -> LibrarySca
     """Load all tracks and list all videos."""
     tracks_by_stem = {}
     unreadable_tracks = {}
-    for path in store.list_track_paths():
-        try:
-            tracks_by_stem[path.stem] = metadata.load_track_text(path.read_text(encoding="utf-8"))
-        except (OSError, metadata.TrackFormatError) as exc:
-            unreadable_tracks[path.stem] = str(exc)
+    for track_file in store.iter_track_files():
+        if track_file.track is None:
+            unreadable_tracks[track_file.path.stem] = str(track_file.error)
+        else:
+            tracks_by_stem[track_file.path.stem] = track_file.track
 
     video_paths = (
         extract.find_videos(library_dir, include=[], exclude=[]) if library_dir.is_dir() else []
@@ -273,7 +273,13 @@ def check_videos(
     }
     renamed_track_stems = set()
 
-    for stem, video_path in sorted(scan.video_paths_by_stem.items()):
+    progress_logger = terminal.ItemProgressLogger(
+        LOGGER, "Checking videos", len(scan.video_paths_by_stem)
+    )
+    for checked_count, (stem, video_path) in enumerate(
+        sorted(scan.video_paths_by_stem.items()), start=1
+    ):
+        progress_logger.update(checked_count - 1)
         length_problem = metadata.get_filename_length_problem(video_path.name)
         if length_problem is not None:
             findings.append(

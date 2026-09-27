@@ -18,6 +18,7 @@ and date. The content fingerprint reconnects a track to its video after a rename
 import dataclasses
 import datetime
 import json
+import logging
 import os
 import re
 import secrets
@@ -27,6 +28,10 @@ from pathlib import Path
 
 from dashcam import cleaning
 from dashcam import geo
+from dashcam import terminal
+
+# pylint: disable=logging-fstring-interpolation
+LOGGER = logging.getLogger(__name__)
 
 # Versions of the extraction (OCR) and cleaning algorithms. Tracks made by older versions can
 # be updated with `extract --force` (extraction) or `extract --reclean` (cleaning).
@@ -373,6 +378,15 @@ def get_locality_name(track: Track, key: str) -> str | None:
     return locality.get("name")
 
 
+@dataclasses.dataclass(frozen=True)
+class TrackFile:
+    """A track file with its track, or the reason it could not be loaded."""
+
+    path: Path
+    track: Track | None
+    error: str | None
+
+
 class MetadataStore:
     """Tracks, previews, and the trip index in a metadata directory."""
 
@@ -403,6 +417,20 @@ class MetadataStore:
             for path in self.tracks_dir.glob(f"*{TRACK_EXTENSION}")
             if not path.name.startswith(".")
         )
+
+    def iter_track_files(self) -> t.Generator[TrackFile]:
+        """Load the track files one by one in name order, logging the progress."""
+        paths = self.list_track_paths()
+        LOGGER.info(f"Loading {len(paths)} tracks from '{self.tracks_dir}'")
+        progress_logger = terminal.ItemProgressLogger(LOGGER, "Loading tracks", len(paths))
+        for loaded_count, path in enumerate(paths, start=1):
+            try:
+                track = load_track_text(path.read_text(encoding="utf-8"))
+            except (OSError, TrackFormatError) as exc:
+                yield TrackFile(path=path, track=None, error=str(exc))
+            else:
+                yield TrackFile(path=path, track=track, error=None)
+            progress_logger.update(loaded_count)
 
     def load_track(self, stem: str) -> Track:
         """Load the track of a video stem."""
@@ -478,10 +506,9 @@ class MetadataStore:
             The index, ready to be written as JSON.
         """
         trips = []
-        for path in self.list_track_paths():
-            try:
-                track = load_track_text(path.read_text(encoding="utf-8"))
-            except (OSError, TrackFormatError):
+        for track_file in self.iter_track_files():
+            track = track_file.track
+            if track is None:
                 continue
             trip_name = parse_trip_name(track.video_filename)
             trip: dict[str, t.Any] = {

@@ -310,7 +310,7 @@ def test_run_encode_job_logs_progress_every_interval(config, tmp_path, monkeypat
     # GIVEN an ffmpeg run that reports its progress every 4 seconds
     caplog.set_level(logging.INFO)
     wall_clock = {"now_s": 0.0}
-    monkeypatch.setattr("dashcam.encode.time.monotonic", lambda: wall_clock["now_s"])
+    monkeypatch.setattr("dashcam.terminal.time.monotonic", lambda: wall_clock["now_s"])
 
     def iter_progress(cmd):
         Path(cmd[-1]).write_bytes(b"partial video")
@@ -385,47 +385,6 @@ def test_run_encode_job_without_durations_still_encodes(
     # THEN the video is still encoded, with a warning about the progress
     assert is_encoded
     assert "Cannot compute the encoding progress" in caplog.text
-
-
-def test_format_encode_progress_with_total_and_speed():
-    # GIVEN 1:23 of a 6-minute video encoded at 1.2x
-    progress = video.FfmpegProgress(output_time_s=83.0, speed=1.2)
-
-    # WHEN describing the progress
-    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=360.0)
-
-    # THEN it has the percentage, times, speed, and the time left in minutes
-    assert text == "trip.mp4: 23% (1:23 of 6:00, 1.2x, ~4 min left)"
-
-
-def test_format_encode_progress_before_speed_is_known():
-    # GIVEN the first report, without a speed
-    progress = video.FfmpegProgress(output_time_s=0.0, speed=None)
-
-    # WHEN describing the progress
-    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=360.0)
-
-    # THEN the speed and the time left are left out
-    assert text == "trip.mp4: 0% (0:00 of 6:00)"
-
-
-def test_format_encode_progress_without_total_duration():
-    # GIVEN a job whose total duration is unknown
-    progress = video.FfmpegProgress(output_time_s=83.0, speed=1.2)
-
-    # WHEN describing the progress
-    text = encode.format_encode_progress("trip.mp4", progress, total_duration_s=None)
-
-    # THEN the encoded time and speed are shown
-    assert text == "trip.mp4: 1:23 encoded, 1.2x"
-
-
-def test_format_video_time_from_one_hour():
-    assert encode.format_video_time(3723.9) == "1:02:03"
-
-
-def test_format_video_time_under_one_hour():
-    assert encode.format_video_time(83.0) == "1:23"
 
 
 def test_run_encode_job_deletes_concat_list(config, tmp_path, fake_ffmpeg):

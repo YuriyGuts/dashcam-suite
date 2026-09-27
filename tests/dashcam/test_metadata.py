@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 
 import pytest
 
@@ -249,6 +250,28 @@ def test_metadata_store_save_and_load_track(make_track, store):
     assert path.name == "2026-09-25 Trip 11-17.json"
     assert loaded_track == track
     assert [path.name for path in store.tracks_dir.iterdir()] == [path.name]
+
+
+def test_metadata_store_iter_track_files(make_track, store, caplog):
+    # GIVEN a readable and a broken track
+    caplog.set_level(logging.INFO)
+    store.save_track(make_track())
+    (store.tracks_dir / "2026-09-26 Broken.json").write_text("{", encoding="utf-8")
+
+    # WHEN iterating over the track files
+    track_files = list(store.iter_track_files())
+
+    # THEN both are listed in name order, the broken one with its error
+    assert [track_file.path.name for track_file in track_files] == [
+        "2026-09-25 Trip 11-17.json",
+        "2026-09-26 Broken.json",
+    ]
+    assert track_files[0].track == make_track()
+    assert track_files[0].error is None
+    assert track_files[1].track is None
+    assert track_files[1].error
+    # THEN the loading is announced before it starts
+    assert caplog.records[0].getMessage() == f"Loading 2 tracks from '{store.tracks_dir}'"
 
 
 def test_metadata_store_move_to_trash(make_track, store):

@@ -475,11 +475,10 @@ def enrich_tracks(
     failed_count = 0
     enriched_count = 0
     try:
-        for path in store.list_track_paths():
-            try:
-                track = metadata.load_track_text(path.read_text(encoding="utf-8"))
-            except (OSError, metadata.TrackFormatError) as exc:
-                LOGGER.error(f"Cannot enrich '{path.name}': {exc}")
+        for track_file in store.iter_track_files():
+            track = track_file.track
+            if track is None:
+                LOGGER.error(f"Cannot enrich '{track_file.path.name}': {track_file.error}")
                 failed_count += 1
                 continue
             if track.extraction_status != metadata.EXTRACTION_OK:

@@ -1,9 +1,9 @@
 import contextlib
 import dataclasses
 import json
+import logging
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -85,6 +85,25 @@ def test_find_videos_with_include_and_exclude(library_dir, make_video_file):
 
     # THEN only the matching trip video is found
     assert [path.name for path in video_paths] == ["2026-09-25 Trip.mp4"]
+
+
+def test_find_videos_announces_the_scan(library_dir, monkeypatch, caplog):
+    # GIVEN a library directory that is slow to list
+    caplog.set_level(logging.INFO)
+    messages_before_listing = []
+    original_iterdir = Path.iterdir
+
+    def recording_iterdir(path):
+        messages_before_listing.extend(record.getMessage() for record in caplog.records)
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", recording_iterdir)
+
+    # WHEN finding videos
+    extract.find_videos(library_dir, include=[], exclude=[])
+
+    # THEN the scan is logged before the directory is listed
+    assert messages_before_listing == [f"Scanning '{library_dir}' for videos"]
 
 
 def test_find_videos_without_patterns(library_dir, make_video_file):
@@ -235,6 +254,38 @@ def test_probe_overlay_with_camera_clock_and_missing_frames(fake_strips, config)
 
     # THEN the overlay is found
     assert has_overlay
+
+
+def test_read_all_frames_logs_progress_at_fixed_interval(fake_strips, config, monkeypatch, caplog):
+    # GIVEN a 10-minute video whose frames take 1 second each to read
+    caplog.set_level(logging.INFO)
+    strip = overlay.read_strip_image(OVERLAY_FIXTURE_DIR / "2026-09-23_60s.png")
+    fake_strips["frames"] = [(offset_s * 60.0, strip) for offset_s in range(10)]
+    wall_clock = {"now_s": 0.0}
+    monkeypatch.setattr("dashcam.terminal.time.monotonic", lambda: wall_clock["now_s"])
+
+    def slow_read_overlay(strip):
+        wall_clock["now_s"] += 1
+        return overlay.OverlayReading("", "2026/09/23 18:43:01", -1.0, 0.99)
+
+    monkeypatch.setattr("dashcam.extract.overlay.read_overlay", slow_read_overlay)
+    monkeypatch.setattr("dashcam.extract.PROGRESS_INTERVAL_S", 4)
+    video_info = video.VideoInfo(width=2560, height=1440, duration_s=600)
+
+    # WHEN reading all frames
+    readings = extract.read_all_frames(Path("trip.mp4"), video_info, config)
+
+    # THEN every frame is read, and the progress is logged every 4 seconds
+    assert len(readings) == 10
+    progress_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if getattr(record, "marker", None) == "progress"
+    ]
+    assert progress_messages == [
+        "trip.mp4: 30% (3:00 of 10:00, 45.0x, <1 min left)",
+        "trip.mp4: 70% (7:00 of 10:00, 52.5x, <1 min left)",
+    ]
 
 
 def test_plan_extraction_with_new_video(store, make_video_file):
@@ -531,7 +582,9 @@ def test_extract_videos_makes_missing_previews(
     previews = []
     monkeypatch.setattr(
         "dashcam.extract.make_preview",
-        lambda video_path, preview_path, config: previews.append((video_path, preview_path)),
+        lambda video_path, preview_path, config, duration_s: previews.append(
+            (video_path, preview_path)
+        ),
     )
 
     # WHEN extracting with previews
@@ -551,41 +604,56 @@ def test_extract_videos_makes_missing_previews(
     assert previews == [(video_path, store.preview_path(video_path.stem))]
 
 
-def test_make_preview_renames_partial_output(monkeypatch, config, tmp_path):
+def test_make_preview_renames_partial_output(fake_ffmpeg, config, tmp_path):
     # GIVEN an ffmpeg run that writes the partial output
-    commands = []
-
-    def fake_run(cmd, **kwargs):
-        commands.append(cmd)
-        Path(cmd[-1]).write_bytes(b"preview")
-
-    monkeypatch.setattr("dashcam.extract.subprocess.run", fake_run)
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"
 
     # WHEN making a preview
-    extract.make_preview(tmp_path / "trip.mp4", preview_path, config)
+    extract.make_preview(tmp_path / "trip.mp4", preview_path, config, duration_s=60.0)
 
     # THEN the result is renamed to the final path
     assert list(preview_path.parent.iterdir()) == [preview_path]
-    assert preview_path.read_bytes() == b"preview"
-    assert "scale=-2:480" in commands[0]
+    assert preview_path.read_bytes() == b"partial video"
+    assert "scale=-2:480" in fake_ffmpeg.calls[0]
 
 
-def test_make_preview_removes_partial_output_on_failure(monkeypatch, config, tmp_path):
+def test_make_preview_removes_partial_output_on_failure(fake_ffmpeg, config, tmp_path):
     # GIVEN an ffmpeg run that fails after writing some output
-    def failing_run(cmd, **kwargs):
-        Path(cmd[-1]).write_bytes(b"partial")
-        raise subprocess.CalledProcessError(1, cmd, stderr="Invalid data found\n")
-
-    monkeypatch.setattr("dashcam.extract.subprocess.run", failing_run)
+    fake_ffmpeg.encode_return_code = 1
+    fake_ffmpeg.encode_stderr = "Invalid data found"
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"
 
     # WHEN making a preview
     with pytest.raises(RuntimeError, match="Invalid data found"):
-        extract.make_preview(tmp_path / "trip.mp4", preview_path, config)
+        extract.make_preview(tmp_path / "trip.mp4", preview_path, config, duration_s=60.0)
 
     # THEN nothing is left behind, and the error names the ffmpeg error
     assert list(preview_path.parent.iterdir()) == []
+
+
+def test_make_preview_logs_progress(fake_ffmpeg, config, tmp_path, monkeypatch, caplog):
+    # GIVEN an ffmpeg run that reports its progress every 20 seconds
+    caplog.set_level(logging.INFO)
+    wall_clock = {"now_s": 0.0}
+    monkeypatch.setattr("dashcam.terminal.time.monotonic", lambda: wall_clock["now_s"])
+
+    def reports():
+        for report_number in range(1, 4):
+            wall_clock["now_s"] = report_number * 20.0
+            yield video.FfmpegProgress(output_time_s=report_number * 600.0, speed=30.0)
+
+    fake_ffmpeg.progress_reports = reports()
+
+    # WHEN making a preview of a 1-hour video
+    extract.make_preview(tmp_path / "trip.mp4", tmp_path / "preview.mp4", config, 3600.0)
+
+    # THEN the progress is logged at most every `PROGRESS_INTERVAL_S` (at 40 s)
+    progress_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if getattr(record, "marker", None) == "progress"
+    ]
+    assert progress_messages == ["trip.mp4 (preview): 33% (20:00 of 1:00:00, 30.0x, ~1 min left)"]
 
 
 def test_reclean_tracks_applies_overrides(config, store, make_track):
