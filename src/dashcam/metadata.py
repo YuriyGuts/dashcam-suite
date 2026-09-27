@@ -99,6 +99,23 @@ def get_max_video_filename_bytes(extension: str) -> int:
     return MAX_FILENAME_BYTES - longest_extension_length + len(extension)
 
 
+def rename_without_overwrite(source_path: Path, target_path: Path) -> None:
+    """
+    Rename a file, refusing to replace another file (which POSIX would do silently).
+
+    A target that is the source itself, as in a rename that only changes the letter case on a
+    case-insensitive file system, is allowed.
+
+    Raises
+    ------
+    FileExistsError
+        If another file has the target name.
+    """
+    if target_path.exists() and not target_path.samefile(source_path):
+        raise FileExistsError(f"'{target_path}' already exists")
+    source_path.rename(target_path)
+
+
 def is_single_path_component(name: str) -> bool:
     """Check that a name (e.g. a trip ID from a request) cannot leave its directory."""
     return bool(name) and not name.startswith(".") and not PATH_SEPARATOR_CHARS.search(name)
@@ -647,18 +664,37 @@ class MetadataStore:
         return trash_dir
 
     def rename_trip(self, old_stem: str, new_video_filename: str) -> None:
-        """Rename a track (and its preview) after its video was renamed."""
-        track = self.load_track(old_stem)
-        track.video_filename = new_video_filename
+        """
+        Rename a track (and its preview) after its video was renamed.
+
+        If a step fails, the steps done so far are undone.
+
+        Raises
+        ------
+        FileExistsError
+            If another track or preview already has the new name.
+        """
+        original_track = self.load_track(old_stem)
+        track = dataclasses.replace(original_track, video_filename=new_video_filename)
         old_track_path = self.track_path(old_stem)
-        # The track is updated under its old name and then renamed, so that a rename that only
-        # changes the letter case works on case-insensitive file systems.
-        self.write_track_file(track, old_track_path)
-        if track.stem != old_stem:
-            old_track_path.rename(self.track_path(track.stem))
-            old_preview_path = self.preview_path(old_stem)
-            if old_preview_path.exists():
-                old_preview_path.rename(self.preview_path(track.stem))
+        new_track_path = self.track_path(track.stem)
+        old_preview_path = self.preview_path(old_stem)
+        new_preview_path = self.preview_path(track.stem)
+        undo_steps: list[t.Callable[[], object]] = []
+        try:
+            # The track is updated under its old name and then renamed, so that a rename that
+            # only changes the letter case works on case-insensitive file systems.
+            self.write_track_file(track, old_track_path)
+            undo_steps.append(lambda: self.write_track_file(original_track, old_track_path))
+            if track.stem != old_stem:
+                rename_without_overwrite(old_track_path, new_track_path)
+                undo_steps.append(lambda: new_track_path.rename(old_track_path))
+                if old_preview_path.exists():
+                    rename_without_overwrite(old_preview_path, new_preview_path)
+        except BaseException:
+            for undo_step in reversed(undo_steps):
+                undo_step()
+            raise
 
     def build_index(self) -> dict[str, t.Any]:
         """

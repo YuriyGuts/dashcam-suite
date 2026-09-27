@@ -491,6 +491,49 @@ def test_metadata_store_rename_trip_changing_only_letter_case(make_track, store)
     assert [path.name for path in store.previews_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
 
 
+def test_metadata_store_rename_trip_undoes_steps_when_preview_rename_fails(
+    make_track, store, monkeypatch
+):
+    # GIVEN a track with a preview, and a preview that cannot be renamed
+    track = make_track()
+    store.save_track(track)
+    store.previews_dir.mkdir(parents=True)
+    store.preview_path(track.stem).write_bytes(b"preview")
+    original_rename = metadata.rename_without_overwrite
+
+    def rename_failing_for_previews(source_path, target_path):
+        if source_path.parent == store.previews_dir:
+            raise PermissionError("preview is locked")
+        original_rename(source_path, target_path)
+
+    monkeypatch.setattr(metadata, "rename_without_overwrite", rename_failing_for_previews)
+
+    # WHEN its video is renamed
+    with pytest.raises(PermissionError):
+        store.rename_trip(track.stem, "2026-09-25 Khreshchatyk.mp4")
+
+    # THEN the track is back under its old name, still naming the old video
+    assert [path.name for path in store.list_track_paths()] == [f"{track.stem}.json"]
+    assert store.load_track(track.stem).video_filename == track.video_filename
+    assert store.preview_path(track.stem).read_bytes() == b"preview"
+
+
+def test_metadata_store_rename_trip_refuses_to_replace_another_track(make_track, store):
+    # GIVEN two tracks
+    track = make_track()
+    store.save_track(track)
+    other_track = make_track(video_filename="2026-09-25 Khreshchatyk.mp4")
+    store.save_track(other_track)
+
+    # WHEN renaming the first to the name of the second
+    with pytest.raises(FileExistsError):
+        store.rename_trip(track.stem, "2026-09-25 Khreshchatyk.mp4")
+
+    # THEN both tracks are unchanged
+    assert store.load_track(track.stem).video_filename == track.video_filename
+    assert store.load_track(other_track.stem).video_filename == other_track.video_filename
+
+
 def test_metadata_store_rebuild_index(make_track, store):
     # GIVEN a good track, a track without an overlay, and an unreadable track
     store.save_track(make_track())
