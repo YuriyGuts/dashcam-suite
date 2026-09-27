@@ -442,6 +442,24 @@ def test_enrich_tracks_skips_videos_without_overlay(enrich_store, config, make_d
     assert enrich_store.load_track(track.stem).enrichment is None
 
 
+def test_enrich_tracks_skips_misnamed_track_files(enrich_store, config, make_driven_track, caplog):
+    # GIVEN a track file whose name differs from the video it declares, next to that video's track
+    other_track = make_driven_track(drive((50, 0), (450, 0)))
+    enrich_store.save_track(other_track)
+    misnamed_track = make_driven_track(drive((50, 0), (900, 0)))
+    enrich_store.write_track_file(misnamed_track, enrich_store.track_path("2026-09-24 Old Name"))
+    caplog.set_level(logging.INFO)
+
+    # WHEN enriching the tracks
+    run_enrich_tracks(enrich_store, config)
+
+    # THEN the misnamed file is skipped with a hint, and does not overwrite the other track
+    assert "Skipped '2026-09-24 Old Name.json'" in caplog.text
+    assert "dashcam doctor --fix" in caplog.text
+    assert enrich_store.load_track(other_track.stem).raw_samples == other_track.raw_samples
+    assert enrich_store.load_track("2026-09-24 Old Name").enrichment is None
+
+
 def test_enrich_tracks_reports_unreadable_tracks(enrich_store, config, make_driven_track):
     # GIVEN a broken track next to a good one
     enrich_store.track_path("2026-09-24 Broken").write_text("{", encoding="utf-8")
