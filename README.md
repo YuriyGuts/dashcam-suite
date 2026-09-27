@@ -2,7 +2,7 @@
 
 A toolkit for importing, processing, and visualizing trips from a car dashcam. Uses the burnt-in GPS metadata for plotting and analyzing routes on a map.
 
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![CI](https://github.com/YuriyGuts/dashcam-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/YuriyGuts/dashcam-suite/actions/workflows/ci.yml) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 
 ## How it works
