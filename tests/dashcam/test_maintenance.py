@@ -356,7 +356,8 @@ def test_run_doctor_ignores_cleaning_version_of_track_without_overlay(
     run_doctor(library_dir, store)
 
     # THEN nothing is suggested, since there are no readings to clean
-    assert "older" not in caplog.text
+    assert "was cleaned by an older version" not in caplog.text
+    assert "--reclean" not in caplog.text
 
 
 def test_run_doctor_reports_track_from_older_extractor(library_dir, store, add_trip, caplog):
