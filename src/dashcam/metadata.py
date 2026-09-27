@@ -137,6 +137,17 @@ def find_videos(library_dir: Path) -> list[Path]:
     )
 
 
+def find_videos_sharing_a_track(video_paths: list[Path]) -> list[list[Path]]:
+    """
+    Group the videos whose names differ only in the extension or the letter case. Tracks are
+    named after the video name without the extension, so such videos would share one track.
+    """
+    paths_by_stem: dict[str, list[Path]] = {}
+    for path in video_paths:
+        paths_by_stem.setdefault(path.stem.lower(), []).append(path)
+    return [paths for paths in paths_by_stem.values() if len(paths) > 1]
+
+
 def rename_without_overwrite(source_path: Path, target_path: Path) -> None:
     """
     Rename a file, refusing to replace another file (which POSIX would do silently).

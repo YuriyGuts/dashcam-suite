@@ -50,6 +50,9 @@ class LibraryScan:
     video_paths_by_stem: dict[str, Path]
     fingerprints_by_stem: dict[str, str]
 
+    # Groups of videos whose names differ only in the extension or the letter case.
+    videos_sharing_a_track: list[list[Path]] = dataclasses.field(default_factory=list)
+
     def get_video_fingerprint(self, stem: str) -> str:
         """Fingerprint a video in the directory, caching the result."""
         if stem not in self.fingerprints_by_stem:
@@ -75,6 +78,7 @@ def scan_library(library_dir: Path, store: metadata.MetadataStore) -> LibrarySca
         unreadable_tracks=unreadable_tracks,
         video_paths_by_stem={path.stem: path for path in video_paths},
         fingerprints_by_stem={},
+        videos_sharing_a_track=metadata.find_videos_sharing_a_track(video_paths),
     )
 
 
@@ -275,6 +279,15 @@ def check_videos(
     }
     renamed_track_stems = set()
 
+    # `extract` skips these videos, so their tracks are not checked against them.
+    conflicting_stems = set()
+    for paths in scan.videos_sharing_a_track:
+        conflicting_stems.update(path.stem for path in paths)
+        names = ", ".join(f"'{path.name}'" for path in paths)
+        findings.append(
+            Finding(SEVERITY_ERROR, f"Videos {names} would share one track (rename all but one)")
+        )
+
     progress_logger = terminal.ItemProgressLogger(
         LOGGER, "Checking videos", len(scan.video_paths_by_stem)
     )
@@ -282,6 +295,8 @@ def check_videos(
         sorted(scan.video_paths_by_stem.items()), start=1
     ):
         progress_logger.update(checked_count - 1)
+        if stem in conflicting_stems:
+            continue
         length_problem = metadata.get_filename_length_problem(video_path.name)
         if length_problem is not None:
             findings.append(

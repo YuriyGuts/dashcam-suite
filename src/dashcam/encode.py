@@ -484,7 +484,9 @@ def plan_encode_jobs(
     config: Config,
 ) -> list[EncodeJobDefinition]:
     """
-    Turn (output name, segments) pairs into encoding jobs, skipping outputs that already exist.
+    Turn (output name, segments) pairs into encoding jobs, skipping outputs whose name a video
+    in the library already has, with any extension or letter case, since a track is named
+    after the video name without the extension.
 
     Returns
     -------
@@ -498,6 +500,8 @@ def plan_encode_jobs(
     """
     job_defs = []
     planned_names = set()
+    library_video_paths = metadata.find_videos(library_dir) if library_dir.is_dir() else []
+    library_video_paths_by_stem = {path.stem.lower(): path for path in library_video_paths}
     for output_name, segments in segment_groups:
         if output_name.lower() in planned_names:
             raise RuntimeError(
@@ -506,8 +510,11 @@ def plan_encode_jobs(
             )
         planned_names.add(output_name.lower())
         output_path = library_dir / f"{output_name}.{OUTPUT_FORMAT}"
-        if output_path.exists():
-            LOGGER.warning(f"Output video '{output_path}' already exists; skipping")
+        existing_path = library_video_paths_by_stem.get(output_name.lower())
+        if existing_path is not None or output_path.exists():
+            LOGGER.warning(
+                f"Output video '{existing_path or output_path}' already exists; skipping"
+            )
             continue
         job_defs.append(
             EncodeJobDefinition(raw_segments=segments, output_path=output_path, config=config)

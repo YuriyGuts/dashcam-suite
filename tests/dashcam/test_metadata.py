@@ -835,6 +835,22 @@ def test_find_videos_lists_trip_videos_by_name(tmp_path):
     assert [path.name for path in video_paths] == ["A.MOV", "b.mp4", "c.avi"]
 
 
+def test_find_videos_sharing_a_track():
+    # GIVEN videos whose names differ only in the extension or letter case, and another video
+    video_paths = [
+        Path("2026-09-25 Trip.mp4"),
+        Path("2026-09-25 Trip.mov"),
+        Path("2026-09-25 trip.MP4"),
+        Path("2026-09-26 Trip.mp4"),
+    ]
+
+    # WHEN grouping the videos that would share a track
+    groups = metadata.find_videos_sharing_a_track(video_paths)
+
+    # THEN the first three are one group
+    assert groups == [video_paths[:3]]
+
+
 def test_find_videos_announces_the_scan(tmp_path, monkeypatch, caplog):
     # GIVEN a library directory that is slow to list
     caplog.set_level(logging.INFO)

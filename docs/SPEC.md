@@ -48,7 +48,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count` (trips only), `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
 - Encoded raw videos are logged by filename and size in `.metadata/encoded_segments.json` (logged by the parent process after each successful job). `trips` leaves logged videos out before grouping, so clips left on the card are not encoded again after their trip is renamed, and new clips recorded within the trip gap of an imported trip form a trip of their own. `range` encodes the selected videos regardless and logs them too.
-- Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). Existing outputs are skipped with a warning and never overwritten. Incomplete outputs never appear under the final name.
+- Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). An output whose name a library video already has, with any extension or letter case, is skipped with a warning, so videos are never overwritten and never share a track. Incomplete outputs never appear under the final name.
 
 ### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews] [--job-count JC]`
 
@@ -77,6 +77,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
   - Times are stored as ISO-8601 with the offset of the configured `timezone`.
   - The camera clock is read as local time. In the hour repeated when daylight saving time ends, a reading counts as the second occurrence once the clock has stepped back within the video. A recording that starts in that hour after the change is read as the first occurrence.
 - Incremental and resumable: only videos without a track, or whose content changed, are processed. Each track is written when its video is done.
+- Videos whose names differ only in the extension or letter case would share one track, so they are skipped and counted as failed until all but one are renamed.
 - `--only` re-extracts the named videos and keeps their manual overrides.
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
 
@@ -125,6 +126,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Track JSON parses, schema valid, overrides well-formed | Report line and field |
 | Track filename differs from its `video_filename` field | Rename the track file |
 | Two tracks share a fingerprint | Report both |
+| Videos whose names differ only in the extension or letter case | Report |
 | Video in the library without a track | Suggest `extract` |
 | Track whose video is not in the library | Reconnect renames via fingerprint; report the rest as unreachable |
 | Same stem, fingerprint mismatch | Suggest `extract --only` |

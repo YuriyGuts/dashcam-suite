@@ -567,6 +567,33 @@ def test_plan_encode_jobs_skips_existing_outputs(config, tmp_path):
     assert [job_def.output_path.name for job_def in job_defs] == ["2026-09-25 Trip 15-00.mp4"]
 
 
+def test_plan_encode_jobs_skips_outputs_named_like_another_video(config, tmp_path):
+    # GIVEN a library video with the output name, but another extension and letter case
+    segment = make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))
+    (tmp_path / "2026-09-25 road trip.mov").write_bytes(b"existing")
+
+    # WHEN planning a job with that output name
+    job_defs = encode.plan_encode_jobs(
+        [("2026-09-25 Road Trip", [segment])], library_dir=tmp_path, config=config
+    )
+
+    # THEN nothing is planned, since both videos would share one track
+    assert job_defs == []
+
+
+def test_plan_encode_jobs_without_library_directory(config, tmp_path):
+    # GIVEN a library directory that does not exist yet
+    segment = make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))
+
+    # WHEN planning a job
+    job_defs = encode.plan_encode_jobs(
+        [("2026-09-25 Trip 11-17", [segment])], library_dir=tmp_path / "videos", config=config
+    )
+
+    # THEN it is planned
+    assert [job_def.output_path.name for job_def in job_defs] == ["2026-09-25 Trip 11-17.mp4"]
+
+
 def test_plan_encode_jobs_rejects_duplicate_output_names(config, tmp_path):
     # GIVEN two trips that start in the same minute (with a very small trip gap)
     segment = make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))

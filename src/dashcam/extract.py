@@ -255,6 +255,23 @@ def make_preview(
         partial_path.unlink(missing_ok=True)
 
 
+def skip_videos_sharing_a_track(
+    video_paths: list[Path], library_video_paths: list[Path]
+) -> list[Path]:
+    """
+    Report and drop the videos whose name, apart from the extension and the letter case,
+    another video in the library has too.
+    """
+    kept_paths = set(video_paths)
+    for paths in metadata.find_videos_sharing_a_track(library_video_paths):
+        if kept_paths.isdisjoint(paths):
+            continue
+        kept_paths.difference_update(paths)
+        names = ", ".join(f"'{path.name}'" for path in paths)
+        LOGGER.error(f"Skipping {names}: they would share one track (rename all but one)")
+    return [path for path in video_paths if path in kept_paths]
+
+
 def clean_raw_samples(
     raw_samples: list[cleaning.RawSample],
     video_filename: str,
@@ -503,6 +520,7 @@ def extract_videos(
     LOGGER.info(f"Found {len(video_paths)} videos in '{library_dir}'")
     found_count = len(video_paths)
     video_paths = skip_too_long_names(video_paths)
+    video_paths = skip_videos_sharing_a_track(video_paths, library_video_paths)
     skipped_count = found_count - len(video_paths)
 
     library_stems = {path.stem for path in library_video_paths}

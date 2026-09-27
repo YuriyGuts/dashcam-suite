@@ -662,6 +662,61 @@ def test_extract_videos_skips_too_long_names(
     assert f"Skipping '{long_name}': the name is too long" in caplog.text
 
 
+def test_extract_videos_skips_videos_sharing_a_track(
+    config, library_dir, store, make_video_file, fake_extract_video, serial_extract_pool, caplog
+):
+    # GIVEN two videos whose names differ only in the extension, and another video
+    make_video_file("2026-09-25 Trip.mp4", b"a")
+    make_video_file("2026-09-25 Trip.mov", b"b")
+    make_video_file("2026-09-26 Trip.mp4", b"c")
+
+    # WHEN extracting
+    failed_count = extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=[],
+        exclude=[],
+        only=[],
+        force=False,
+        make_previews=False,
+        job_count=2,
+    )
+
+    # THEN only the other video is extracted, and both conflicting videos count as failures
+    assert failed_count == 2
+    assert fake_extract_video == ["2026-09-26 Trip.mp4"]
+    assert "would share one track" in caplog.text
+    assert [path.name for path in store.list_track_paths()] == ["2026-09-26 Trip.json"]
+
+
+def test_extract_videos_ignores_conflicts_of_videos_left_out(
+    config, library_dir, store, make_video_file, fake_extract_video, serial_extract_pool, caplog
+):
+    # GIVEN two videos that would share a track, and another video
+    make_video_file("2026-09-25 Trip.mp4", b"a")
+    make_video_file("2026-09-25 Trip.mov", b"b")
+    make_video_file("2026-09-26 Trip.mp4", b"c")
+
+    # WHEN extracting only the other video
+    failed_count = extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=["2026-09-26*"],
+        exclude=[],
+        only=[],
+        force=False,
+        make_previews=False,
+        job_count=2,
+    )
+
+    # THEN it is extracted without reporting the conflict
+    assert failed_count == 0
+    assert fake_extract_video == ["2026-09-26 Trip.mp4"]
+    assert "would share one track" not in caplog.text
+
+
 def test_extract_videos_makes_missing_previews(
     monkeypatch, config, library_dir, store, make_video_file, save_track_for, serial_extract_pool
 ):
