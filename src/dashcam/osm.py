@@ -415,6 +415,10 @@ class Download:
     error: BaseException | None = None
     stop_requested: threading.Event = dataclasses.field(default_factory=threading.Event)
 
+    # Set when the download ends and its file is closed. Waiting on it replaces
+    # `Thread.join()`, which returns at once after being interrupted by Ctrl+C on Python 3.12.
+    finished: threading.Event = dataclasses.field(default_factory=threading.Event)
+
     # Set once the connection is made and the target file is open.
     is_writing: bool = False
 
@@ -430,6 +434,8 @@ class Download:
             self.error = error
         except BaseException as exc:
             self.error = exc
+        finally:
+            self.finished.set()
 
     def transfer(self) -> None:
         """Download the file until it is complete or a stop is requested."""
@@ -487,10 +493,9 @@ def download_file(url: str, target_path: Path) -> None:
     next_progress_at = started_at + DOWNLOAD_PROGRESS_INTERVAL_S
     thread.start()
     try:
-        while thread.is_alive():
-            thread.join(DOWNLOAD_POLL_INTERVAL_S)
+        while not download.finished.wait(DOWNLOAD_POLL_INTERVAL_S):
             now = time.monotonic()
-            if now >= next_progress_at and download.downloaded_size and thread.is_alive():
+            if now >= next_progress_at and download.downloaded_size:
                 LOGGER.info(
                     format_download_progress(
                         download.downloaded_size, download.total_size, now - started_at
@@ -503,7 +508,7 @@ def download_file(url: str, target_path: Path) -> None:
         # download still connecting has no file yet, and is not waited for.
         download.stop_requested.set()
         if download.is_writing:
-            thread.join(DOWNLOAD_STOP_TIMEOUT_S)
+            download.finished.wait(DOWNLOAD_STOP_TIMEOUT_S)
         raise
 
     if download.error is not None:
