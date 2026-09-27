@@ -656,6 +656,44 @@ def test_extract_videos_makes_missing_previews(
     assert previews == [(video_path, store.preview_path(video_path.stem))]
 
 
+def test_extract_videos_with_previews_skips_videos_without_overlay(
+    monkeypatch,
+    config,
+    library_dir,
+    store,
+    make_video_file,
+    save_track_for,
+    serial_extract_pool,
+    caplog,
+):
+    # GIVEN an up-to-date track of a video without an overlay, and no preview
+    video_path = make_video_file("2023-01-01 Old Camera.mp4")
+    save_track_for(video_path, extraction_status=metadata.EXTRACTION_NO_OVERLAY)
+    previews = []
+    monkeypatch.setattr(
+        "dashcam.extract.make_preview",
+        lambda video_path, preview_path, config, duration_s: previews.append(video_path),
+    )
+    caplog.set_level(logging.INFO)
+
+    # WHEN extracting with previews
+    extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=[],
+        exclude=[],
+        only=[],
+        force=False,
+        make_previews=True,
+        job_count=2,
+    )
+
+    # THEN no job is started, and the library is reported as up to date
+    assert previews == []
+    assert "All tracks are up to date" in caplog.text
+
+
 def test_make_preview_renames_partial_output(fake_ffmpeg, config, tmp_path):
     # GIVEN an ffmpeg run that writes the partial output
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"

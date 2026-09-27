@@ -542,11 +542,22 @@ def plan_missing_previews(
     store: metadata.MetadataStore,
     config: Config,
 ) -> list[ExtractJobDefinition]:
-    """Plan preview-only jobs for extracted videos that do not have a preview yet."""
+    """
+    Plan preview-only jobs for extracted videos that do not have a preview yet.
+
+    Videos without an overlay get no preview, and unreadable tracks are skipped (the planning
+    of the extraction reports them).
+    """
     job_defs = []
     for video_path in video_paths:
         track_path = store.track_path(video_path.stem)
         if not track_path.exists() or store.preview_path(video_path.stem).exists():
+            continue
+        try:
+            track = store.load_track(video_path.stem)
+        except (OSError, metadata.TrackFormatError):
+            continue
+        if track.extraction_status != metadata.EXTRACTION_OK:
             continue
         job_defs.append(
             ExtractJobDefinition(
