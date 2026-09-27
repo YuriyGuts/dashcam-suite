@@ -10,8 +10,10 @@ Colors are only used on a terminal. `NO_COLOR` and `FORCE_COLOR` are honored.
 """
 
 import copy
+import io
 import logging
 import multiprocessing.queues
+import sys
 import time
 import typing as t
 
@@ -154,6 +156,19 @@ class WorkerLogHandler(logging.Handler):
             self.log_queue.put(sendable_record)
         except Exception:
             self.handleError(record)
+
+
+def configure_output_encoding() -> None:
+    """
+    Write UTF-8 when stdout is redirected to a file or a pipe.
+
+    Otherwise Windows uses its legacy code page there, which cannot encode arrows or Cyrillic
+    trip names. A terminal keeps its own encoding.
+    """
+    stdout = sys.stdout
+    is_utf8 = stdout.encoding.lower().replace("-", "") == "utf8"
+    if isinstance(stdout, io.TextIOWrapper) and not stdout.isatty() and not is_utf8:
+        stdout.reconfigure(encoding="utf-8")
 
 
 def configure_logging() -> None:

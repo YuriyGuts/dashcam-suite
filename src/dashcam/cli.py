@@ -632,6 +632,7 @@ def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
 
 
 def main() -> None:
+    terminal.configure_output_encoding()
     terminal.configure_logging()
     try:
         config = load_config()

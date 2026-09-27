@@ -17,6 +17,38 @@ ANSI_ESCAPE = "\x1b["
 RECORD_TIME = time.mktime((2026, 9, 25, 14, 3, 11, 0, 0, -1))
 
 
+def test_configure_output_encoding_writes_utf8_to_a_redirected_stdout(monkeypatch):
+    # GIVEN stdout redirected to a file in a legacy Windows code page
+    redirected_bytes = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(redirected_bytes, encoding="cp1252"))
+
+    line = f"{terminal.ARROW} 2026-09-25 Вулиця.mp4"
+
+    # WHEN configuring the output and printing a rename plan with a Cyrillic name
+    terminal.configure_output_encoding()
+    terminal.print_line(line)
+    sys.stdout.flush()
+
+    # THEN the line is written as UTF-8
+    assert redirected_bytes.getvalue().decode("utf-8") == f"{line}\n"
+
+
+def test_configure_output_encoding_keeps_a_terminal_encoding(monkeypatch):
+    # GIVEN stdout attached to a terminal in a legacy code page
+    class TerminalStream(io.TextIOWrapper):
+        def isatty(self):
+            return True
+
+    terminal_stream = TerminalStream(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", terminal_stream)
+
+    # WHEN configuring the output
+    terminal.configure_output_encoding()
+
+    # THEN its encoding is left to the terminal
+    assert terminal_stream.encoding == "cp1252"
+
+
 def make_console(is_terminal):
     return Console(
         file=io.StringIO(),
