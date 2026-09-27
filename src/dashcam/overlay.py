@@ -112,6 +112,10 @@ GPS_TEXT_PATTERN = re.compile(
     r"(?:(?P<lon_hemisphere>[EW])(?P<lon>\d{1,3}\.\d+))?$"
 )
 
+# Largest possible absolute latitude and longitude, in degrees.
+MAX_ABS_LAT = 90
+MAX_ABS_LON = 180
+
 GrayImage = npt.NDArray[np.uint8]
 
 # The score and the label of the best allowed character of a pattern cell, at every position.
@@ -545,12 +549,15 @@ def parse_gps_text(gps_text: str) -> GpsReading | None:
     Returns
     -------
     GpsReading | None
-        The parsed values, or None if the text has no latitude or longitude.
+        The parsed values, or None if the text has no latitude or longitude, or one of them is
+        out of range.
     """
     match = GPS_TEXT_PATTERN.match(gps_text)
     if match is None or match["lat"] is None or match["lon"] is None:
         return None
     lat = float(match["lat"]) * (-1 if match["lat_hemisphere"] == "S" else 1)
     lon = float(match["lon"]) * (-1 if match["lon_hemisphere"] == "W" else 1)
+    if abs(lat) > MAX_ABS_LAT or abs(lon) > MAX_ABS_LON:
+        return None
     speed_kmh = int(match["speed"]) if match["speed"] is not None else None
     return GpsReading(speed_kmh=speed_kmh, lat=lat, lon=lon)

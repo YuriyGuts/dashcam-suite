@@ -217,6 +217,9 @@ def test_overlay_reading_with_low_score_is_unreliable():
         ("0 KM/H N1.000000 E123.456789", overlay.GpsReading(0, 1.0, 123.456789)),
         ("N49.8102 E24.0289", overlay.GpsReading(None, 49.8102, 24.0289)),
         ("46 KM/H N49.810205", None),
+        ("46 KM/H N99.810205 E24.028992", None),
+        ("46 KM/H N49.810205 E240.028992", None),
+        ("0 KM/H S90.000000 W180.000000", overlay.GpsReading(0, -90.0, -180.0)),
         ("46 KM/H", None),
         ("", None),
     ],
@@ -227,7 +230,7 @@ def test_parse_gps_text(gps_text, expected):
     # WHEN parsing it
     gps = overlay.parse_gps_text(gps_text)
 
-    # THEN the values (or None without both coordinates) are returned
+    # THEN the values (or None without both coordinates in range) are returned
     assert gps == expected
 
 
