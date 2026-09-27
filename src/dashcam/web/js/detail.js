@@ -205,8 +205,9 @@ async function saveRename() {
     renderDetail();
     return;
   }
+  // The unchanged name keeps the filename, even if its spacing after the date is unusual.
   const filename = renamedFilename(trip, edit.draft);
-  if (filename === trip.video_filename) {
+  if (edit.draft.trim() === trip.name.trim() || filename === trip.video_filename) {
     cancelRename();
     return;
   }
