@@ -522,7 +522,8 @@ async function drawCoverage(generation) {
   if (generation !== drawGeneration) {
     return;
   }
-  const focusedTrip = state.focusedId ? state.tripsById.get(state.focusedId) : null;
+  const isFocusedTripShown = state.focusedId && !state.hiddenIds.has(state.focusedId);
+  const focusedTrip = isFocusedTripShown ? state.tripsById.get(state.focusedId) : null;
   const focusedTrackPromise = focusedTrip && hasGps(focusedTrip) ? loadTrack(focusedTrip.id) : null;
   const geometry = await loadGeometry();
   const focusedTrack = focusedTrackPromise ? await focusedTrackPromise.catch(() => null) : null;
