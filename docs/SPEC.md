@@ -131,7 +131,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Track from an older extractor or cleaning version | Suggest `--reclean` |
 | Street list older than the track or the OSM data | Suggest `enrich` |
 | Video name too long for its track name to fit | Report |
-| Orphaned previews or temp files (also in the library) | Delete (listed) |
+| Orphaned previews or temp files (also in the library) | Delete (listed); temp files modified in the last hour may belong to a running job and are only reported |
 
 `--fix` never deletes or moves a track anywhere but to its proper name. `extract` and `serve` run the cheap checks at startup and warn.
 

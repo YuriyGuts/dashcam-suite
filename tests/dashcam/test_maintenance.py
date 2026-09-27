@@ -1,6 +1,8 @@
 import dataclasses
 import json
 import logging
+import os
+import time
 
 import pytest
 
@@ -51,6 +53,13 @@ def add_trip(library_dir, store, make_track):
 
 def run_doctor(library_dir, store, apply_fixes=False):
     return maintenance.run_doctor(library_dir, store.root, apply_fixes=apply_fixes)
+
+
+def make_old(*paths):
+    """Set the modification time of files to before `MIN_LEFTOVER_AGE_S`."""
+    old_time = time.time() - maintenance.MIN_LEFTOVER_AGE_S - 60
+    for path in paths:
+        os.utime(path, (old_time, old_time))
 
 
 def test_run_doctor_with_healthy_library(library_dir, store, add_trip, caplog):
@@ -135,6 +144,7 @@ def test_run_doctor_reports_a_failing_fix_and_continues(
         library_dir / f"{metadata.PARTIAL_FILE_PREFIX}1234{metadata.PARTIAL_FILE_SUFFIX}"
     )
     leftover_path.write_bytes(b"partial")
+    make_old(leftover_path)
 
     def locked_rename_trip(self, old_stem, new_video_filename):
         raise PermissionError("track is locked")
@@ -231,6 +241,23 @@ def test_run_doctor_reports_outdated_track(library_dir, store, add_trip, caplog)
     assert "--reclean" in caplog.text
 
 
+def test_run_doctor_keeps_recent_temporary_files(library_dir, store, add_trip, caplog):
+    # GIVEN temporary files that a running job may still be writing
+    add_trip("2026-09-25 Trip.mp4")
+    partial_track_path = store.tracks_dir / ".tmp-0123abcd.partial"
+    partial_track_path.write_text("{", encoding="utf-8")
+    partial_video_path = library_dir / ".tmp-4567cdef.partial"
+    partial_video_path.write_bytes(b"video")
+
+    # WHEN running the doctor with fixes
+    run_doctor(library_dir, store, apply_fixes=True)
+
+    # THEN they are reported and kept
+    assert partial_track_path.exists()
+    assert partial_video_path.exists()
+    assert f"Recent temporary file, possibly of a running job: {partial_video_path}" in caplog.text
+
+
 def test_run_doctor_deletes_leftover_files(library_dir, store, add_trip):
     # GIVEN a preview without a track, and temporary files from interrupted runs
     add_trip("2026-09-25 Trip.mp4")
@@ -241,6 +268,7 @@ def test_run_doctor_deletes_leftover_files(library_dir, store, add_trip):
     partial_track_path.write_text("{", encoding="utf-8")
     partial_video_path = library_dir / ".tmp-4567cdef.partial"
     partial_video_path.write_bytes(b"video")
+    make_old(partial_track_path, partial_video_path)
 
     # WHEN running the doctor with fixes
     run_doctor(library_dir, store, apply_fixes=True)
@@ -259,6 +287,7 @@ def test_run_doctor_deletes_leftover_osm_download(library_dir, store, add_trip):
     osm_dir.mkdir()
     download_path = osm_dir / ".download.partial.osm.pbf"
     download_path.write_bytes(b"pbf")
+    make_old(download_path)
 
     # WHEN running the doctor with fixes
     run_doctor(library_dir, store, apply_fixes=True)

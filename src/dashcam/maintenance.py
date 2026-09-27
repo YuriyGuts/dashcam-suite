@@ -3,6 +3,7 @@
 import dataclasses
 import json
 import logging
+import time
 import typing as t
 from pathlib import Path
 
@@ -21,6 +22,10 @@ SEVERITY_INFO = "info"
 # GPS coverage (in percent) from which `status` shows a trip in green, or in yellow.
 GOOD_COVERAGE_PERCENT = 90
 FAIR_COVERAGE_PERCENT = 50
+
+# Temporary files modified more recently than this (in seconds) may belong to a running job, so
+# they are not deleted.
+MIN_LEFTOVER_AGE_S = 3600
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
@@ -382,7 +387,22 @@ def check_files(
     ]
     if library_dir.is_dir():
         leftover_files += library_dir.glob(metadata.PARTIAL_FILE_GLOB)
-    for path in sorted(orphan_previews + leftover_files):
+    leftover_ages_s = {path: get_age_s(path) for path in leftover_files}
+    recent_files = [
+        path
+        for path, age_s in leftover_ages_s.items()
+        if age_s is not None and age_s < MIN_LEFTOVER_AGE_S
+    ]
+    old_leftover_files = [
+        path
+        for path, age_s in leftover_ages_s.items()
+        if age_s is not None and age_s >= MIN_LEFTOVER_AGE_S
+    ]
+    for path in sorted(recent_files):
+        findings.append(
+            Finding(SEVERITY_INFO, f"Recent temporary file, possibly of a running job: {path}")
+        )
+    for path in sorted(orphan_previews + old_leftover_files):
         findings.append(
             Finding(
                 SEVERITY_WARNING,
@@ -392,6 +412,14 @@ def check_files(
             )
         )
     return findings
+
+
+def get_age_s(path: Path) -> float | None:
+    """Return how long ago (in seconds) a file was modified, or None if it is gone."""
+    try:
+        return time.time() - path.stat().st_mtime
+    except FileNotFoundError:
+        return None
 
 
 def apply_fixes_of(findings: list[Finding]) -> list[Finding]:
