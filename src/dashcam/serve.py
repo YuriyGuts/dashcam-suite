@@ -58,7 +58,10 @@ WEB_DIR = Path(__file__).parent / "web"
 CHUNK_SIZE = 256 * 1024
 
 # A single byte range: `bytes=START-END`, `bytes=START-`, or `bytes=-SUFFIX_LENGTH`.
-BYTE_RANGE_PATTERN = re.compile(r"^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$", re.IGNORECASE | re.ASCII)
+# Longer numbers are ignored: no file is that large, and `int` refuses very long numbers.
+BYTE_RANGE_PATTERN = re.compile(
+    r"^\s*bytes\s*=\s*(\d{0,18})\s*-\s*(\d{0,18})\s*$", re.IGNORECASE | re.ASCII
+)
 
 # Content types by file extension. Other files are served as binary data.
 CONTENT_TYPES = {
@@ -78,6 +81,9 @@ DEFAULT_CONTENT_TYPE = "application/octet-stream"
 
 # The largest request body accepted, in bytes.
 MAX_REQUEST_BODY_SIZE = 16 * 1024
+
+# Seconds a connection may stay idle, or a client may take to receive data, before it is closed.
+CONNECTION_TIMEOUT_S = 60
 
 # Host names that always refer to this machine.
 LOOPBACK_HOST_NAMES = frozenset(["localhost"])
@@ -399,7 +405,7 @@ class VisualizerServer(http.server.ThreadingHTTPServer):
     def handle_error(self, request: t.Any, client_address: t.Any) -> None:
         # Browsers drop connections all the time, e.g. when seeking in a video.
         exc = sys.exception()
-        if isinstance(exc, ConnectionError):
+        if isinstance(exc, ConnectionError | TimeoutError):
             return
         super().handle_error(request, client_address)
 
@@ -409,6 +415,10 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
     server_version = "dashcam"
+    timeout = CONNECTION_TIMEOUT_S
+
+    # Whether the status line of the current response has been sent.
+    response_started = False
 
     @property
     def app(self) -> VisualizerApp:
@@ -417,18 +427,42 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: t.Any) -> None:  # noqa: A002
         LOGGER.debug(f"{self.address_string()} {format % args}")
 
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self.response_started = True
+        super().send_response(code, message)
+
     def do_GET(self) -> None:
-        self.handle_request(send_body=True)
+        self.handle_safely(lambda: self.handle_request(send_body=True), send_body=True)
 
     def do_HEAD(self) -> None:
-        self.handle_request(send_body=False)
+        self.handle_safely(lambda: self.handle_request(send_body=False), send_body=False)
+
+    def do_POST(self) -> None:
+        # A rejected request leaves its body unread, which would be parsed as the next request.
+        self.close_connection = True
+        self.handle_safely(self.handle_post, send_body=True)
+
+    def handle_safely(self, handler: t.Callable[[], None], send_body: bool) -> None:
+        """Run a request handler, answering unexpected errors with a JSON error."""
+        self.response_started = False
+        try:
+            handler()
+        except (ConnectionError, TimeoutError):
+            # Browsers abort video requests all the time, e.g. when seeking.
+            self.close_connection = True
+        except Exception:
+            LOGGER.exception(f"Cannot handle {self.command} {self.path}")
+            self.close_connection = True
+            if not self.response_started:
+                self.send_json_error(500, "Internal server error", send_body)
 
     def is_host_trusted(self) -> bool:
         """Check that the request addresses the server by a name that cannot be rebound."""
         host = split_host_header(self.headers.get("Host") or "")
         return is_trusted_host(host, self.app.allow_network_hosts)
 
-    def do_POST(self) -> None:
+    def handle_post(self) -> None:
+        """Dispatch a POST request."""
         if not self.is_host_trusted():
             self.send_json_error(403, "Unexpected Host header")
             return
@@ -488,37 +522,31 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_error(403, "Unexpected Host header", send_body)
             return
         url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
-        try:
-            if url_path == "/api/trips":
-                self.send_json(self.app.get_trips(), send_body)
-            elif url_path == "/api/suggestion":
-                self.send_suggestion(send_body)
-            elif url_path == "/api/geometry":
-                self.send_json(self.app.get_geometry(), send_body)
-            elif url_path.startswith("/videos/"):
-                file_path = self.app.video_path(url_path.removeprefix("/videos/"))
-                self.send_file(file_path, send_body)
-            elif url_path.startswith("/tracks/"):
-                file_path = safe_join(self.app.store.tracks_dir, url_path.removeprefix("/tracks/"))
-                self.send_file(file_path, send_body)
-            elif url_path.startswith("/previews/"):
-                file_path = safe_join(
-                    self.app.store.previews_dir, url_path.removeprefix("/previews/")
-                )
-                self.send_file(file_path, send_body)
-            else:
-                relative_path = url_path.removeprefix("/") or "index.html"
-                self.send_file(safe_join(WEB_DIR, relative_path), send_body)
-        except ConnectionError:
-            # Browsers abort video requests all the time, e.g. when seeking.
-            self.close_connection = True
+        if url_path == "/api/trips":
+            self.send_json(self.app.get_trips(), send_body)
+        elif url_path == "/api/suggestion":
+            self.send_suggestion(send_body)
+        elif url_path == "/api/geometry":
+            self.send_json(self.app.get_geometry(), send_body)
+        elif url_path.startswith("/videos/"):
+            file_path = self.app.video_path(url_path.removeprefix("/videos/"))
+            self.send_file(file_path, send_body)
+        elif url_path.startswith("/tracks/"):
+            file_path = safe_join(self.app.store.tracks_dir, url_path.removeprefix("/tracks/"))
+            self.send_file(file_path, send_body)
+        elif url_path.startswith("/previews/"):
+            file_path = safe_join(self.app.store.previews_dir, url_path.removeprefix("/previews/"))
+            self.send_file(file_path, send_body)
+        else:
+            relative_path = url_path.removeprefix("/") or "index.html"
+            self.send_file(safe_join(WEB_DIR, relative_path), send_body)
 
     def send_suggestion(self, send_body: bool) -> None:
         """Send the suggested filename of the trip given by the `id` query parameter."""
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         trip_id = (query.get("id") or [""])[0]
         if not self.app.allow_rename:
-            self.send_json_error(403, RENAME_DISABLED_MESSAGE)
+            self.send_json_error(403, RENAME_DISABLED_MESSAGE, send_body)
             return
         try:
             filename = self.app.suggest_filename(trip_id)
@@ -538,6 +566,8 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", CONTENT_TYPES[".json"])
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         if send_body:
             self.wfile.write(body)

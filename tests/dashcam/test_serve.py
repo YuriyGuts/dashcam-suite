@@ -1,4 +1,5 @@
 import contextlib
+import http.client
 import json
 import logging
 import os
@@ -79,6 +80,7 @@ def fetch(url, headers=None, method="GET"):
         ("bytes=5-1", None),
         ("bytes=-", None),
         ("items=0-1", None),
+        pytest.param("bytes=" + "9" * 5000 + "-", None, id="bytes=<5000 digits>-"),
         ("bytes=a-b", None),
     ],
 )
@@ -622,6 +624,58 @@ def test_server_accepts_network_names_when_listening_on_the_network(
     # THEN the request is served
     assert status == 200
     assert len(json.loads(body)["trips"]) == 1
+
+
+def test_server_answers_unexpected_errors_with_json(server, app, monkeypatch, caplog):
+    # GIVEN a trip index that fails to load for an unexpected reason
+    def broken_get_trips():
+        raise KeyError("trips")
+
+    monkeypatch.setattr(app, "get_trips", broken_get_trips)
+
+    # WHEN requesting the trips
+    status, headers, body = fetch(f"{server}/api/trips")
+
+    # THEN the server answers with a JSON error and logs the traceback
+    assert status == 500
+    assert headers["Content-Type"].startswith("application/json")
+    assert json.loads(body) == {"error": "Internal server error"}
+    assert "Cannot handle GET /api/trips" in caplog.text
+    assert "KeyError" in caplog.text
+
+
+def test_server_closes_connection_after_rejected_post(server):
+    # GIVEN a connection to the server
+    connection = http.client.HTTPConnection(server.removeprefix("http://"))
+
+    # WHEN a POST to an unknown path is rejected without reading its body
+    connection.request("POST", "/api/unknown", body=b"GET /api/trips HTTP/1.1\r\n\r\n")
+    response = connection.getresponse()
+    response.read()
+    connection.close()
+
+    # THEN the connection is closed, so the body is not parsed as the next request
+    assert response.status == 404
+    assert response.getheader("Connection") == "close"
+
+
+def test_server_head_suggestion_when_disabled_has_no_body(server):
+    # GIVEN a connection to a server without renaming
+    connection = http.client.HTTPConnection(server.removeprefix("http://"))
+
+    # WHEN asking for a suggestion with HEAD, then with GET on the same connection
+    connection.request("HEAD", "/api/suggestion?id=x")
+    head_response = connection.getresponse()
+    head_response.read()
+    connection.request("GET", "/api/suggestion?id=x")
+    get_response = connection.getresponse()
+    get_body = get_response.read()
+    connection.close()
+
+    # THEN both are refused, and the HEAD response has no body to confuse the next response
+    assert head_response.status == 403
+    assert get_response.status == 403
+    assert "Renaming" in json.loads(get_body)["error"]
 
 
 def test_server_missing_file(server):
