@@ -405,13 +405,17 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
     try:
         LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)
         run_ffmpeg_with_progress(cmd, output_path.name, total_duration_s)
-        partial_output_path.rename(output_path)
+        metadata.rename_without_overwrite(partial_output_path, output_path)
     except subprocess.CalledProcessError as exc:
         error_tail = f"\n{exc.stderr}" if exc.stderr else ""
         LOGGER.error(
             f"Encoding failed for '{output_path.name}' (ffmpeg exit code {exc.returncode})"
             f"{error_tail}"
         )
+        partial_output_path.unlink(missing_ok=True)
+        return False
+    except OSError as exc:
+        LOGGER.error(f"Cannot save '{output_path.name}': {exc}")
         partial_output_path.unlink(missing_ok=True)
         return False
     finally:
@@ -433,9 +437,21 @@ def plan_encode_jobs(
     -------
     list[EncodeJobDefinition]
         The jobs whose output does not exist yet.
+
+    Raises
+    ------
+    RuntimeError
+        If two outputs would get the same name.
     """
     job_defs = []
+    planned_names = set()
     for output_name, segments in segment_groups:
+        if output_name.lower() in planned_names:
+            raise RuntimeError(
+                f"Two trips would be named '{output_name}' "
+                f"(use a larger `--min-trip-gap-hours` to merge them)"
+            )
+        planned_names.add(output_name.lower())
         output_path = library_dir / f"{output_name}.{OUTPUT_FORMAT}"
         if output_path.exists():
             LOGGER.warning(f"Output video '{output_path}' already exists; skipping")

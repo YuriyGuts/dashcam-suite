@@ -18,6 +18,7 @@ import dataclasses
 import datetime
 import fnmatch
 import logging
+import os
 import shlex
 import subprocess
 import time
@@ -264,7 +265,8 @@ def make_preview(
             f"ffmpeg failed to make the preview (exit code {exc.returncode})\n"
             f"{video.get_error_tail(exc.stderr or '')}"
         ) from exc
-    partial_path.rename(preview_path)
+    # Replaces an older preview, which a plain rename refuses to do on Windows.
+    os.replace(partial_path, preview_path)
 
 
 def clean_raw_samples(

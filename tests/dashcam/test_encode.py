@@ -282,6 +282,28 @@ def test_run_encode_job_removes_partial_output_on_failure(config, tmp_path, fake
     assert list(tmp_path.iterdir()) == []
 
 
+def test_run_encode_job_keeps_an_output_that_appeared_meanwhile(
+    config, tmp_path, fake_ffmpeg, caplog
+):
+    # GIVEN an encoding job whose output is created by someone else while it runs
+    output_path = tmp_path / "2026-09-25 Trip 11-17.mp4"
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=output_path,
+        config=config,
+    )
+    output_path.write_bytes(b"other video")
+
+    # WHEN running it
+    is_encoded = encode.run_encode_job(job_def)
+
+    # THEN the other video is kept, the job fails, and no partial output is left behind
+    assert not is_encoded
+    assert output_path.read_bytes() == b"other video"
+    assert list(tmp_path.iterdir()) == [output_path]
+    assert "Cannot save '2026-09-25 Trip 11-17.mp4'" in caplog.text
+
+
 def test_run_encode_job_logs_ffmpeg_errors(config, tmp_path, fake_ffmpeg, caplog):
     # GIVEN an encoding job for which ffmpeg fails with error output
     fake_ffmpeg.encode_return_code = 1
@@ -417,6 +439,20 @@ def test_plan_encode_jobs_skips_existing_outputs(config, tmp_path):
 
     # THEN only the missing output is planned
     assert [job_def.output_path.name for job_def in job_defs] == ["2026-09-25 Trip 15-00.mp4"]
+
+
+def test_plan_encode_jobs_rejects_duplicate_output_names(config, tmp_path):
+    # GIVEN two trips that start in the same minute (with a very small trip gap)
+    segment = make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))
+
+    # WHEN planning jobs
+    # THEN planning fails instead of letting one output replace the other
+    with pytest.raises(RuntimeError, match="Two trips would be named '2026-09-25 Trip 11-17'"):
+        encode.plan_encode_jobs(
+            [("2026-09-25 Trip 11-17", [segment]), ("2026-09-25 Trip 11-17", [segment])],
+            library_dir=tmp_path,
+            config=config,
+        )
 
 
 def test_encode_trips_encodes_each_trip(

@@ -694,6 +694,20 @@ def test_extract_videos_with_previews_skips_videos_without_overlay(
     assert "All tracks are up to date" in caplog.text
 
 
+def test_make_preview_replaces_an_older_preview(fake_ffmpeg, config, tmp_path):
+    # GIVEN an older preview
+    preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"
+    preview_path.parent.mkdir()
+    preview_path.write_bytes(b"old preview")
+
+    # WHEN making the preview again
+    extract.make_preview(tmp_path / "trip.mp4", preview_path, config, duration_s=60.0)
+
+    # THEN the new preview replaces it
+    assert list(preview_path.parent.iterdir()) == [preview_path]
+    assert preview_path.read_bytes() == b"partial video"
+
+
 def test_make_preview_renames_partial_output(fake_ffmpeg, config, tmp_path):
     # GIVEN an ffmpeg run that writes the partial output
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"

@@ -581,12 +581,8 @@ def apply_rename(plan: RenamePlan, store: metadata.MetadataStore) -> None:
         If a video with the new name already exists.
     """
     new_path = plan.video_path.with_name(plan.new_filename)
-    # On case-insensitive file systems, a rename that only changes the letter case finds the
-    # video itself under the new name.
-    if new_path.exists() and not new_path.samefile(plan.video_path):
-        raise FileExistsError(f"'{new_path}' already exists")
     old_stem = plan.video_path.stem
-    plan.video_path.rename(new_path)
+    metadata.rename_without_overwrite(plan.video_path, new_path)
     try:
         store.rename_trip(old_stem, plan.new_filename)
     except BaseException:
