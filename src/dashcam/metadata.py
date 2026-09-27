@@ -197,6 +197,11 @@ def sample_to_dict(raw_sample: cleaning.RawSample, clean_sample: cleaning.CleanS
     return sample_dict
 
 
+def is_number(value: t.Any) -> bool:
+    """Check that a JSON value is a number (JSON booleans load as `bool`, a subclass of `int`)."""
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
 def samples_from_dict(sample_dict: dict) -> tuple[cleaning.RawSample, cleaning.CleanSample]:
     """Convert a track file line back to a raw and a clean sample."""
     gps_text, separator, clock_text = sample_dict["raw"].partition(" | ")
@@ -210,14 +215,24 @@ def samples_from_dict(sample_dict: dict) -> tuple[cleaning.RawSample, cleaning.C
         gps_score=float(gps_score),
         clock_score=float(clock_score),
     )
+    status = sample_dict["status"]
+    if status not in cleaning.ALL_STATUSES:
+        raise TrackFormatError(f"Unknown status {status!r}")
+    lat = sample_dict.get("lat")
+    lon = sample_dict.get("lon")
+    for coordinate in (lat, lon):
+        if coordinate is not None and not is_number(coordinate):
+            raise TrackFormatError(f"'lat' and 'lon' must be numbers or null, not {coordinate!r}")
+    if status in cleaning.LOCATED_STATUSES and (lat is None or lon is None):
+        raise TrackFormatError(f"A sample with status {status!r} needs 'lat' and 'lon'")
     time_text = sample_dict.get("time")
     clean_sample = cleaning.CleanSample(
         t=float(sample_dict["t"]),
         time=datetime.datetime.fromisoformat(time_text) if time_text else None,
-        lat=sample_dict.get("lat"),
-        lon=sample_dict.get("lon"),
+        lat=lat,
+        lon=lon,
         kmh=sample_dict.get("kmh"),
-        status=sample_dict["status"],
+        status=status,
         time_estimated=bool(sample_dict.get("time_estimated", False)),
     )
     return raw_sample, clean_sample

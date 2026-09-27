@@ -172,6 +172,39 @@ def test_load_track_text_with_invalid_sample(make_track):
         metadata.load_track_text(json.dumps(data))
 
 
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"status": "ok", "lat": None}, "status 'ok' needs 'lat' and 'lon'"),
+        ({"status": "interpolated", "lon": None}, "status 'interpolated' needs 'lat' and 'lon'"),
+        ({"lat": "49.8"}, "must be numbers or null"),
+        ({"lon": True}, "must be numbers or null"),
+        ({"status": "good"}, "Unknown status 'good'"),
+    ],
+)
+def test_load_track_text_with_hand_edited_sample(make_track, changes, message):
+    # GIVEN a track whose second sample was edited by hand into an inconsistent state
+    data = json.loads(metadata.dump_track(make_track()))
+    data["samples"][1].update(changes)
+
+    # WHEN parsing it
+    # THEN the error names the sample and the problem, instead of a crash in a later command
+    with pytest.raises(metadata.TrackFormatError, match=f"sample #2: .*{message}"):
+        metadata.load_track_text(json.dumps(data))
+
+
+def test_load_track_text_accepts_samples_without_position(make_track):
+    # GIVEN a track with a sample without a fix
+    data = json.loads(metadata.dump_track(make_track()))
+    data["samples"][1].update({"status": "no_fix", "lat": None, "lon": None})
+
+    # WHEN parsing it
+    track = metadata.load_track_text(json.dumps(data))
+
+    # THEN it loads
+    assert track.clean_samples[1].status == "no_fix"
+
+
 def test_parse_trip_name():
     # GIVEN a video filename with a date and a name
 

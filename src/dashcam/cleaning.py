@@ -45,6 +45,12 @@ STATUS_INTERPOLATED = "interpolated"
 STATUS_NO_FIX = "no_fix"
 STATUS_SPOOFED = "spoofed"
 STATUS_UNREADABLE = "unreadable"
+ALL_STATUSES = frozenset(
+    [STATUS_OK, STATUS_INTERPOLATED, STATUS_NO_FIX, STATUS_SPOOFED, STATUS_UNREADABLE]
+)
+
+# Statuses of samples with a usable position.
+LOCATED_STATUSES = frozenset([STATUS_OK, STATUS_INTERPOLATED])
 
 # Camera clock text: a date with the year first or last, and a 24-hour time.
 CLOCK_TEXT_PATTERN = re.compile(
