@@ -8,11 +8,13 @@ import osmium
 import osmium.io
 import pytest
 from osmium.osm import mutable
+from rich.console import Console
 
 from dashcam import cleaning
 from dashcam import enrich
 from dashcam import metadata
 from dashcam import osm
+from dashcam import terminal
 from dashcam import video
 from dashcam.config import get_platform_defaults
 
@@ -47,6 +49,22 @@ def local_to_lat_lon(east_m, north_m):
     lat = MAP_ORIGIN[0] + north_m / meters_per_degree
     lon = MAP_ORIGIN[1] + east_m / (meters_per_degree * math.cos(math.radians(MAP_ORIGIN[0])))
     return lat, lon
+
+
+@pytest.fixture(autouse=True)
+def plain_terminal_output(monkeypatch):
+    """Print without styles, even if the environment forces colors (e.g. `FORCE_COLOR`)."""
+    for console_name, is_stderr in (("STDOUT", False), ("STDERR", True)):
+        plain_console = Console(
+            stderr=is_stderr,
+            force_terminal=False,
+            color_system=None,
+            theme=terminal.THEME,
+            markup=False,
+            highlight=False,
+            emoji=False,
+        )
+        monkeypatch.setattr(terminal, console_name, plain_console)
 
 
 @pytest.fixture
