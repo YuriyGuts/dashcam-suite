@@ -129,7 +129,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Video in the library without a track | Suggest `extract` |
 | Track whose video is not in the library | Reconnect renames via fingerprint; report the rest as unreachable |
 | Same stem, fingerprint mismatch | Suggest `extract --only` |
-| `index.json` stale or missing | Rebuild |
+| `index.json` stale or missing | Rebuild (with `geometry.json`) |
 | Track from an older extractor or cleaning version | Suggest `--reclean` |
 | Street list older than the track or the OSM data | Suggest `enrich` |
 | Video name too long for its track name to fit | Report |
@@ -156,6 +156,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
 ```
 .metadata/
   index.json                    Derived from tracks; never edit.
+  geometry.json                 Simplified routes, written with the index; never edit.
   encoded_segments.json         Raw videos already encoded: filename → size.
   tracks/<video stem>.json      One per trip; hand-editable.
   previews/<video stem>.mp4     Optional.

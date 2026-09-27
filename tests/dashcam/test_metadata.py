@@ -1,16 +1,30 @@
 import datetime
 import json
 import logging
+import math
 
 import pytest
 
 from dashcam import cleaning
+from dashcam import geo
 from dashcam import metadata
 
 
 @pytest.fixture
 def store(tmp_path):
     return metadata.MetadataStore(tmp_path / ".metadata")
+
+
+def clean_sample(t, lat, lon, status):
+    return cleaning.CleanSample(t=t, time=None, lat=lat, lon=lon, kmh=None, status=status)
+
+
+def located_sample(t, lat, lon):
+    return clean_sample(t, lat, lon, cleaning.STATUS_OK)
+
+
+def unlocated_sample(t, status=cleaning.STATUS_NO_FIX):
+    return clean_sample(t, None, None, status)
 
 
 def test_dump_track_round_trip(make_track):
@@ -238,6 +252,108 @@ def test_compute_trip_stats_without_samples(make_track):
     assert stats["bbox"] is None
 
 
+def test_simplify_route_splits_runs_at_unlocated_samples():
+    # GIVEN two located stretches separated by a sample without a fix
+    samples = [
+        located_sample(0, 49.80, 24.0),
+        located_sample(1, 49.81, 24.0),
+        unlocated_sample(2),
+        located_sample(3, 49.82, 24.0),
+        located_sample(4, 49.83, 24.0),
+    ]
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN each stretch is a separate run
+    assert runs == [[[49.80, 24.0], [49.81, 24.0]], [[49.82, 24.0], [49.83, 24.0]]]
+
+
+def test_simplify_route_drops_close_points_but_keeps_run_end():
+    # GIVEN points 1 m apart (a car creeping forward)
+    samples = [located_sample(index, 49.8 + index * 0.00001, 24.0) for index in range(5)]
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN only the first and the last points are kept
+    assert runs == [[[49.8, 24.0], [49.80004, 24.0]]]
+
+
+def test_simplify_route_drops_single_point_runs():
+    # GIVEN a lone located sample between samples without a fix
+    samples = [
+        unlocated_sample(0),
+        located_sample(1, 49.8, 24.0),
+        unlocated_sample(2, cleaning.STATUS_SPOOFED),
+    ]
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN nothing is left to draw
+    assert runs == []
+
+
+def test_simplify_route_ignores_located_status_without_coordinates():
+    # GIVEN an `ok` sample whose coordinates are missing
+    samples = [
+        located_sample(0, 49.80, 24.0),
+        clean_sample(1, None, None, cleaning.STATUS_OK),
+        located_sample(2, 49.81, 24.0),
+    ]
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN the sample splits the track like a missing fix
+    assert runs == []
+
+
+def test_simplify_route_keeps_interpolated_samples():
+    # GIVEN an interpolated sample at a turn between good fixes
+    samples = [
+        located_sample(0, 49.80, 24.0),
+        clean_sample(1, 49.81, 24.01, cleaning.STATUS_INTERPOLATED),
+        located_sample(2, 49.82, 24.0),
+    ]
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN it is part of the run
+    assert runs == [[[49.80, 24.0], [49.81, 24.01], [49.82, 24.0]]]
+
+
+def test_simplify_route_drops_points_on_a_straight_line():
+    # GIVEN points every ~11 m along a straight road, with a turn at the end
+    samples = [located_sample(index, 49.8 + index * 0.0001, 24.0) for index in range(10)]
+    samples.append(located_sample(10, 49.8009, 24.001))
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN only the ends of the straight stretch and the turn are kept
+    assert runs == [[[49.8, 24.0], [49.8009, 24.0], [49.8009, 24.001]]]
+
+
+@pytest.mark.parametrize(
+    ("offset_m", "is_kept"),
+    [(3.0, False), (8.0, True)],
+)
+def test_simplify_polyline_keeps_points_beyond_tolerance(offset_m, is_kept):
+    # GIVEN a straight 200 m road with its middle point off the line by `offset_m` to the east
+    meters_per_degree = geo.EARTH_RADIUS_M * math.pi / 180
+    offset_lon = offset_m / (meters_per_degree * math.cos(math.radians(49.8)))
+    points = [[49.8, 24.0], [49.8009, 24.0 + offset_lon], [49.8018, 24.0]]
+
+    # WHEN simplifying it with a 5 m tolerance
+    simplified = metadata.simplify_polyline(points, 5.0)
+
+    # THEN the middle point is kept only if it is farther than the tolerance
+    assert (points[1] in simplified) == is_kept
+
+
 def test_metadata_store_save_and_load_track(make_track, store):
     # GIVEN a track
     track = make_track()
@@ -375,6 +491,64 @@ def test_metadata_store_rebuild_index_with_localities(make_track, store):
     # THEN the trip has the locality names
     assert index["trips"][0]["start_locality"] == "Львів"
     assert index["trips"][0]["end_locality"] is None
+
+
+def test_get_street_names_lists_each_name_once(make_track):
+    # GIVEN streets as dictionaries and strings, with a repeat and entries without a name
+    track = make_track()
+    track.streets = [
+        {"name": "Lychakivska", "distance_m": 900},
+        "Zelena",
+        {"name": "Lychakivska"},
+        {"distance_m": 10},
+        "",
+    ]
+
+    # WHEN listing the street names
+    street_names = metadata.get_street_names(track)
+
+    # THEN each name appears once, in travel order
+    assert street_names == ["Lychakivska", "Zelena"]
+
+
+def test_metadata_store_rebuild_index_writes_streets_and_geometry(make_track, store):
+    # GIVEN a trip with streets and a video without an overlay
+    track = make_track()
+    track.streets = [{"name": "Zelena", "distance_m": 700}, {"name": "Stryiska"}]
+    store.save_track(track)
+    no_overlay_track = make_track("2023-01-01 Old Camera.mp4", sample_count=0)
+    no_overlay_track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
+    store.save_track(no_overlay_track)
+
+    # WHEN rebuilding the index
+    index = store.rebuild_index()
+
+    # THEN the index has the street names, and the geometry file has the route of the GPS trip
+    trips_by_id = {trip["id"]: trip for trip in index["trips"]}
+    assert index["format_version"] == metadata.INDEX_FORMAT_VERSION
+    assert trips_by_id["2026-09-25 Trip 11-17"]["streets"] == ["Zelena", "Stryiska"]
+    assert trips_by_id["2023-01-01 Old Camera"]["streets"] == []
+    geometry = store.load_geometry()
+    assert geometry["format_version"] == metadata.INDEX_FORMAT_VERSION
+    assert geometry["trips"] == {"2026-09-25 Trip 11-17": [[[49.8, 24.0], [49.8006, 24.0]]]}
+
+
+def test_metadata_store_update_index_after_rename_matches_rebuild(make_track, store):
+    # GIVEN an index of three trips
+    for video_filename in ["2026-09-24 A.mp4", "2026-09-25 B.mp4", "2026-09-26 C.mp4"]:
+        store.save_track(make_track(video_filename))
+    store.rebuild_index()
+
+    # WHEN renaming a trip and updating the index for it
+    store.rename_trip("2026-09-25 B", "2026-09-25 A b.mp4")
+    index = store.update_index_after_rename("2026-09-25 B", "2026-09-25 A b")
+
+    # THEN the index and the geometry are the same as after a full rebuild
+    updated_geometry = store.load_geometry()
+    rebuilt_index, rebuilt_geometry = store.build_index_and_geometry()
+    assert index["trips"] == rebuilt_index["trips"]
+    assert store.load_index()["trips"] == rebuilt_index["trips"]
+    assert updated_geometry == rebuilt_geometry
 
 
 def test_metadata_store_list_track_paths_ignores_temporary_files(make_track, store):

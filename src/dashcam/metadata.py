@@ -4,6 +4,7 @@ Store extracted tracks and the trip index.
 Layout of the metadata directory:
 
     index.json                  Summary of all trips, rebuilt from the tracks. Never edit.
+    geometry.json               Simplified routes of all trips, rebuilt with the index.
     encoded_segments.json       Raw videos already encoded (see `dashcam.encode`).
     tracks/<video stem>.json    One track per video. Hand-editable.
     previews/<video stem>.mp4   Optional low-resolution previews for browsers without HEVC.
@@ -19,6 +20,7 @@ import dataclasses
 import datetime
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -42,6 +44,16 @@ CLEANING_VERSION = 2
 EXTRACTION_OK = "ok"
 EXTRACTION_NO_OVERLAY = "no_overlay"
 
+# Version of the index and geometry files. An index of another version is rebuilt.
+INDEX_FORMAT_VERSION = 2
+
+# Simplified routes: points closer than this to the previous kept point are dropped, points
+# that deviate less than the tolerance from the simplified line are dropped too, and the kept
+# coordinates are rounded to this many decimals (~1 m).
+GEOMETRY_MIN_STEP_M = 10.0
+GEOMETRY_TOLERANCE_M = 5.0
+GEOMETRY_DECIMALS = 5
+
 # Trip videos are named `YYYY-mm-dd <trip name>.<ext>`.
 VIDEO_NAME_PATTERN = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})\s*(?P<name>.*)$")
 
@@ -49,6 +61,7 @@ TRACKS_DIR_NAME = "tracks"
 PREVIEWS_DIR_NAME = "previews"
 TRASH_DIR_NAME = "trash"
 INDEX_FILENAME = "index.json"
+GEOMETRY_FILENAME = "geometry.json"
 ENCODED_SEGMENTS_FILENAME = "encoded_segments.json"
 TRACK_EXTENSION = ".json"
 PREVIEW_EXTENSION = ".mp4"
@@ -378,6 +391,129 @@ def get_locality_name(track: Track, key: str) -> str | None:
     return locality.get("name")
 
 
+def get_street_names(track: Track) -> list[str]:
+    """Return the street names of a track in travel order, each name once."""
+    street_names = []
+    for street in track.streets:
+        name = street.get("name") if isinstance(street, dict) else street
+        if isinstance(name, str) and name and name not in street_names:
+            street_names.append(name)
+    return street_names
+
+
+def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]]]:
+    """
+    Reduce the samples of a track to runs of located points, for drawing many trips at once.
+
+    A run ends at every sample without a location. Points closer than `GEOMETRY_MIN_STEP_M` to
+    the previous kept point are dropped, but the last point of a run is always kept. Each run
+    is then simplified with the Douglas-Peucker algorithm (`GEOMETRY_TOLERANCE_M`).
+
+    Returns
+    -------
+    list[list[list[float]]]
+        Runs of `[lat, lon]` points. Runs with fewer than two points are left out.
+    """
+    located_statuses = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
+    runs = []
+    current_run: list[list[float]] = []
+    last_point: list[float] | None = None
+
+    def finish_run() -> None:
+        if last_point is not None and current_run[-1] is not last_point:
+            current_run.append(last_point)
+        if len(current_run) >= 2:
+            runs.append(simplify_polyline(current_run, GEOMETRY_TOLERANCE_M))
+
+    for sample in samples:
+        if sample.status not in located_statuses or sample.lat is None or sample.lon is None:
+            if current_run:
+                finish_run()
+            current_run = []
+            last_point = None
+            continue
+
+        point = [round(sample.lat, GEOMETRY_DECIMALS), round(sample.lon, GEOMETRY_DECIMALS)]
+        last_point = point
+        if not current_run:
+            current_run.append(point)
+            continue
+        previous_point = current_run[-1]
+        step_m = geo.haversine_m(previous_point[0], previous_point[1], point[0], point[1])
+        if step_m >= GEOMETRY_MIN_STEP_M:
+            current_run.append(point)
+
+    if current_run:
+        finish_run()
+    return runs
+
+
+def simplify_polyline(points: list[list[float]], tolerance_m: float) -> list[list[float]]:
+    """
+    Drop the points of a `[lat, lon]` polyline that deviate less than `tolerance_m` from the
+    simplified line (Douglas-Peucker). The first and the last points are always kept.
+    """
+    if len(points) <= 2:
+        return points
+    # Local flat coordinates in meters, accurate enough over the length of a trip.
+    lon_scale = math.cos(math.radians(points[0][0]))
+    meters_per_degree = geo.EARTH_RADIUS_M * math.pi / 180
+    xs = [point[1] * lon_scale * meters_per_degree for point in points]
+    ys = [point[0] * meters_per_degree for point in points]
+
+    is_kept = [False] * len(points)
+    is_kept[0] = is_kept[-1] = True
+    stack = [(0, len(points) - 1)]
+    while stack:
+        first, last = stack.pop()
+        dx = xs[last] - xs[first]
+        dy = ys[last] - ys[first]
+        length = math.hypot(dx, dy)
+        farthest_index = None
+        farthest_distance = tolerance_m
+        for index in range(first + 1, last):
+            if length > 0:
+                distance = abs(dy * (xs[index] - xs[first]) - dx * (ys[index] - ys[first])) / length
+            else:
+                distance = math.hypot(xs[index] - xs[first], ys[index] - ys[first])
+            if distance > farthest_distance:
+                farthest_index = index
+                farthest_distance = distance
+        if farthest_index is not None:
+            is_kept[farthest_index] = True
+            stack.append((first, farthest_index))
+            stack.append((farthest_index, last))
+    return [point for point, kept in zip(points, is_kept, strict=True) if kept]
+
+
+def build_index_entry(track: Track, has_preview: bool) -> dict[str, t.Any]:
+    """Summarize one track for the index."""
+    trip_name = parse_trip_name(track.video_filename)
+    entry: dict[str, t.Any] = {
+        "id": track.stem,
+        "video_filename": track.video_filename,
+        "date": trip_name.date.isoformat() if trip_name.date else None,
+        "name": trip_name.name,
+        "extraction_status": track.extraction_status,
+        "has_preview": has_preview,
+        "streets": get_street_names(track),
+        "start_locality": get_locality_name(track, "start"),
+        "end_locality": get_locality_name(track, "end"),
+    }
+    if track.extraction_status == EXTRACTION_OK:
+        entry.update(compute_trip_stats(track))
+    return entry
+
+
+def make_index(trips: list[dict[str, t.Any]]) -> dict[str, t.Any]:
+    """Wrap index entries into the index file content."""
+    return {
+        "format_version": INDEX_FORMAT_VERSION,
+        "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "trips": trips,
+    }
+
+
 @dataclasses.dataclass(frozen=True)
 class TrackFile:
     """A track file with its track, or the reason it could not be loaded."""
@@ -396,6 +532,7 @@ class MetadataStore:
         self.previews_dir = root / PREVIEWS_DIR_NAME
         self.trash_dir = root / TRASH_DIR_NAME
         self.index_path = root / INDEX_FILENAME
+        self.geometry_path = root / GEOMETRY_FILENAME
         self.encoded_segments_path = root / ENCODED_SEGMENTS_FILENAME
 
     def ensure_dirs(self) -> None:
@@ -505,39 +642,69 @@ class MetadataStore:
         dict[str, t.Any]
             The index, ready to be written as JSON.
         """
+        return self.build_index_and_geometry()[0]
+
+    def build_index_and_geometry(self) -> tuple[dict[str, t.Any], dict[str, t.Any]]:
+        """Summarize all tracks and simplify their routes, reading each track once."""
         trips = []
+        routes = {}
         for track_file in self.iter_track_files():
             track = track_file.track
             if track is None:
                 continue
-            trip_name = parse_trip_name(track.video_filename)
-            trip: dict[str, t.Any] = {
-                "id": track.stem,
-                "video_filename": track.video_filename,
-                "date": trip_name.date.isoformat() if trip_name.date else None,
-                "name": trip_name.name,
-                "extraction_status": track.extraction_status,
-                "has_preview": self.preview_path(track.stem).exists(),
-                "street_count": len(track.streets),
-                "start_locality": get_locality_name(track, "start"),
-                "end_locality": get_locality_name(track, "end"),
-            }
-            if track.extraction_status == EXTRACTION_OK:
-                trip.update(compute_trip_stats(track))
+            trip = build_index_entry(track, has_preview=self.preview_path(track.stem).exists())
             trips.append(trip)
-
-        return {
-            "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-            "trips": trips,
-        }
+            if trip.get("bbox"):
+                routes[track.stem] = simplify_route(track.clean_samples)
+        return make_index(trips), {"format_version": INDEX_FORMAT_VERSION, "trips": routes}
 
     def rebuild_index(self) -> dict[str, t.Any]:
-        """Rebuild `index.json` from the tracks."""
-        index = self.build_index()
-        self.root.mkdir(parents=True, exist_ok=True)
-        partial_path = get_partial_path(self.index_path)
-        partial_path.write_text(
-            json.dumps(index, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
-        os.replace(partial_path, self.index_path)
+        """Rebuild `index.json` and `geometry.json` from the tracks."""
+        index, geometry = self.build_index_and_geometry()
+        self.write_index_files(index, geometry)
         return index
+
+    def load_index(self) -> dict[str, t.Any]:
+        """Load `index.json` as it is on disk."""
+        return json.loads(self.index_path.read_text(encoding="utf-8"))
+
+    def load_geometry(self) -> dict[str, t.Any]:
+        """Load `geometry.json` as it is on disk."""
+        return json.loads(self.geometry_path.read_text(encoding="utf-8"))
+
+    def update_index_after_rename(self, old_stem: str, new_stem: str) -> dict[str, t.Any]:
+        """
+        Update the index and geometry files for one renamed trip, without reading other tracks.
+
+        Returns
+        -------
+        dict[str, t.Any]
+            The updated index.
+        """
+        track = self.load_track(new_stem)
+        index = self.load_index()
+        geometry = self.load_geometry()
+        trips = [trip for trip in index["trips"] if trip["id"] != old_stem]
+        entry = build_index_entry(track, has_preview=self.preview_path(new_stem).exists())
+        trips.append(entry)
+        # Same order as a full rebuild, which reads the track files in name order.
+        trips.sort(key=lambda trip: trip["id"] + TRACK_EXTENSION)
+        routes = geometry["trips"]
+        routes.pop(old_stem, None)
+        if entry.get("bbox"):
+            routes[new_stem] = simplify_route(track.clean_samples)
+        index = make_index(trips)
+        self.write_index_files(index, geometry)
+        return index
+
+    def write_index_files(self, index: dict[str, t.Any], geometry: dict[str, t.Any]) -> None:
+        """Write the geometry and then the index, both atomically."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        # The index is written last: it is newer than the geometry whenever both are current.
+        for path, text in [
+            (self.geometry_path, json.dumps(geometry, ensure_ascii=False, separators=(",", ":"))),
+            (self.index_path, json.dumps(index, indent=2, ensure_ascii=False)),
+        ]:
+            partial_path = get_partial_path(path)
+            partial_path.write_text(text + "\n", encoding="utf-8")
+            os.replace(partial_path, path)

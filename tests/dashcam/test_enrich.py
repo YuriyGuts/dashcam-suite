@@ -391,11 +391,11 @@ def test_enrich_tracks_enriches_and_rebuilds_index(enrich_store, config, make_dr
     # WHEN enriching the tracks
     failed_count = run_enrich_tracks(enrich_store, config)
 
-    # THEN the track has streets, and the index has the street count and localities
+    # THEN the track has streets, and the index has the street names and localities
     assert failed_count == 0
     assert street_names(enrich_store.load_track("2026-09-25 Trip 11-17")) == ["Main"]
     index = json.loads(enrich_store.index_path.read_text(encoding="utf-8"))
-    assert index["trips"][0]["street_count"] == 1
+    assert index["trips"][0]["streets"] == ["Main"]
     assert index["trips"][0]["start_locality"] == "Львів"
     assert index["trips"][0]["end_locality"] == "Львів"
 

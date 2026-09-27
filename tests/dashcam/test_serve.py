@@ -8,7 +8,6 @@ import urllib.request
 
 import pytest
 
-from dashcam import cleaning
 from dashcam import metadata
 from dashcam import serve
 
@@ -62,14 +61,6 @@ def fetch(url, headers=None, method="GET"):
             return response.status, response.headers, response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.headers, exc.read()
-
-
-def located_sample(t, lat, lon):
-    return {"t": t, "lat": lat, "lon": lon, "status": cleaning.STATUS_OK}
-
-
-def unlocated_sample(t, status=cleaning.STATUS_NO_FIX):
-    return {"t": t, "lat": None, "lon": None, "status": status}
 
 
 @pytest.mark.parametrize(
@@ -171,159 +162,6 @@ def test_get_content_type_of_unknown_extension(tmp_path):
     assert content_type == "application/octet-stream"
 
 
-def test_simplify_track_geometry_splits_runs_at_unlocated_samples():
-    # GIVEN two located stretches separated by a sample without a fix
-    samples = [
-        located_sample(0, 49.80, 24.0),
-        located_sample(1, 49.81, 24.0),
-        unlocated_sample(2),
-        located_sample(3, 49.82, 24.0),
-        located_sample(4, 49.83, 24.0),
-    ]
-
-    # WHEN simplifying the track
-    runs = serve.simplify_track_geometry(samples)
-
-    # THEN each stretch is a separate run
-    assert runs == [[[49.80, 24.0], [49.81, 24.0]], [[49.82, 24.0], [49.83, 24.0]]]
-
-
-def test_simplify_track_geometry_drops_close_points_but_keeps_run_end():
-    # GIVEN points 1 m apart (a car creeping forward)
-    samples = [located_sample(index, 49.8 + index * 0.00001, 24.0) for index in range(5)]
-
-    # WHEN simplifying the track
-    runs = serve.simplify_track_geometry(samples)
-
-    # THEN only the first and the last points are kept
-    assert runs == [[[49.8, 24.0], [49.80004, 24.0]]]
-
-
-def test_simplify_track_geometry_drops_single_point_runs():
-    # GIVEN a lone located sample between samples without a fix
-    samples = [
-        unlocated_sample(0),
-        located_sample(1, 49.8, 24.0),
-        unlocated_sample(2, cleaning.STATUS_SPOOFED),
-    ]
-
-    # WHEN simplifying the track
-    runs = serve.simplify_track_geometry(samples)
-
-    # THEN nothing is left to draw
-    assert runs == []
-
-
-def test_simplify_track_geometry_ignores_located_status_without_coordinates():
-    # GIVEN an `ok` sample whose coordinates are missing
-    samples = [
-        located_sample(0, 49.80, 24.0),
-        {"t": 1, "lat": None, "lon": None, "status": cleaning.STATUS_OK},
-        located_sample(2, 49.81, 24.0),
-    ]
-
-    # WHEN simplifying the track
-    runs = serve.simplify_track_geometry(samples)
-
-    # THEN the sample splits the track like a missing fix
-    assert runs == []
-
-
-def test_simplify_track_geometry_keeps_interpolated_samples():
-    # GIVEN interpolated samples between good fixes
-    samples = [
-        located_sample(0, 49.80, 24.0),
-        {"t": 1, "lat": 49.81, "lon": 24.0, "status": cleaning.STATUS_INTERPOLATED},
-        located_sample(2, 49.82, 24.0),
-    ]
-
-    # WHEN simplifying the track
-    runs = serve.simplify_track_geometry(samples)
-
-    # THEN they are part of the run
-    assert runs == [[[49.80, 24.0], [49.81, 24.0], [49.82, 24.0]]]
-
-
-def test_summarize_track_collects_unique_street_names():
-    # GIVEN streets as dictionaries and strings, with a repeat and entries without a name
-    track_data = {
-        "streets": [
-            {"name": "Lychakivska", "distance_m": 900},
-            "Zelena",
-            {"name": "Lychakivska"},
-            {"distance_m": 10},
-            "",
-        ],
-        "samples": [],
-    }
-
-    # WHEN summarizing the track
-    summary = serve.summarize_track(track_data)
-
-    # THEN each name appears once, in travel order
-    assert summary.street_names == ["Lychakivska", "Zelena"]
-    assert summary.geometry == []
-
-
-def test_track_summary_cache_reuses_unchanged_track(store, add_track, monkeypatch):
-    # GIVEN a summarized track
-    add_track()
-    cache = serve.TrackSummaryCache(store)
-    first_summary = cache.get("2026-09-25 Trip")
-    parse_calls = []
-    monkeypatch.setattr(
-        "dashcam.serve.summarize_track",
-        lambda track_data: parse_calls.append(track_data),
-    )
-
-    # WHEN asking again without changing the file
-    second_summary = cache.get("2026-09-25 Trip")
-
-    # THEN the cached summary is returned
-    assert second_summary is first_summary
-    assert parse_calls == []
-
-
-def test_track_summary_cache_refreshes_changed_track(store, add_track):
-    # GIVEN a summarized track without streets
-    track = add_track()
-    cache = serve.TrackSummaryCache(store)
-    cache.get(track.stem)
-
-    # WHEN the track gets streets
-    track.streets = [{"name": "Zelena"}]
-    path = store.save_track(track)
-    stat = path.stat()
-    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
-    summary = cache.get(track.stem)
-
-    # THEN the summary is recomputed
-    assert summary is not None
-    assert summary.street_names == ["Zelena"]
-
-
-def test_track_summary_cache_missing_track(store):
-    # GIVEN no track file
-
-    # WHEN asking for a summary
-    summary = serve.TrackSummaryCache(store).get("2026-09-25 Trip")
-
-    # THEN there is none
-    assert summary is None
-
-
-def test_track_summary_cache_unreadable_track(store, caplog):
-    # GIVEN a broken track file
-    store.track_path("2026-09-25 Trip").write_text("{oops", encoding="utf-8")
-
-    # WHEN asking for a summary
-    summary = serve.TrackSummaryCache(store).get("2026-09-25 Trip")
-
-    # THEN there is none, and the problem is reported
-    assert summary is None
-    assert "Cannot read track '2026-09-25 Trip.json'" in caplog.text
-
-
 def test_is_index_stale_without_index(store, add_track):
     # GIVEN a track but no index
     add_track()
@@ -379,6 +217,29 @@ def test_is_index_stale_after_new_preview(store, add_track):
 
     # WHEN checking the index
     # THEN it is stale, because the index records `has_preview`
+    assert serve.is_index_stale(store)
+
+
+def test_is_index_stale_with_other_format_version(store, add_track):
+    # GIVEN an index written by another version
+    add_track()
+    index = store.rebuild_index()
+    index["format_version"] = metadata.INDEX_FORMAT_VERSION - 1
+    store.index_path.write_text(json.dumps(index), encoding="utf-8")
+
+    # WHEN checking the index
+    # THEN it is stale
+    assert serve.is_index_stale(store)
+
+
+def test_is_index_stale_without_geometry(store, add_track):
+    # GIVEN an index whose geometry file is gone
+    add_track()
+    store.rebuild_index()
+    store.geometry_path.unlink()
+
+    # WHEN checking the index
+    # THEN it is stale
     assert serve.is_index_stale(store)
 
 
@@ -450,6 +311,28 @@ def test_get_trips_includes_street_names(app, store, make_track):
     assert trip["streets"] == ["Zelena", "Stryiska"]
 
 
+def test_get_trips_does_not_read_tracks_when_index_is_current(app, store, add_track, monkeypatch):
+    # GIVEN a current index
+    add_track()
+    store.rebuild_index()
+    monkeypatch.setattr(
+        "dashcam.metadata.MetadataStore.load_track",
+        lambda self, stem: pytest.fail(f"Track '{stem}' was read"),
+    )
+    monkeypatch.setattr(
+        "dashcam.metadata.MetadataStore.iter_track_files",
+        lambda self: pytest.fail("Tracks were read"),
+    )
+
+    # WHEN listing the trips and loading the geometry
+    trips = app.get_trips()["trips"]
+    geometry = app.get_geometry()["trips"]
+
+    # THEN both come from the index files
+    assert [trip["id"] for trip in trips] == ["2026-09-25 Trip"]
+    assert list(geometry) == ["2026-09-25 Trip"]
+
+
 def test_get_geometry_skips_trips_without_gps(app, store, add_track, make_track):
     # GIVEN a trip with GPS and a video without an overlay
     add_track("2026-09-25 Trip.mp4")
@@ -462,7 +345,7 @@ def test_get_geometry_skips_trips_without_gps(app, store, add_track, make_track)
 
     # THEN only the trip with GPS has routes
     assert list(geometry) == ["2026-09-25 Trip"]
-    assert geometry["2026-09-25 Trip"] == [[[49.8, 24.0], [49.8003, 24.0], [49.8006, 24.0]]]
+    assert geometry["2026-09-25 Trip"] == [[[49.8, 24.0], [49.8006, 24.0]]]
 
 
 def test_warn_about_library_reports_mismatches(app, library_dir, add_track, caplog):
@@ -926,6 +809,42 @@ def test_server_renames_trip(rename_server, library_dir, store, add_trip_with_vi
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
     _, _, trips_body = fetch(f"{rename_server}/api/trips")
     assert [trip["id"] for trip in json.loads(trips_body)["trips"]] == ["2026-09-25 To Work"]
+
+
+def test_rename_trip_updates_current_index_without_reading_other_tracks(
+    app, store, add_trip_with_video, monkeypatch
+):
+    # GIVEN two trips and a current index
+    add_trip_with_video("2026-09-25 Trip 11-17.mp4")
+    add_trip_with_video("2026-09-24 Other.mp4")
+    store.rebuild_index()
+    monkeypatch.setattr(
+        "dashcam.metadata.MetadataStore.iter_track_files",
+        lambda self: pytest.fail("All tracks were read"),
+    )
+
+    # WHEN renaming one trip
+    new_id = app.rename_trip("2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4")
+
+    # THEN only its index entry changes
+    assert new_id == "2026-09-25 To Work"
+    trip_ids = {trip["id"] for trip in store.load_index()["trips"]}
+    assert trip_ids == {"2026-09-25 To Work", "2026-09-24 Other"}
+    assert set(store.load_geometry()["trips"]) == trip_ids
+
+
+def test_rename_trip_rebuilds_stale_index(app, store, add_trip_with_video, make_track):
+    # GIVEN an index that misses a track added later
+    add_trip_with_video("2026-09-25 Trip 11-17.mp4")
+    store.rebuild_index()
+    store.save_track(make_track("2026-09-24 Added Later.mp4"))
+
+    # WHEN renaming a trip
+    app.rename_trip("2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4")
+
+    # THEN the index is rebuilt with the added track too
+    trip_ids = {trip["id"] for trip in store.load_index()["trips"]}
+    assert trip_ids == {"2026-09-25 To Work", "2026-09-24 Added Later"}
 
 
 def test_server_reports_rename_conflict(rename_server, add_trip_with_video):

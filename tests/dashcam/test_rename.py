@@ -697,3 +697,21 @@ def test_print_plans_shows_old_and_new_names(two_plans, capsys):
         "  2. 2026-09-25 Trip 18-00.mp4",
         "     → 2026-09-25 B (Car).mp4",
     ]
+
+
+def test_find_taken_stems_in_library_uses_file_names_only(library, add_named_trip, monkeypatch):
+    # GIVEN a trip, a video without a track, and an unreadable track
+    library_dir, store = library
+    add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
+    (library_dir / "2026-09-26 New.MP4").write_bytes(b"video")
+    store.track_path("2026-09-20 Broken").write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        "dashcam.metadata.MetadataStore.iter_track_files",
+        lambda self: pytest.fail("Tracks were read"),
+    )
+
+    # WHEN finding the taken names
+    taken_stems = rename.find_taken_stems_in_library(library_dir, store)
+
+    # THEN every video and track file counts, in lowercase
+    assert taken_stems == {"2026-09-25 trip 11-17", "2026-09-26 new", "2026-09-20 broken"}

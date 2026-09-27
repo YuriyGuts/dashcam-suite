@@ -26,7 +26,6 @@ Usage example:
 > dashcam serve -d ~/Videos/Dashcam --port 8765
 """
 
-import dataclasses
 import http.server
 import ipaddress
 import json
@@ -39,9 +38,7 @@ import typing as t
 import urllib.parse
 from pathlib import Path
 
-from dashcam import cleaning
 from dashcam import extract
-from dashcam import geo
 from dashcam import metadata
 from dashcam import rename
 from dashcam import terminal
@@ -55,11 +52,6 @@ WEB_DIR = Path(__file__).parent / "web"
 
 # Size of the chunks in which files are sent.
 CHUNK_SIZE = 256 * 1024
-
-# Coverage geometry: points closer than this to the previous kept point are dropped, and the
-# kept coordinates are rounded to this many decimals (~1 m).
-GEOMETRY_MIN_STEP_M = 10.0
-GEOMETRY_DECIMALS = 5
 
 # A single byte range: `bytes=START-END`, `bytes=START-`, or `bytes=-SUFFIX_LENGTH`.
 BYTE_RANGE_PATTERN = re.compile(r"^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$", re.IGNORECASE | re.ASCII)
@@ -89,9 +81,6 @@ LOOPBACK_HOST_NAMES = frozenset(["localhost"])
 RENAME_DISABLED_MESSAGE = (
     "Renaming is only available when the server listens on localhost or runs with --allow-rename"
 )
-
-# Sample statuses that have coordinates.
-LOCATED_STATUSES = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
 
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
@@ -197,129 +186,30 @@ def get_content_type(path: Path) -> str:
     return CONTENT_TYPES.get(path.suffix.lower(), DEFAULT_CONTENT_TYPE)
 
 
-def simplify_track_geometry(samples: list[dict[str, t.Any]]) -> list[list[list[float]]]:
-    """
-    Reduce the samples of a track to runs of located points for the coverage mode.
-
-    A run ends at every sample without a location. Points closer than `GEOMETRY_MIN_STEP_M` to
-    the previous kept point are dropped, but the last point of a run is always kept.
-
-    Returns
-    -------
-    list[list[list[float]]]
-        Runs of `[lat, lon]` points. Runs with fewer than two points are left out.
-    """
-    runs = []
-    current_run: list[list[float]] = []
-    last_point: list[float] | None = None
-
-    def finish_run() -> None:
-        if last_point is not None and current_run[-1] is not last_point:
-            current_run.append(last_point)
-        if len(current_run) >= 2:
-            runs.append(current_run)
-
-    for sample in samples:
-        is_located = (
-            sample.get("status") in LOCATED_STATUSES
-            and sample.get("lat") is not None
-            and sample.get("lon") is not None
-        )
-        if not is_located:
-            if current_run:
-                finish_run()
-            current_run = []
-            last_point = None
-            continue
-
-        point = [
-            round(sample["lat"], GEOMETRY_DECIMALS),
-            round(sample["lon"], GEOMETRY_DECIMALS),
-        ]
-        last_point = point
-        if not current_run:
-            current_run.append(point)
-            continue
-        previous_point = current_run[-1]
-        step_m = geo.haversine_m(previous_point[0], previous_point[1], point[0], point[1])
-        if step_m >= GEOMETRY_MIN_STEP_M:
-            current_run.append(point)
-
-    if current_run:
-        finish_run()
-    return runs
-
-
-@dataclasses.dataclass(frozen=True)
-class TrackSummary:
-    """The parts of a track the web app needs for all trips at once."""
-
-    geometry: list[list[list[float]]]
-    street_names: list[str]
-
-
-def summarize_track(track_data: dict[str, t.Any]) -> TrackSummary:
-    """Extract the coverage geometry and the street names from a parsed track file."""
-    street_names = []
-    for street in track_data.get("streets") or []:
-        name = street.get("name") if isinstance(street, dict) else street
-        if isinstance(name, str) and name and name not in street_names:
-            street_names.append(name)
-    return TrackSummary(
-        geometry=simplify_track_geometry(track_data.get("samples") or []),
-        street_names=street_names,
-    )
-
-
-class TrackSummaryCache:
-    """Track summaries, recomputed only when a track file changes."""
-
-    def __init__(self, store: metadata.MetadataStore):
-        self.store = store
-        self.lock = threading.Lock()
-        self.entries: dict[str, tuple[tuple[int, int], TrackSummary]] = {}
-
-    def get(self, stem: str) -> TrackSummary | None:
-        """
-        Return the summary of a track.
-
-        Returns
-        -------
-        TrackSummary | None
-            The summary, or None if the track is missing or unreadable.
-        """
-        path = self.store.track_path(stem)
-        try:
-            stat = path.stat()
-        except OSError:
-            return None
-        file_key = (stat.st_mtime_ns, stat.st_size)
-        with self.lock:
-            cached = self.entries.get(stem)
-        if cached is not None and cached[0] == file_key:
-            return cached[1]
-
-        try:
-            track_data = json.loads(path.read_text(encoding="utf-8"))
-            summary = summarize_track(track_data)
-        except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
-            LOGGER.warning(f"Cannot read track '{path.name}': {exc} (see `dashcam doctor`)")
-            return None
-        with self.lock:
-            self.entries[stem] = (file_key, summary)
-        return summary
+def list_filenames(directory: Path) -> set[str]:
+    """Return the names of the regular files in a directory, or nothing if it is missing."""
+    try:
+        with os.scandir(directory) as entries:
+            return {entry.name for entry in entries if entry.is_file()}
+    except OSError:
+        return set()
 
 
 def is_index_stale(store: metadata.MetadataStore) -> bool:
     """
-    Check cheaply whether the index needs a rebuild: it is missing, older than a track, or lists
-    different trips than there are track files.
+    Check cheaply whether the index needs a rebuild: it or the geometry file is missing, it has
+    another format version, is older than a track, or lists different trips than there are track
+    files.
     """
     try:
         index_mtime_ns = store.index_path.stat().st_mtime_ns
-        index = json.loads(store.index_path.read_text(encoding="utf-8"))
+        index = store.load_index()
         indexed_stems = {trip["id"] for trip in index["trips"]}
     except (OSError, ValueError, TypeError, KeyError):
+        return True
+    if index.get("format_version") != metadata.INDEX_FORMAT_VERSION:
+        return True
+    if not store.geometry_path.is_file():
         return True
 
     track_paths = store.list_track_paths()
@@ -357,7 +247,6 @@ class VisualizerApp:
         # Whether rename requests may address the server by an IP address, not only by a
         # loopback name, so that other devices on the network can rename trips.
         self.allow_rename_by_ip = allow_rename_by_ip
-        self.summaries = TrackSummaryCache(self.store)
         self.index_lock = threading.Lock()
 
     def load_index(self) -> dict[str, t.Any]:
@@ -366,7 +255,7 @@ class VisualizerApp:
             if is_index_stale(self.store):
                 LOGGER.info(f"Rebuilding the trip index '{self.store.index_path}'")
                 return self.store.rebuild_index()
-            return json.loads(self.store.index_path.read_text(encoding="utf-8"))
+            return self.store.load_index()
 
     def video_path(self, video_filename: str) -> Path | None:
         """Return the path of a trip video in the library directory, if the name is acceptable."""
@@ -384,36 +273,32 @@ class VisualizerApp:
         index = self.load_index()
         index["library_dir"] = str(self.library_dir.resolve())
         index["can_rename"] = self.allow_rename
+        # One listing per directory, instead of a lookup per trip, which is slow on network drives.
+        video_filenames = list_filenames(self.library_dir)
+        preview_filenames = list_filenames(self.store.previews_dir)
         for trip in index["trips"]:
-            video_path = self.video_path(trip["video_filename"])
-            is_video_available = video_path is not None and video_path.is_file()
+            is_video_available = (
+                self.video_path(trip["video_filename"]) is not None
+                and trip["video_filename"] in video_filenames
+            )
             trip["video_url"] = (
                 f"/videos/{urllib.parse.quote(trip['video_filename'])}"
                 if is_video_available
                 else None
             )
-            is_preview_available = self.store.preview_path(trip["id"]).is_file()
+            is_preview_available = self.store.preview_path(trip["id"]).name in preview_filenames
             trip["has_preview"] = is_preview_available
             trip["preview_url"] = (
                 f"/previews/{urllib.parse.quote(trip['id'])}.mp4" if is_preview_available else None
             )
             trip["track_url"] = f"/tracks/{urllib.parse.quote(trip['id'])}.json"
-
-            summary = self.summaries.get(trip["id"]) if trip.get("street_count") else None
-            trip["streets"] = summary.street_names if summary is not None else []
         return index
 
     def get_geometry(self) -> dict[str, t.Any]:
         """Return the simplified routes of all trips with GPS, keyed by trip ID."""
-        index = self.load_index()
-        geometry = {}
-        for trip in index["trips"]:
-            if trip.get("extraction_status") != metadata.EXTRACTION_OK or not trip.get("bbox"):
-                continue
-            summary = self.summaries.get(trip["id"])
-            if summary is not None:
-                geometry[trip["id"]] = summary.geometry
-        return {"trips": geometry}
+        # Loading the index rebuilds the geometry file with it if needed.
+        self.load_index()
+        return {"trips": self.store.load_geometry()["trips"]}
 
     def suggest_filename(self, trip_id: str) -> str:
         """
@@ -431,7 +316,7 @@ class VisualizerApp:
 
     def rename_trip(self, trip_id: str, new_filename: str) -> str:
         """
-        Rename a trip and rebuild the index.
+        Rename a trip and update the index.
 
         Returns
         -------
@@ -444,8 +329,13 @@ class VisualizerApp:
             If the trip cannot be renamed to this filename.
         """
         with self.index_lock:
+            # Checked before the rename, which makes the renamed track newer than the index.
+            was_index_stale = is_index_stale(self.store)
             new_id = rename.rename_trip(self.library_dir, self.store, trip_id, new_filename)
-            self.store.rebuild_index()
+            if was_index_stale:
+                self.store.rebuild_index()
+            elif new_id != trip_id:
+                self.store.update_index_after_rename(trip_id, new_id)
         return new_id
 
     def warn_about_library(self) -> None:

@@ -419,11 +419,16 @@ def has_usable_street_list(track: metadata.Track) -> bool:
     return enrich.is_enrichment_current(track, osm_timestamp=None)
 
 
-def find_taken_stems(
-    video_paths: list[Path], tracks_by_stem: t.Mapping[str, metadata.Track]
-) -> set[str]:
+def find_taken_stems(video_paths: list[Path], track_stems: t.Iterable[str]) -> set[str]:
     """Return the names (stems, in lowercase) used by videos and tracks."""
-    return {path.stem.lower() for path in video_paths} | {stem.lower() for stem in tracks_by_stem}
+    return {path.stem.lower() for path in video_paths} | {stem.lower() for stem in track_stems}
+
+
+def find_taken_stems_in_library(library_dir: Path, store: metadata.MetadataStore) -> set[str]:
+    """Return the names used by videos and tracks, from the file names only."""
+    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
+    track_stems = [path.stem for path in store.list_track_paths()]
+    return find_taken_stems(video_paths, track_stems)
 
 
 def load_trip(
@@ -465,8 +470,7 @@ def suggest_trip_filename(
         raise RenameError("The current name does not start with a date")
     if not has_usable_street_list(track):
         raise RenameError("The street list is outdated (run `dashcam enrich`)")
-    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
-    taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
+    taken_stems = find_taken_stems_in_library(library_dir, store)
     return suggest_filename(
         track, car_model, extension=video_path.suffix, taken_stems=taken_stems - {stem.lower()}
     )
@@ -493,8 +497,7 @@ def rename_trip(
     if problem is not None:
         raise RenameError(f"Invalid name: {problem}")
     new_stem = Path(new_filename).stem
-    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
-    taken_stems = find_taken_stems(video_paths, extract.load_tracks_by_stem(store))
+    taken_stems = find_taken_stems_in_library(library_dir, store)
     if new_stem.lower() in taken_stems - {stem.lower()}:
         raise RenameError(f"'{new_stem}' is already taken by another video or track")
     if new_filename != video_path.name:
