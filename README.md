@@ -12,9 +12,9 @@ A toolkit for importing, processing, and visualizing trips from a car dashcam. U
 * Matches the route coordinates to street names from OpenStreetMap and automatically suggests trip names.
 * Lets you browse your trips on a map in the Web browser, with the dashcam video playing in sync.
 
-I wrote it for my own VIOFO A119 V3, and it only reads that camera's overlay for now. See [Assumptions](#assumptions) before you try it with anything else.
+![Trips on a map in the web app](docs/screenshot.png)
 
-TODO: Screenshot.
+I wrote it for my own VIOFO A119 V3, and it only reads that camera's overlay for now. See [Assumptions](#assumptions) before you try it with anything else.
 
 
 ## Requirements
