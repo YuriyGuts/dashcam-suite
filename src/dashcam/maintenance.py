@@ -306,11 +306,17 @@ def check_videos(
             continue
 
         old_stem = stems_by_fingerprint.get(scan.get_video_fingerprint(stem))
-        if old_stem in orphan_track_stems:
+        if old_stem is not None and old_stem in orphan_track_stems:
             renamed_track_stems.add(old_stem)
 
-            def reconnect(old_stem: str = old_stem, video_filename: str = video_path.name) -> None:
-                store.rename_trip(old_stem, video_filename)
+            def reconnect(
+                old_stem: str = old_stem,
+                declared_stem: str = scan.tracks_by_stem[old_stem].stem,
+                video_filename: str = video_path.name,
+            ) -> None:
+                # A fix of the track file name may have moved it to the stem it declares.
+                track_stem = old_stem if store.track_path(old_stem).exists() else declared_stem
+                store.rename_trip(track_stem, video_filename)
 
             findings.append(
                 Finding(
@@ -391,6 +397,29 @@ def check_files(store: metadata.MetadataStore, library_dir: Path) -> list[Findin
     return findings
 
 
+def apply_fixes_of(findings: list[Finding]) -> list[Finding]:
+    """
+    Apply the fixes of the findings that have one. A fix that fails is reported and skipped.
+
+    Returns
+    -------
+    list[Finding]
+        The findings that were fixed.
+    """
+    fixed_findings = []
+    for finding in findings:
+        if finding.fix is None:
+            continue
+        try:
+            finding.fix()
+        except (OSError, metadata.TrackFormatError) as exc:
+            LOGGER.error(f"Cannot fix: {finding.message} ({finding.fix_description}): {exc}")
+            continue
+        LOGGER.info(f"Fixed: {finding.message} ({finding.fix_description})", extra=terminal.SUCCESS)
+        fixed_findings.append(finding)
+    return fixed_findings
+
+
 def run_doctor(
     library_dir: Path,
     metadata_dir: Path,
@@ -408,30 +437,16 @@ def run_doctor(
     scan = scan_library(library_dir, store)
     findings = check_tracks(scan, store) + check_videos(scan, store, library_dir)
 
-    fixable_findings = [finding for finding in findings if finding.fix is not None]
-    if apply_fixes:
-        for finding in fixable_findings:
-            assert finding.fix is not None
-            finding.fix()
-            LOGGER.info(
-                f"Fixed: {finding.message} ({finding.fix_description})", extra=terminal.SUCCESS
-            )
+    fixed_findings = apply_fixes_of(findings) if apply_fixes else []
 
     # File checks run last, so that the index reflects any renames made above.
     file_findings = check_files(store, library_dir)
     if apply_fixes:
-        for finding in file_findings:
-            if finding.fix is not None:
-                finding.fix()
-                LOGGER.info(
-                    f"Fixed: {finding.message} ({finding.fix_description})",
-                    extra=terminal.SUCCESS,
-                )
+        fixed_findings += apply_fixes_of(file_findings)
 
     all_findings = findings + file_findings
-    unfixed_findings = [
-        finding for finding in all_findings if not (apply_fixes and finding.fix is not None)
-    ]
+    fixed_finding_ids = {id(finding) for finding in fixed_findings}
+    unfixed_findings = [finding for finding in all_findings if id(finding) not in fixed_finding_ids]
     for finding in unfixed_findings:
         suffix = f" [fixable: {finding.fix_description}]" if finding.fix is not None else ""
         log_level = {

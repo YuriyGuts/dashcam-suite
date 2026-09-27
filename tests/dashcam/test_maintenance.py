@@ -108,6 +108,48 @@ def test_run_doctor_reconnects_renamed_video(library_dir, store, add_trip):
     assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Khreshchatyk (Car)"]
 
 
+def test_run_doctor_reconnects_renamed_video_of_misnamed_track(library_dir, store, add_trip):
+    # GIVEN a renamed video whose track file was also renamed by hand
+    video_path, _ = add_trip("2026-09-25 Trip.mp4")
+    store.track_path("2026-09-25 Trip").rename(store.track_path("wrong name"))
+    video_path.rename(library_dir / "2026-09-25 Khreshchatyk.mp4")
+
+    # WHEN running the doctor with fixes
+    error_count = run_doctor(library_dir, store, apply_fixes=True)
+
+    # THEN both fixes apply in turn, and the track ends up with the video
+    assert error_count == 0
+    assert [path.stem for path in store.list_track_paths()] == ["2026-09-25 Khreshchatyk"]
+    assert store.load_track("2026-09-25 Khreshchatyk").video_filename == (
+        "2026-09-25 Khreshchatyk.mp4"
+    )
+
+
+def test_run_doctor_reports_a_failing_fix_and_continues(
+    library_dir, store, add_trip, monkeypatch, caplog
+):
+    # GIVEN a renamed video whose track cannot be renamed, and a leftover file
+    video_path, _ = add_trip("2026-09-25 Trip.mp4")
+    video_path.rename(library_dir / "2026-09-25 Khreshchatyk.mp4")
+    leftover_path = (
+        library_dir / f"{metadata.PARTIAL_FILE_PREFIX}1234{metadata.PARTIAL_FILE_SUFFIX}"
+    )
+    leftover_path.write_bytes(b"partial")
+
+    def locked_rename_trip(self, old_stem, new_video_filename):
+        raise PermissionError("track is locked")
+
+    monkeypatch.setattr(metadata.MetadataStore, "rename_trip", locked_rename_trip)
+
+    # WHEN running the doctor with fixes
+    run_doctor(library_dir, store, apply_fixes=True)
+
+    # THEN the failure is reported, and the other fixes are still applied
+    assert "Cannot fix: Video '2026-09-25 Trip' was renamed" in caplog.text
+    assert "track is locked" in caplog.text
+    assert not leftover_path.exists()
+
+
 def test_run_doctor_without_fix_changes_nothing(library_dir, store, add_trip, caplog):
     # GIVEN a video renamed by hand
     video_path, _ = add_trip("2026-09-25 Trip.mp4")
