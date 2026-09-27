@@ -1526,21 +1526,35 @@ function renderTripName(trip) {
   );
 }
 
+// The rename field grows with the name, so that a long name stays readable while it is edited.
+function fitRenameInput() {
+  const input = renameEdit?.input;
+  if (input?.isConnected) {
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }
+}
+
 function renderRenameForm(trip) {
-  const input = el("input", {
-    type: "text",
+  const input = el("textarea", {
     className: "rename-input",
-    value: renameEdit.draft,
+    rows: 1,
     spellcheck: false,
     autocomplete: "off",
     "aria-label": "Trip name",
     "aria-invalid": renameEdit.error ? "true" : false,
     disabled: renameEdit.isSaving,
   });
+  input.value = renameEdit.draft;
   input.addEventListener("input", () => {
+    // A filename has no line breaks, e.g. from a pasted text.
+    if (/[\r\n]/.test(input.value)) {
+      input.value = input.value.replace(/[\r\n]+/g, " ");
+    }
     renameEdit.draft = input.value;
     renameEdit.error = null;
     input.removeAttribute("aria-invalid");
+    fitRenameInput();
     updateRenameHints(trip);
   });
   input.addEventListener("keydown", (event) => {
@@ -1553,7 +1567,7 @@ function renderRenameForm(trip) {
     }
   });
   renameEdit.input = input;
-  renameEdit.lengthNote = el("span", {className: "rename-length"});
+  renameEdit.filenameNote = el("p", {className: "rename-filename"});
   renameEdit.hint = el("div", {className: "rename-hint"});
 
   const form = el(
@@ -1562,20 +1576,14 @@ function renderRenameForm(trip) {
       event.preventDefault();
       saveRename();
     }},
-    el(
-      "div",
-      {className: "rename-field"},
-      el("span", {className: "rename-affix"}, trip.date),
-      input,
-      el("span", {className: "rename-affix"}, fileExtension(trip.video_filename)),
-    ),
+    input,
+    renameEdit.filenameNote,
     renameEdit.hint,
     el(
       "div",
       {className: "rename-actions"},
       el("button", {type: "submit", className: "button button-primary", disabled: renameEdit.isSaving}, renameEdit.isSaving ? "Saving..." : "Save"),
       el("button", {type: "button", className: "button", disabled: renameEdit.isSaving, onclick: cancelRename}, "Cancel"),
-      renameEdit.lengthNote,
     ),
   );
   updateRenameHints(trip);
@@ -1584,9 +1592,10 @@ function renderRenameForm(trip) {
 
 // Updates the length and the error or suggestion under the field without rebuilding it.
 function updateRenameHints(trip) {
-  const length = renamedFilename(trip, renameEdit.draft).length;
-  renameEdit.lengthNote.textContent = `${length}/${MAX_FILENAME_LENGTH}`;
-  renameEdit.lengthNote.classList.toggle("is-over", length > MAX_FILENAME_LENGTH);
+  const filename = renamedFilename(trip, renameEdit.draft);
+  const lengthNote = el("span", {className: "rename-length"}, `${filename.length}/${MAX_FILENAME_LENGTH}`);
+  lengthNote.classList.toggle("is-over", filename.length > MAX_FILENAME_LENGTH);
+  renameEdit.filenameNote.replaceChildren(el("span", {className: "rename-filename-text"}, filename), DOT, lengthNote);
 
   let hint;
   if (renameEdit.error) {
@@ -1653,6 +1662,7 @@ function useSuggestedName() {
   renameEdit.input.value = renameEdit.draft;
   renameEdit.input.removeAttribute("aria-invalid");
   renameEdit.input.focus();
+  fitRenameInput();
   updateRenameHints(trip);
 }
 
@@ -1817,6 +1827,7 @@ function renderDetail() {
     ),
     streetsContainer,
   );
+  fitRenameInput();
   // Rendering replaces the rename field; keep the focus and the cursor in the new one.
   if (focusedRenameInput && renameEdit?.input) {
     renameEdit.input.focus();
