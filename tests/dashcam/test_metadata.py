@@ -627,6 +627,22 @@ def test_metadata_store_update_index_after_rename_matches_rebuild(make_track, st
     assert updated_geometry == rebuilt_geometry
 
 
+def test_metadata_store_list_track_paths_sorts_by_case_sensitive_name(make_track, store):
+    # GIVEN tracks whose names differ in letter case
+    for video_filename in ["2026-09-25 b.mp4", "2026-09-25 C.mp4", "2026-09-25 A.mp4"]:
+        store.save_track(make_track(video_filename))
+
+    # WHEN listing them
+    track_paths = store.list_track_paths()
+
+    # THEN they are in the same order as the incremental index update uses, on every platform
+    assert [path.name for path in track_paths] == [
+        "2026-09-25 A.json",
+        "2026-09-25 C.json",
+        "2026-09-25 b.json",
+    ]
+
+
 def test_metadata_store_list_track_paths_ignores_temporary_files(make_track, store):
     # GIVEN a track and a leftover temporary file
     store.save_track(make_track())

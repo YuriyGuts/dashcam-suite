@@ -590,13 +590,16 @@ class MetadataStore:
         return self.previews_dir / f"{stem}{PREVIEW_EXTENSION}"
 
     def list_track_paths(self) -> list[Path]:
-        """List the track files, sorted by name."""
+        """List the track files, sorted by name (case-sensitively on every platform)."""
         if not self.tracks_dir.is_dir():
             return []
         return sorted(
-            path
-            for path in self.tracks_dir.glob(f"*{TRACK_EXTENSION}")
-            if not path.name.startswith(".")
+            (
+                path
+                for path in self.tracks_dir.glob(f"*{TRACK_EXTENSION}")
+                if not path.name.startswith(".")
+            ),
+            key=lambda path: path.name,
         )
 
     def iter_track_files(self) -> t.Generator[TrackFile]:
