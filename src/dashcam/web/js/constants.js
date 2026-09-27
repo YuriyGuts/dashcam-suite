@@ -64,6 +64,10 @@ export const STATUS_LABELS = {
 // The playback marker moves smoothly between samples at most this far apart (seconds).
 export const MAX_INTERPOLATION_STEP_S = 3;
 
+// Fixes further apart in time than this (seconds) are not joined by the route but by a gap line,
+// e.g. across a gap between merged segments. The same as `MAX_INTERPOLATION_GAP_S` in cleaning.
+export const MAX_ROUTE_STEP_S = 60;
+
 // GPS coverage badge thresholds.
 export const GOOD_COVERAGE = 0.95;
 export const PARTIAL_COVERAGE = 0.7;

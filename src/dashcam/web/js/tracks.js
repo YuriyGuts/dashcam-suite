@@ -1,6 +1,6 @@
 // Loading and caching full tracks and simplified routes, and positions along a track.
 
-import {MAX_INTERPOLATION_STEP_S} from "./constants.js";
+import {MAX_INTERPOLATION_STEP_S, MAX_ROUTE_STEP_S} from "./constants.js";
 import {fetchJson, isLocated} from "./helpers.js";
 import {state} from "./state.js";
 
@@ -9,16 +9,27 @@ const trackPromises = new Map();
 export const loadedTracks = new Map();
 let geometryPromise = null;
 
+// Whether consecutive samples are further apart in time than a route may join. A sample without
+// a time does not break the route.
+function isGapBetween(previous, current) {
+  if (!previous?.time || !current?.time) {
+    return false;
+  }
+  const stepS = (Date.parse(current.time) - Date.parse(previous.time)) / 1000;
+  return !(stepS >= 0 && stepS <= MAX_ROUTE_STEP_S);
+}
+
 function prepareTrack(trip, data) {
   const samples = data.samples || [];
   const runs = [];
   let run = [];
   samples.forEach((sample, index) => {
-    if (isLocated(sample)) {
-      run.push(index);
-    } else if (run.length) {
+    if (run.length && (!isLocated(sample) || isGapBetween(samples[index - 1], sample))) {
       runs.push(run);
       run = [];
+    }
+    if (isLocated(sample)) {
+      run.push(index);
     }
   });
   if (run.length) {
@@ -116,7 +127,8 @@ export function positionAtVideoTime(track, seconds) {
     nextSample &&
     isLocated(nextSample) &&
     seconds > sample.t &&
-    nextSample.t - sample.t <= MAX_INTERPOLATION_STEP_S;
+    nextSample.t - sample.t <= MAX_INTERPOLATION_STEP_S &&
+    !isGapBetween(sample, nextSample);
   if (!canInterpolate) {
     return sampleLatLng(sample);
   }

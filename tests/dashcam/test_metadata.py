@@ -299,6 +299,21 @@ def test_compute_trip_stats_skips_gaps(make_track):
     assert stats["coverage"] == pytest.approx(0.667, abs=0.001)
 
 
+def test_compute_trip_stats_skips_time_gaps_between_fixes(make_track):
+    # GIVEN a track whose last fix comes an hour later and 1 km away, e.g. after a merge gap
+    track = make_track(sample_count=3)
+    last_sample = track.clean_samples[2]
+    last_sample.time += datetime.timedelta(hours=1)
+    last_sample.lat += 0.009
+
+    # WHEN computing the stats
+    stats = metadata.compute_trip_stats(track)
+
+    # THEN neither the distance nor the time of the gap is counted
+    assert stats["distance_km"] == pytest.approx(0.03, abs=0.005)
+    assert stats["avg_kmh"] == pytest.approx(120, rel=0.05)
+
+
 def test_compute_trip_stats_without_samples(make_track):
     # GIVEN a track without samples
     track = make_track(sample_count=0)
@@ -327,6 +342,20 @@ def test_simplify_route_splits_runs_at_unlocated_samples():
 
     # THEN each stretch is a separate run
     assert runs == [[[49.80, 24.0], [49.81, 24.0]], [[49.82, 24.0], [49.83, 24.0]]]
+
+
+def test_simplify_route_splits_runs_at_time_gaps():
+    # GIVEN two stretches of fixes an hour apart, with no sample in between
+    start = datetime.datetime(2026, 9, 25, 11, 17, tzinfo=datetime.UTC)
+    samples = [located_sample(t, 49.8 + t * 0.001, 24.0) for t in range(4)]
+    for index, sample in enumerate(samples):
+        sample.time = start + datetime.timedelta(seconds=index, hours=1 if index >= 2 else 0)
+
+    # WHEN simplifying the route
+    runs = metadata.simplify_route(samples)
+
+    # THEN the gap is not drawn as part of the route
+    assert runs == [[[49.8, 24.0], [49.801, 24.0]], [[49.802, 24.0], [49.803, 24.0]]]
 
 
 def test_simplify_route_drops_close_points_but_keeps_run_end():

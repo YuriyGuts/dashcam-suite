@@ -439,8 +439,19 @@ def load_track_file(path: Path) -> Track:
     return load_track_text(text)
 
 
+def is_gap_between(previous: cleaning.CleanSample, current: cleaning.CleanSample) -> bool:
+    """
+    Check whether consecutive samples are further apart in time than cleaning interpolates,
+    e.g. across a gap between merged segments. The route is not continuous there.
+    """
+    if previous.time is None or current.time is None:
+        return False
+    step_s = (current.time - previous.time).total_seconds()
+    return not 0 <= step_s <= cleaning.MAX_INTERPOLATION_GAP_S
+
+
 def compute_trip_stats(track: Track) -> dict[str, t.Any]:
-    """Compute the trip summary shown in the visualizer."""
+    """Compute the trip summary shown in the visualizer. Gaps add neither distance nor time."""
     samples = track.clean_samples
     located = [sample.status in cleaning.LOCATED_STATUSES for sample in samples]
     times = [sample.time for sample in samples if sample.time is not None]
@@ -452,13 +463,13 @@ def compute_trip_stats(track: Track) -> dict[str, t.Any]:
             continue
         previous = samples[index - 1]
         current = samples[index]
+        if is_gap_between(previous, current):
+            continue
         assert previous.lat is not None and previous.lon is not None
         assert current.lat is not None and current.lon is not None
         distance_m += geo.haversine_m(previous.lat, previous.lon, current.lat, current.lon)
         if previous.time is not None and current.time is not None:
-            step_s = (current.time - previous.time).total_seconds()
-            if 0 < step_s <= cleaning.MAX_INTERPOLATION_GAP_S:
-                moving_duration_s += step_s
+            moving_duration_s += (current.time - previous.time).total_seconds()
 
     located_samples = [
         sample for sample, is_located in zip(samples, located, strict=True) if is_located
@@ -505,9 +516,10 @@ def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]
     """
     Reduce the samples of a track to runs of located points, for drawing many trips at once.
 
-    A run ends at every sample without a location. Points closer than `GEOMETRY_MIN_STEP_M` to
-    the previous kept point are dropped, but the last point of a run is always kept. Each run
-    is then simplified with the Douglas-Peucker algorithm (`GEOMETRY_TOLERANCE_M`).
+    A run ends at every sample without a location and at every gap in time. Points closer than
+    `GEOMETRY_MIN_STEP_M` to the previous kept point are dropped, but the last point of a run is
+    always kept. Each run is then simplified with the Douglas-Peucker algorithm
+    (`GEOMETRY_TOLERANCE_M`).
 
     Returns
     -------
@@ -517,6 +529,7 @@ def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]
     runs = []
     current_run: list[list[float]] = []
     last_point: list[float] | None = None
+    previous_sample: cleaning.CleanSample | None = None
 
     def finish_run() -> None:
         if last_point is not None and current_run[-1] is not last_point:
@@ -525,16 +538,21 @@ def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]
             runs.append(simplify_polyline(current_run, GEOMETRY_TOLERANCE_M))
 
     for sample in samples:
-        if (
-            sample.status not in cleaning.LOCATED_STATUSES
-            or sample.lat is None
-            or sample.lon is None
-        ):
+        is_located = (
+            sample.status in cleaning.LOCATED_STATUSES
+            and sample.lat is not None
+            and sample.lon is not None
+        )
+        is_after_gap = previous_sample is not None and is_gap_between(previous_sample, sample)
+        previous_sample = sample
+        if not is_located or is_after_gap:
             if current_run:
                 finish_run()
             current_run = []
             last_point = None
+        if not is_located:
             continue
+        assert sample.lat is not None and sample.lon is not None
 
         point = [round(sample.lat, GEOMETRY_DECIMALS), round(sample.lon, GEOMETRY_DECIMALS)]
         last_point = point
