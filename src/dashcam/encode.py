@@ -555,6 +555,11 @@ def encode_range(
         The number of failed jobs.
     """
     if output_name is not None:
+        if output_name.startswith(".") or metadata.FORBIDDEN_FILENAME_CHARS.search(output_name):
+            raise RuntimeError(
+                f"The output name '{output_name}' must not start with '.' or contain any of "
+                f"{metadata.FORBIDDEN_FILENAME_CHARS_TEXT}"
+            )
         output_filename = f"{output_name}.{OUTPUT_FORMAT}"
         problem = metadata.get_filename_length_problem(output_filename)
         if problem is not None:

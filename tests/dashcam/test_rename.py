@@ -646,6 +646,18 @@ def test_suggest_trip_filename_without_track(library):
         rename.suggest_trip_filename(library_dir, store, "2026-09-25 Missing", "Car")
 
 
+@pytest.mark.parametrize("trip_id", ["../2026-09-25 Trip 11-17", "a/b", "a\\b", ".hidden", ""])
+def test_suggest_trip_filename_with_invalid_trip_name(library, add_named_trip, trip_id):
+    # GIVEN a trip, and a name that is not a single file name
+    library_dir, store = library
+    add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
+
+    # WHEN suggesting a filename for it
+    # THEN it is refused
+    with pytest.raises(rename.RenameError, match="Invalid trip name"):
+        rename.suggest_trip_filename(library_dir, store, trip_id, "Car")
+
+
 def test_suggest_trip_filename_without_video(library, add_named_trip):
     # GIVEN a trip whose video is not in the library directory
     library_dir, store = library

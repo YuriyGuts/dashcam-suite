@@ -769,6 +769,30 @@ def test_encode_range_rejects_too_long_output_name(config, raw_video_dir, tmp_pa
     assert fake_ffmpeg.calls == []
 
 
+@pytest.mark.parametrize("output_name", ["../Road Trip", "Trips/Road Trip", ".Road Trip", "A: B"])
+def test_encode_range_rejects_output_name_outside_a_plain_filename(
+    config, raw_video_dir, tmp_path, fake_ffmpeg, output_name
+):
+    # GIVEN an output name that leaves the library, is hidden, or has a forbidden character
+
+    # WHEN encoding with it
+    with pytest.raises(RuntimeError, match="must not start with '.' or contain"):
+        encode.encode_range(
+            raw_video_dir=raw_video_dir,
+            library_dir=tmp_path / "out",
+            metadata_dir=tmp_path / "metadata",
+            config=config,
+            start_index=1,
+            end_index=1,
+            output_name=output_name,
+            dry_run=False,
+            check_readability=False,
+        )
+
+    # THEN nothing is encoded
+    assert fake_ffmpeg.calls == []
+
+
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_collect_raw_video_segments_with_real_ffmpeg(raw_video_dir):
     # GIVEN three consecutive 1-second H.264 segments and a corrupt one

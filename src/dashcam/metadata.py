@@ -76,6 +76,13 @@ PARTIAL_FILE_PREFIX = ".tmp-"
 PARTIAL_FILE_SUFFIX = ".partial"
 PARTIAL_FILE_GLOB = f"{PARTIAL_FILE_PREFIX}*{PARTIAL_FILE_SUFFIX}"
 
+# Characters that are not allowed in filenames on common file systems.
+FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
+FORBIDDEN_FILENAME_CHARS_TEXT = '/ \\ : * ? " < > |'
+
+# Characters that would make a name span several path components.
+PATH_SEPARATOR_CHARS = re.compile(r"[/\\\x00]")
+
 
 class TrackFormatError(ValueError):
     """Raised when a track file cannot be parsed."""
@@ -90,6 +97,11 @@ def get_max_video_filename_bytes(extension: str) -> int:
     """Return the longest video filename whose track and preview filenames fit the limit."""
     longest_extension_length = max(len(TRACK_EXTENSION), len(PREVIEW_EXTENSION), len(extension))
     return MAX_FILENAME_BYTES - longest_extension_length + len(extension)
+
+
+def is_single_path_component(name: str) -> bool:
+    """Check that a name (e.g. a trip ID from a request) cannot leave its directory."""
+    return bool(name) and not name.startswith(".") and not PATH_SEPARATOR_CHARS.search(name)
 
 
 def get_filename_length_problem(video_filename: str) -> str | None:

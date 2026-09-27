@@ -46,9 +46,6 @@ REF_HIGHWAY_CLASSES = frozenset(["motorway", "motorway_link", "trunk", "trunk_li
 # Placeholder names given by `encode`, e.g. `Trip 11-17`, or by older versions, e.g. `Trip 3`.
 PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip (\d{2}-\d{2}|\d+)$")
 
-# Characters that are not allowed in filenames on common file systems.
-FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
-
 # Street-type words dropped from names, in lowercase. Ukrainian words are dropped before
 # transliteration, English words from `name:en`.
 UKRAINIAN_STREET_TYPE_WORDS = frozenset(
@@ -221,7 +218,7 @@ def to_ascii(text: str) -> str:
 
 def clean_filename_part(text: str) -> str:
     """Remove characters not allowed in filenames and collapse whitespace."""
-    text = FORBIDDEN_FILENAME_CHARS.sub(" ", text)
+    text = metadata.FORBIDDEN_FILENAME_CHARS.sub(" ", text)
     return " ".join(text.split())
 
 
@@ -438,8 +435,11 @@ def load_trip(
     Raises
     ------
     RenameError
-        If the track is missing or unreadable, or the video is not in the library directory.
+        If the name is not a trip name, the track is missing or unreadable, or the video is not
+        in the library directory.
     """
+    if not metadata.is_single_path_component(stem):
+        raise RenameError(f"Invalid trip name '{stem}'")
     try:
         track = store.load_track(stem)
     except FileNotFoundError as exc:
@@ -560,8 +560,8 @@ def validate_filename(filename: str, extension: str) -> str | None:
     """
     if not filename.isascii():
         return "use ASCII characters only"
-    if FORBIDDEN_FILENAME_CHARS.search(filename):
-        return 'do not use any of / \\ : * ? " < > |'
+    if metadata.FORBIDDEN_FILENAME_CHARS.search(filename):
+        return f"do not use any of {metadata.FORBIDDEN_FILENAME_CHARS_TEXT}"
     if len(filename) > MAX_FILENAME_LENGTH:
         return f"use at most {MAX_FILENAME_LENGTH} characters ({len(filename)} now)"
     if metadata.parse_trip_name(filename).date is None:
