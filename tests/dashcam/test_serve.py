@@ -741,14 +741,46 @@ def test_warn_about_library_when_no_video_is_found(app, add_track, caplog):
     assert "`dashcam serve --library-dir DIR`" in caplog.text
 
 
-def test_server_ignores_dropped_connections(app, capsys):
+def test_server_ignores_connection_aborted_while_sending(server, library_dir, monkeypatch, capsys):
+    # GIVEN a video, and a client that aborts the connection while it is sent (as on Windows)
+    (library_dir / "trip.mp4").write_bytes(bytes(100))
+
+    def send_file_to_aborted_client(self, path, send_body):
+        raise ConnectionAbortedError("Connection aborted")
+
+    monkeypatch.setattr(serve.VisualizerRequestHandler, "send_file", send_file_to_aborted_client)
+
+    # WHEN requesting the video
+    with pytest.raises(OSError):
+        fetch(f"{server}/videos/trip.mp4")
+
+    # THEN the server closes the connection without printing a traceback
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_server_ignores_reset_connections(app, capsys):
     # GIVEN a server
     http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
 
-    # WHEN a client drops the connection while a request is handled
+    # WHEN a client resets the connection while a request is handled
     try:
         raise ConnectionResetError("Connection reset by peer")
     except ConnectionResetError:
+        http_server.handle_error(None, ("127.0.0.1", 12345))
+    http_server.server_close()
+
+    # THEN no traceback is printed
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_server_ignores_aborted_connections(app, capsys):
+    # GIVEN a server
+    http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
+
+    # WHEN a client aborts the connection while a request is handled (as on Windows)
+    try:
+        raise ConnectionAbortedError("Connection aborted")
+    except ConnectionAbortedError:
         http_server.handle_error(None, ("127.0.0.1", 12345))
     http_server.server_close()
 

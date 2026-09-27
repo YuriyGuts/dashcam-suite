@@ -491,7 +491,7 @@ class VisualizerServer(http.server.ThreadingHTTPServer):
     def handle_error(self, request: t.Any, client_address: t.Any) -> None:
         # Browsers drop connections all the time, e.g. when seeking in a video.
         exc = sys.exception()
-        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+        if isinstance(exc, ConnectionError):
             return
         super().handle_error(request, client_address)
 
@@ -593,7 +593,7 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
             else:
                 relative_path = url_path.removeprefix("/") or "index.html"
                 self.send_file(safe_join(WEB_DIR, relative_path), send_body)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             # Browsers abort video requests all the time, e.g. when seeking.
             self.close_connection = True
 
