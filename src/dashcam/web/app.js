@@ -9,8 +9,8 @@
 
 // Categorical trip colors, assigned in this order to selected trips. More trips reuse them.
 const TRIP_COLORS = [
-  "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
-  "#4a3aa7", "#e34948", "#0e9aa7", "#a0522d", "#9b4dca", "#7a8b1f",
+  "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#4fa33a",
+  "#7c6fe0", "#e34948", "#0e9aa7", "#b0764f", "#c366d6", "#7a8b1f",
 ];
 
 // Sequential speed scale (one hue, light to dark). Samples without a speed are gray.
