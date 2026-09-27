@@ -1,7 +1,6 @@
 import io
 import logging
 import multiprocessing
-import queue
 import sys
 import time
 
@@ -159,7 +158,7 @@ def test_configure_logging_does_not_add_handler_twice():
 
 def test_worker_log_handler_sends_formatted_record():
     # GIVEN a worker handler writing to a queue
-    log_queue = queue.SimpleQueue()
+    log_queue = multiprocessing.SimpleQueue()
     handler = terminal.WorkerLogHandler(log_queue)
 
     # WHEN a record with arguments, a marker, and an exception is emitted
@@ -179,7 +178,7 @@ def test_worker_log_handler_sends_formatted_record():
     handler.emit(record)
 
     # THEN the queued record carries the formatted message and the marker only
-    sent_record = log_queue.get_nowait()
+    sent_record = log_queue.get()
     assert sent_record.msg.startswith("Failed: trip.mp4\nTraceback")
     assert "ValueError: bad value" in sent_record.msg
     assert sent_record.args is None

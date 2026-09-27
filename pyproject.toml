@@ -23,7 +23,7 @@ dashcam = "dashcam.cli:main"
 dev = [
     "pytest>=8",
     "ruff>=0.6",
-    "ty>=0.0.1a1",
+    "ty==0.0.84",
 ]
 
 [build-system]
