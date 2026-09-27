@@ -635,6 +635,22 @@ def test_metadata_store_rebuild_index_writes_streets_and_geometry(make_track, st
     assert geometry["trips"] == {"2026-09-25 Trip 11-17": [[[49.8, 24.0], [49.8006, 24.0]]]}
 
 
+def test_metadata_store_rebuild_index_leaves_out_trips_without_a_route(make_track, store):
+    # GIVEN a trip whose fixes are all isolated, between samples without a fix
+    track = make_track()
+    no_fix_sample = track.clean_samples[1]
+    no_fix_sample.status = cleaning.STATUS_NO_FIX
+    no_fix_sample.lat = no_fix_sample.lon = None
+    store.save_track(track)
+
+    # WHEN rebuilding the index
+    index = store.rebuild_index()
+
+    # THEN the trip is located, but has no route to draw
+    assert index["trips"][0]["bbox"] is not None
+    assert store.load_geometry()["trips"] == {}
+
+
 def test_metadata_store_update_index_after_rename_matches_rebuild(make_track, store):
     # GIVEN an index of three trips
     for video_filename in ["2026-09-24 A.mp4", "2026-09-25 B.mp4", "2026-09-26 C.mp4"]:

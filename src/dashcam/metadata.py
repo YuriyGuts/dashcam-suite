@@ -787,8 +787,9 @@ class MetadataStore:
                 continue
             trip = build_index_entry(track, has_preview=self.preview_path(track.stem).exists())
             trips.append(trip)
-            if trip.get("bbox"):
-                routes[track.stem] = simplify_route(track.clean_samples)
+            route = simplify_route(track.clean_samples) if trip.get("bbox") else []
+            if route:
+                routes[track.stem] = route
         return make_index(trips), {"format_version": INDEX_FORMAT_VERSION, "trips": routes}
 
     def rebuild_index(self) -> dict[str, t.Any]:
@@ -824,8 +825,9 @@ class MetadataStore:
         trips.sort(key=lambda trip: trip["id"] + TRACK_EXTENSION)
         routes = geometry["trips"]
         routes.pop(old_stem, None)
-        if entry.get("bbox"):
-            routes[new_stem] = simplify_route(track.clean_samples)
+        route = simplify_route(track.clean_samples) if entry.get("bbox") else []
+        if route:
+            routes[new_stem] = route
         index = make_index(trips)
         self.write_index_files(index, geometry)
         return index

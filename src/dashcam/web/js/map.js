@@ -384,7 +384,7 @@ async function drawRoutes(generation) {
   }
 
   const layer = L.layerGroup();
-  const simplifiedTrips = simplifiedIds.filter((id) => geometry[id]).map((id) => state.tripsById.get(id));
+  const simplifiedTrips = simplifiedIds.filter((id) => geometry[id]?.length).map((id) => state.tripsById.get(id));
   // All halos go first, so that no halo covers another trip's line.
   for (const trip of simplifiedTrips) {
     addHalo(layer, geometry[trip.id], ROUTE_HALO_WEIGHT, 0.8);
@@ -530,7 +530,7 @@ async function drawCoverage(generation) {
     return;
   }
   const layer = L.layerGroup();
-  const tripsWithRoutes = trips.filter((trip) => geometry[trip.id]);
+  const tripsWithRoutes = trips.filter((trip) => geometry[trip.id]?.length);
   // All halos go first, so that no halo covers another trip's line.
   for (const trip of tripsWithRoutes) {
     addHalo(layer, geometry[trip.id], COVERAGE_HALO_WEIGHT, 0.9);
