@@ -183,6 +183,27 @@ def test_suggest_filename_without_streets_uses_start_time(make_named_track):
     assert filename == "2026-09-25 Trip 08-17 (Car).mp4"
 
 
+@pytest.mark.parametrize(
+    ("streets", "taken_stems", "expected_filename"),
+    [
+        ([FRANKA, STUSA], set(), "2026-09-25 Ivana Franka, Vasylia Stusa.mp4"),
+        ([STUSA], {"2026-09-25 vasylia stusa"}, "2026-09-25 Vasylia Stusa (1).mp4"),
+        ([], set(), "2026-09-25 Trip 08-17.mp4"),
+    ],
+)
+def test_suggest_filename_without_car_model(
+    make_named_track, streets, taken_stems, expected_filename
+):
+    # GIVEN a trip and no configured car model
+    track = make_named_track("2026-09-25 Trip 11-17.mp4", streets, start_hour=8)
+
+    # WHEN suggesting a name
+    filename = rename.suggest_filename(track, "", ".mp4", taken_stems)
+
+    # THEN the name has no car model suffix
+    assert filename == expected_filename
+
+
 @pytest.mark.parametrize("placeholder_name", ["Trip 11-17", "Trip 3"])
 def test_suggest_filename_without_time_keeps_placeholder(make_track, placeholder_name):
     # GIVEN a video without an overlay, named by `encode`
@@ -515,7 +536,7 @@ def test_rename_trips_without_confirmation_only_prints(library, add_named_trip, 
 
     # THEN the suggestion is printed and nothing is renamed
     assert failed_count == 0
-    assert "2026-09-25 Vasylia Stusa (Car).mp4" in capsys.readouterr().out
+    assert "2026-09-25 Vasylia Stusa.mp4" in capsys.readouterr().out
     assert video_path.exists()
 
 
@@ -529,9 +550,9 @@ def test_rename_trips_with_yes_renames_and_rebuilds_index(library, add_named_tri
 
     # THEN the trip is renamed and the index lists the new name
     assert failed_count == 0
-    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Vasylia Stusa (Car).mp4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Vasylia Stusa.mp4"]
     index = json.loads(store.index_path.read_text(encoding="utf-8"))
-    assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Vasylia Stusa (Car)"]
+    assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 Vasylia Stusa"]
 
 
 def test_rename_trips_interactive_declined(library, add_named_trip, config):

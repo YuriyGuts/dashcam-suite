@@ -68,8 +68,8 @@ timezone = "Europe/Kyiv"
 # Pick yours at https://download.geofabrik.de/.
 osm_extract_url = "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf"
 
-# Added to suggested trip names in parentheses. Set to "" to leave it out.
-car_model = "Car"
+# Added to suggested trip names as a suffix. Set to "" to leave it out.
+car_model = ""
 
 # A gap of at least this many hours between clips starts a new trip.
 min_trip_gap_hours = 3

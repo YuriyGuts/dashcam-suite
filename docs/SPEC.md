@@ -92,7 +92,7 @@ Port of `dashcam-encode`.
 
 ### `dashcam rename [-d DIR] [--metadata-dir PATH] [--suggest] [--all] [--yes]`
 
-- Pattern: `YYYY-mm-dd <streets> (<car model>).mp4`, streets separated by `, `. Car model defaults to `Car` (config override). The extension of the video is kept.
+- Pattern: `YYYY-mm-dd <streets> (<car model>).mp4`, streets separated by `, `. The car model comes from the config and is left out when empty (the default). The extension of the video is kept.
 - ASCII only. Whole filename (including extension) at most 140 characters.
 - Streets:
   - In travel order. Stretches under ~300 m and consecutive repeats are dropped.

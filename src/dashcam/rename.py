@@ -1,7 +1,8 @@
 """
 Suggest and apply descriptive trip names built from the street lists of the tracks.
 
-A suggested name looks like `2026-09-25 Ivana Franka, Vasylia Stusa (Car).mp4`:
+A suggested name looks like `2026-09-25 Ivana Franka, Vasylia Stusa (Car).mp4`, where the car
+model suffix is left out if no car model is configured:
 
 * The date comes from the current video filename.
 * Streets are listed in travel order. Stretches under 300 m and consecutive repeats are dropped.

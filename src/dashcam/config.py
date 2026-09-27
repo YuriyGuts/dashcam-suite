@@ -105,7 +105,7 @@ def get_platform_defaults() -> Config:
         "encode_job_count": 1,
         "extract_job_count": 10,
         "min_trip_gap_hours": 3,
-        "car_model": "Car",
+        "car_model": "",
         "metadata_dir": ".metadata",
         "library_dir": None,
         "timezone": "Europe/Kyiv",
