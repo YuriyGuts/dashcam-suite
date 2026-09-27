@@ -1,3 +1,4 @@
+import ctypes
 import os
 import signal
 import subprocess
@@ -26,6 +27,23 @@ def wait_for(condition, timeout_s=10):
 
 
 def is_process_running(pid):
+    if sys.platform == "win32":
+        # `os.kill` would terminate the process on Windows, so its exit code is asked instead.
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            return exit_code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -150,7 +168,6 @@ def test_worker_pool_workers_exit_quietly_when_terminated():
     assert handler is system.exit_on_signal
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot catch process termination")
 def test_worker_pool_failure_stops_programs_started_by_workers(tmp_path, endless_progress_cmd):
     # GIVEN a worker that follows the progress of a program that never ends
     pid_path = tmp_path / "pid.txt"

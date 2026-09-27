@@ -35,10 +35,79 @@ def exit_on_signal(signal_number: int, frame: types.FrameType | None) -> None:
     raise SystemExit(SIGNAL_EXIT_CODE_BASE + signal_number)
 
 
+# Windows job object settings, from `winnt.h`.
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9
+
+
+class JobObjectBasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_int64),
+        ("PerJobUserTimeLimit", ctypes.c_int64),
+        ("LimitFlags", ctypes.c_uint32),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_uint32),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_uint32),
+        ("SchedulingClass", ctypes.c_uint32),
+    ]
+
+
+class JobObjectExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", JobObjectBasicLimitInformation),
+        ("IoInfo", ctypes.c_uint64 * 6),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+def stop_programs_with_worker() -> None:
+    """
+    On Windows, make the programs that a worker starts (e.g. ffmpeg) stop when the worker does.
+
+    A pool terminates its workers on Windows without running any cleanup, so it cannot stop the
+    programs itself. Instead, the worker joins a job object that kills its processes once its
+    only handle, held by the worker, is closed. Programs that the worker starts join it too.
+    """
+    if sys.platform != "win32":
+        return
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel32.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    ]
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+    job_handle = kernel32.CreateJobObjectW(None, None)
+    limits = JobObjectExtendedLimitInformation()
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    is_configured = job_handle and kernel32.SetInformationJobObject(
+        job_handle,
+        JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+        ctypes.byref(limits),
+        ctypes.sizeof(limits),
+    )
+    if not is_configured or not kernel32.AssignProcessToJobObject(
+        job_handle, kernel32.GetCurrentProcess()
+    ):
+        LOGGER.warning(
+            f"Programs started by this job may keep running if it is stopped "
+            f"(Windows error {ctypes.get_last_error()})"
+        )
+
+
 def initialize_worker(log_queue: multiprocessing.queues.SimpleQueue) -> None:
     """
     Prepare a worker process: send its log records to the parent, and exit quietly on Ctrl+C or
-    when the pool terminates its workers after a failure.
+    when the pool terminates its workers after a failure, stopping the programs it started.
 
     Ctrl+C reaches every process of the terminal, and the parent reports the interruption. The
     handler is a Python function rather than `SIG_IGN`, because programs that the worker starts
@@ -47,6 +116,7 @@ def initialize_worker(log_queue: multiprocessing.queues.SimpleQueue) -> None:
     signal.signal(signal.SIGINT, exit_on_signal)
     signal.signal(signal.SIGTERM, exit_on_signal)
     terminal.configure_worker_logging(log_queue)
+    stop_programs_with_worker()
 
 
 @contextlib.contextmanager
