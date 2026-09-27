@@ -249,7 +249,7 @@ def test_build_strip_reader_command():
 
     # WHEN building the ffmpeg command
     cmd = video.build_strip_reader_command(
-        path=video.Path("/videos/trip.mp4"),
+        path=Path("/videos/trip.mp4"),
         frame_width=2560,
         sample_fps=2,
         ffmpeg_executable="ffmpeg",

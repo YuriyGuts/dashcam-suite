@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -273,3 +274,22 @@ def test_read_strip_image_with_missing_file(tmp_path):
     # THEN it fails
     with pytest.raises(FileNotFoundError):
         overlay.read_strip_image(tmp_path / "missing.png")
+
+
+def test_load_glyph_templates_rejects_atlas_of_wrong_width(tmp_path, monkeypatch):
+    # GIVEN an atlas with one cell fewer than it has labels
+    atlas_path = tmp_path / "glyphs.png"
+    labels_path = tmp_path / "glyphs.json"
+    cv2.imwrite(str(atlas_path), np.zeros((overlay.CELL_HEIGHT, overlay.CELL_WIDTH), np.uint8))
+    labels_path.write_text('["0", "1"]', encoding="utf-8")
+    monkeypatch.setattr(overlay, "GLYPH_ATLAS_PATH", atlas_path)
+    monkeypatch.setattr(overlay, "GLYPH_LABELS_PATH", labels_path)
+    overlay.load_glyph_templates.cache_clear()
+
+    # WHEN loading the templates
+    # THEN the mismatch is reported
+    try:
+        with pytest.raises(ValueError, match="18 pixels wide, but its 2 labels need 36"):
+            overlay.load_glyph_templates()
+    finally:
+        overlay.load_glyph_templates.cache_clear()

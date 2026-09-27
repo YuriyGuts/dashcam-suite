@@ -307,7 +307,7 @@ def run_extract_job(job_def: ExtractJobDefinition | PreviewJobDefinition) -> str
     str | None
         The error message, or None if the job succeeded.
     """
-    # Each job decodes with ffmpeg in parallel; keep OpenCV from adding more threads.
+    # Each job decodes with its own ffmpeg process, so OpenCV must not add more threads.
     cv2.setNumThreads(1)
     started_at = time.monotonic()
     video_filename = job_def.video_path.name

@@ -517,7 +517,7 @@ def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
         problem = validate_filename(answer, extension)
         if problem is None:
             return answer
-        terminal.print_line(("  ▲ Invalid name: ", "yellow"), problem)
+        terminal.print_line((f"  {terminal.WARNING_SYMBOL} Invalid name: ", "yellow"), problem)
 
 
 def confirm_plans(plans: list[RenamePlan], ask: t.Callable[[str], str]) -> list[RenamePlan]:

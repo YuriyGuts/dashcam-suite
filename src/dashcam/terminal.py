@@ -32,11 +32,14 @@ HEADING = {"marker": "heading"}
 # Arrow between an old and a new name.
 ARROW = "→"
 
+# Symbol of warnings, also used for problems shown outside the log.
+WARNING_SYMBOL = "▲"
+
 # Symbol and style of each log level and marker.
 LEVEL_SYMBOLS = {
     logging.DEBUG: ("·", "dim"),
     logging.INFO: ("•", "dim"),
-    logging.WARNING: ("▲", "yellow"),
+    logging.WARNING: (WARNING_SYMBOL, "yellow"),
     logging.ERROR: ("✗", "red"),
     logging.CRITICAL: ("✗", "bold red"),
 }

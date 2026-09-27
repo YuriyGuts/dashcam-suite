@@ -6,7 +6,7 @@ The overlay is one line of text in a fixed-width font, for example:
     46 KM/H N49.810205 E24.028992          VIOFO A119 V3             2026/09/23 18:42:06
 
 The reader does not rely on where the values are, in which order they appear, or how they are
-padded. It looks for five kinds of tokens anywhere along the line:
+padded. It looks for these tokens anywhere along the line:
 
 * speed, e.g. `46 KM/H` or `46KM/H`,
 * latitude and longitude, e.g. `N49.810205`, `N 49.8102` or `49.810205N`,
@@ -232,6 +232,12 @@ def load_glyph_templates() -> GlyphTemplates:
     if atlas is None:
         raise FileNotFoundError(f"Glyph atlas not found: '{GLYPH_ATLAS_PATH}'")
     labels = json.loads(GLYPH_LABELS_PATH.read_text(encoding="utf-8"))
+    expected_width = len(labels) * CELL_WIDTH
+    if atlas.shape[1] != expected_width:
+        raise ValueError(
+            f"Glyph atlas '{GLYPH_ATLAS_PATH}' is {atlas.shape[1]} pixels wide, but its "
+            f"{len(labels)} labels need {expected_width}"
+        )
 
     images = []
     masks = []
