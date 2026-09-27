@@ -128,6 +128,23 @@ def test_run_doctor_fixes_track_filename(library_dir, store, add_trip):
     assert not store.track_path("wrong name").exists()
 
 
+def test_run_doctor_fixes_only_one_of_two_tracks_for_the_same_video(library_dir, store, add_trip):
+    # GIVEN two copies of a track under wrong names, both belonging to the same video
+    add_trip("2026-09-25 Trip.mp4")
+    track_path = store.track_path("2026-09-25 Trip")
+    copy_path = store.track_path("copy")
+    copy_path.write_bytes(track_path.read_bytes())
+    track_path.rename(store.track_path("wrong name"))
+
+    # WHEN running the doctor with fixes
+    error_count = run_doctor(library_dir, store, apply_fixes=True)
+
+    # THEN one copy gets the proper name, and the other is kept and reported
+    assert error_count == 1
+    assert track_path.exists()
+    assert len(store.list_track_paths()) == 2
+
+
 def test_run_doctor_reconnects_renamed_video(library_dir, store, add_trip):
     # GIVEN a video renamed by hand
     video_path, _ = add_trip("2026-09-25 Trip.mp4")

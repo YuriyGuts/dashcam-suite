@@ -195,7 +195,7 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
             target_path = store.track_path(track.stem)
 
             def rename_track_file(stem: str = stem, target_path: Path = target_path) -> None:
-                store.track_path(stem).rename(target_path)
+                metadata.rename_without_overwrite(store.track_path(stem), target_path)
 
             findings.append(
                 Finding(
