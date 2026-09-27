@@ -199,9 +199,9 @@ One JSON file. Header pretty-printed, one sample per line.
 
 ## Validation
 
-- OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Twelve hand-labeled strips (two with day-first dates) are kept as a regression fixture, and are also read back from synthetic videos scaled to 1920 and 1280 px.
+- OCR: `scripts/evaluate_overlay_ocr.py` reads every frame of the sample videos at 2 fps (~4,300 frames: day, night, rain, snow, glare, no fix, spoofed) and flags readings that break physical consistency: clock not advancing with the video, isolated coordinate jumps, GPS text flickering, and displayed speed disagreeing with implied speed. Flagged frames are saved for review by eye. Tesseract proved too noisy on this font to serve as a reference. Twelve hand-labeled strips (two with day-first dates) are kept as a regression fixture, and are also read back from synthetic videos scaled to 1920 and 1280 px. An end-to-end extraction test runs on a 6-second clip of a sample trip, with the picture above the overlay blacked out.
 - Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
-- Encode: grouping, parsing, and naming tests against `video/raw-sd`.
+- Encode: grouping, parsing, and naming tests, plus a readability check of ffmpeg-generated segments.
 - Enrich: tests against a synthetic OSM map (intersections, GPS noise, ref-only highways, footways, localities); street lists of the sample trips checked against the map by eye.
 - Visualizer: browser smoke test.
 

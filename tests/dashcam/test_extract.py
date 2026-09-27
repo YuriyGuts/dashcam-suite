@@ -15,7 +15,8 @@ from dashcam import overlay
 from dashcam import video
 
 OVERLAY_FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "overlay"
-SAMPLE_VIDEO_PATH = Path(__file__).parents[2] / "video" / "2026-09-23 Some Trip 1.mp4"
+# A 6-second clip of a real trip, with the picture above the overlay blacked out.
+SAMPLE_VIDEO_PATH = Path(__file__).parents[1] / "fixtures" / "video" / "2026-09-23 Sample Trip.mp4"
 
 
 @pytest.fixture
@@ -705,10 +706,9 @@ def test_reclean_tracks_reports_unreadable_tracks(config, store):
     assert failed_count == 1
 
 
-@pytest.mark.skipif(not SAMPLE_VIDEO_PATH.is_file(), reason="Sample video not present")
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_extract_video_with_sample_video(config, tmp_path):
-    # GIVEN the 2-minute sample trip video
+    # GIVEN the sample trip clip
     job_def = extract.ExtractJobDefinition(
         video_path=SAMPLE_VIDEO_PATH,
         fingerprint="sample",
@@ -722,13 +722,14 @@ def test_extract_video_with_sample_video(config, tmp_path):
 
     # THEN every second has a good fix, in the right place and time
     assert track.extraction_status == metadata.EXTRACTION_OK
-    assert len(track.clean_samples) == 119
-    assert {sample.status for sample in track.clean_samples} == {cleaning.STATUS_OK}
+    assert [sample.status for sample in track.clean_samples] == [cleaning.STATUS_OK] * 6
+    assert [sample.time.isoformat() for sample in track.clean_samples if sample.time] == [
+        f"2026-09-23T18:42:{second}+03:00" for second in range(32, 38)
+    ]
     first_sample = track.clean_samples[0]
-    assert first_sample.time is not None
-    assert first_sample.time.isoformat() == "2026-09-23T18:42:03+03:00"
-    assert first_sample.lat == pytest.approx(49.81, abs=0.01)
-    assert first_sample.lon == pytest.approx(24.03, abs=0.01)
+    assert (first_sample.lat, first_sample.lon) == (49.811027, 24.02489)
+    last_sample = track.clean_samples[-1]
+    assert (last_sample.lat, last_sample.lon) == (49.811157, 24.024162)
 
 
 def test_extract_video_probes_with_configured_ffprobe(monkeypatch, config, tmp_path):

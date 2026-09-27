@@ -13,7 +13,7 @@ neighbors agree with each other:
 
 Readings with text below the reliability threshold are listed as well.
 
-Flagged strips are saved to `.scratch/ocr-review/` for visual review.
+Flagged strips are saved to `.local/.scratch/ocr-review/` for visual review.
 
 Usage:
 > uv run python scripts/evaluate_overlay_ocr.py [VIDEO ...]
@@ -35,10 +35,10 @@ from dashcam.video import iter_overlay_strips
 from dashcam.video import probe_video
 
 # Sample videos to evaluate when none are given.
-SAMPLE_VIDEO_DIR = Path(__file__).parents[1] / "video"
+SAMPLE_VIDEO_DIR = Path(__file__).parents[1] / ".local" / "video"
 
 # Where to save the strips of flagged readings.
-REVIEW_DIR = Path(__file__).parents[1] / ".scratch" / "ocr-review"
+REVIEW_DIR = Path(__file__).parents[1] / ".local" / ".scratch" / "ocr-review"
 
 # Frames per second to sample.
 SAMPLE_FPS = 2

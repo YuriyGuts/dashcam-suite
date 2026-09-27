@@ -3,6 +3,7 @@ import datetime
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,6 @@ import pytest
 from dashcam import encode
 from dashcam import metadata
 from dashcam import video
-
-SAMPLE_RAW_VIDEO_DIR = Path(__file__).parents[2] / "video" / "raw-sd" / "DCIM" / "Movie"
 
 
 def make_segment(index, start_time, path=None):
@@ -770,15 +769,28 @@ def test_encode_range_rejects_too_long_output_name(config, raw_video_dir, tmp_pa
     assert fake_ffmpeg.calls == []
 
 
-@pytest.mark.skipif(not SAMPLE_RAW_VIDEO_DIR.is_dir(), reason="Sample SD card videos not present")
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
-def test_collect_raw_video_segments_with_sample_sd_card():
-    # GIVEN the sample SD card directory with six consecutive 1-minute segments
+def test_collect_raw_video_segments_with_real_ffmpeg(raw_video_dir):
+    # GIVEN three consecutive 1-second H.264 segments and a corrupt one
+    for raw_video_name in [
+        "20260925111707_000271.MP4",
+        "20260925111708_000272.MP4",
+        "20260925111709_000273.MP4",
+    ]:
+        cmd = [
+            "ffmpeg",
+            *["-v", "error"],
+            *["-f", "lavfi", "-i", "testsrc=s=320x180:r=10:d=1"],
+            *["-c:v", "libx264", "-pix_fmt", "yuv420p"],
+            str(raw_video_dir / raw_video_name),
+        ]
+        subprocess.run(cmd, check=True)
+    (raw_video_dir / "20260925111710_000274.MP4").write_bytes(b"not a video")
 
-    # WHEN collecting and grouping its segments with real readability checks
-    segments = encode.collect_raw_video_segments(SAMPLE_RAW_VIDEO_DIR, ffmpeg_executable="ffmpeg")
+    # WHEN collecting and grouping the segments with real readability checks
+    segments = encode.collect_raw_video_segments(raw_video_dir, ffmpeg_executable="ffmpeg")
     trips = encode.group_segments_into_trips(segments, min_trip_gap_hours=3)
 
-    # THEN they form a single readable trip
-    assert [segment.index for segment in segments] == [271, 272, 273, 274, 275, 276]
+    # THEN the readable segments form a single trip
+    assert [segment.index for segment in segments] == [271, 272, 273]
     assert [trip.get_placeholder_name() for trip in trips] == ["2026-09-25 Trip 11-17"]

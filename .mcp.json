@@ -6,7 +6,9 @@
       "args": [
         "@playwright/mcp@latest",
         "--browser",
-        "firefox"
+        "firefox",
+        "--output-dir",
+        ".local/.playwright-mcp"
       ],
       "env": {}
     }
