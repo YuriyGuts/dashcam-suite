@@ -72,6 +72,59 @@ def test_probe_video_with_invalid_file(tmp_path):
 
 
 @requires_ffmpeg
+@pytest.mark.parametrize(
+    "probe_output",
+    [
+        "not json",
+        '{"streams": [{"width": 2560, "height": 1440}], "format": {}}',
+        '{"streams": [{"width": "N/A", "height": 1440}], "format": {"duration": "1.0"}}',
+        '{"streams": [{"height": 1440}], "format": {"duration": "1.0"}}',
+    ],
+)
+def test_probe_video_with_incomplete_output(monkeypatch, probe_output):
+    # GIVEN ffprobe succeeding with malformed or incomplete output (e.g. for a truncated video)
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=probe_output, stderr="")
+
+    monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
+
+    # WHEN probing the video
+    # THEN a `RuntimeError` names the file
+    with pytest.raises(RuntimeError, match="trip.mp4"):
+        video.probe_video(Path("trip.mp4"), "ffprobe")
+
+
+def test_probe_video_without_video_stream(monkeypatch):
+    # GIVEN ffprobe finding no video stream
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"streams": []}', stderr="")
+
+    monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
+
+    # WHEN probing the video
+    # THEN the error says so
+    with pytest.raises(RuntimeError, match="No video stream in 'trip.mp4'"):
+        video.probe_video(Path("trip.mp4"), "ffprobe")
+
+
+def test_probe_video_decodes_output_as_utf8(monkeypatch):
+    # GIVEN ffprobe failing on a file with a Cyrillic name
+    run_kwargs = {}
+
+    def fake_run(cmd, **kwargs):
+        run_kwargs.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Поїздка.mp4: Invalid data")
+
+    monkeypatch.setattr("dashcam.video.subprocess.run", fake_run)
+
+    # WHEN probing the video
+    # THEN the output is decoded as UTF-8 whatever the locale, and the error is reported
+    with pytest.raises(RuntimeError, match="Invalid data"):
+        video.probe_video(Path("Поїздка.mp4"), "ffprobe")
+    assert run_kwargs["encoding"] == "utf-8"
+    assert run_kwargs["errors"] == "replace"
+
+
 def test_iter_overlay_strips(synthetic_video):
     # GIVEN a 3-second video
 

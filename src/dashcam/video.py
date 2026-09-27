@@ -22,6 +22,10 @@ FINGERPRINT_CHUNK_SIZE = 1024 * 1024
 # How many of the last ffmpeg error lines to report when it fails.
 ERROR_TAIL_LINE_COUNT = 20
 
+# How to decode the text output of ffmpeg and ffprobe. Their messages quote file names in UTF-8,
+# whatever the locale.
+OUTPUT_DECODING: dict[str, t.Any] = {"encoding": "utf-8", "errors": "replace"}
+
 
 @dataclasses.dataclass(frozen=True)
 class VideoInfo:
@@ -39,7 +43,7 @@ def probe_video(path: Path, ffprobe_executable: str) -> VideoInfo:
     Raises
     ------
     RuntimeError
-        If the file cannot be read or has no video stream.
+        If the file cannot be read, has no video stream, or lacks its size or duration.
     """
     cmd = [
         ffprobe_executable,
@@ -49,19 +53,22 @@ def probe_video(path: Path, ffprobe_executable: str) -> VideoInfo:
         *["-of", "json"],
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, check=False, **OUTPUT_DECODING)
     if result.returncode != 0:
-        raise RuntimeError(f"Cannot read '{path}': {result.stderr.strip()}")
+        raise RuntimeError(f"Cannot read '{path}': {get_error_tail(result.stderr)}")
 
-    probe_output = json.loads(result.stdout)
-    streams = probe_output.get("streams", [])
-    if not streams:
-        raise RuntimeError(f"No video stream in '{path}'")
-    return VideoInfo(
-        width=int(streams[0]["width"]),
-        height=int(streams[0]["height"]),
-        duration_s=float(probe_output["format"]["duration"]),
-    )
+    try:
+        probe_output = json.loads(result.stdout)
+        streams = probe_output.get("streams", [])
+        if not streams:
+            raise RuntimeError(f"No video stream in '{path}'")
+        return VideoInfo(
+            width=int(streams[0]["width"]),
+            height=int(streams[0]["height"]),
+            duration_s=float(probe_output["format"]["duration"]),
+        )
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"Cannot read the size and duration of '{path}': {exc!r}") from exc
 
 
 def probe_duration(path: Path, ffprobe_executable: str) -> float:
@@ -80,12 +87,12 @@ def probe_duration(path: Path, ffprobe_executable: str) -> float:
         *["-of", "default=noprint_wrappers=1:nokey=1"],
         str(path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, check=False, **OUTPUT_DECODING)
     try:
         return float(result.stdout)
     except ValueError:
         raise RuntimeError(
-            f"Cannot read the duration of '{path}': {result.stderr.strip()}"
+            f"Cannot read the duration of '{path}': {get_error_tail(result.stderr)}"
         ) from None
 
 
@@ -133,7 +140,9 @@ def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
     """
     # Collect errors in a file: a pipe could fill up and block ffmpeg.
     with tempfile.TemporaryFile() as stderr_file:
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=stderr_file, text=True) as proc:
+        with subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=stderr_file, **OUTPUT_DECODING
+        ) as proc:
             assert proc.stdout is not None
             output_time_s = 0.0
             speed = None
@@ -155,7 +164,7 @@ def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
 
         if proc.returncode != 0:
             stderr_file.seek(0)
-            stderr = stderr_file.read().decode(errors="replace")
+            stderr = stderr_file.read().decode(**OUTPUT_DECODING)
             raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=get_error_tail(stderr))
 
 
@@ -268,8 +277,8 @@ def iter_overlay_strips(
 
         if proc.returncode != 0:
             stderr_file.seek(0)
-            stderr = stderr_file.read().decode(errors="replace").strip()
-            raise RuntimeError(f"ffmpeg failed to decode '{path}': {stderr}")
+            stderr = stderr_file.read().decode(**OUTPUT_DECODING)
+            raise RuntimeError(f"ffmpeg failed to decode '{path}': {get_error_tail(stderr)}")
 
 
 def compute_fingerprint(path: Path) -> str:
