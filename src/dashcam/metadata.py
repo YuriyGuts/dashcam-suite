@@ -712,7 +712,7 @@ class MetadataStore:
             key=lambda path: path.name,
         )
 
-    def iter_track_files(self) -> t.Generator[TrackFile]:
+    def iter_track_files(self) -> t.Generator[TrackFile, None, None]:
         """Load the track files one by one in name order, logging the progress."""
         paths = self.list_track_paths()
         LOGGER.info(f"Loading {len(paths)} tracks from '{self.tracks_dir}'")

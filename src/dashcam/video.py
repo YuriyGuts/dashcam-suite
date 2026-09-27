@@ -123,7 +123,7 @@ def get_error_tail(stderr: str) -> str:
     return "\n".join(stderr.strip().splitlines()[-ERROR_TAIL_LINE_COUNT:])
 
 
-def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
+def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress, None, None]:
     """
     Run an ffmpeg command that has `-progress pipe:1` and yield its progress reports.
 
@@ -245,7 +245,7 @@ def iter_overlay_strips(
     hwaccel_options: str,
     start_s: float = 0.0,
     duration_s: float | None = None,
-) -> t.Generator[tuple[float, GrayImage]]:
+) -> t.Generator[tuple[float, GrayImage], None, None]:
     """
     Decode the video and yield the bottom strip of frames sampled at `sample_fps`.
 
