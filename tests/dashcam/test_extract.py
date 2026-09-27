@@ -834,3 +834,50 @@ def test_extract_video_probes_with_configured_ffprobe(monkeypatch, config, tmp_p
 
     # THEN the custom ffprobe reads the video
     assert probed_executables == ["/opt/ffmpeg/bin/ffprobe"]
+
+
+def test_run_extract_job_makes_preview_after_extraction(
+    monkeypatch, config, library_dir, store, make_track
+):
+    # GIVEN an extraction job that also makes a preview
+    video_path = library_dir / "2026-09-25 Trip.mp4"
+    monkeypatch.setattr(
+        extract, "extract_video", lambda job_def: make_track(video_filename=video_path.name)
+    )
+    previews = []
+    monkeypatch.setattr(
+        extract,
+        "make_preview",
+        lambda video_path, preview_path, config, duration_s: previews.append(preview_path),
+    )
+    job_def = extract.ExtractJobDefinition(
+        video_path=video_path,
+        fingerprint="1:abc",
+        metadata_dir=store.root,
+        config=config,
+        make_preview=True,
+    )
+
+    # WHEN running it
+    error = extract.run_extract_job(job_def)
+
+    # THEN the track is saved and its preview is made
+    assert error is None
+    assert store.track_path(video_path.stem).exists()
+    assert previews == [store.preview_path(video_path.stem)]
+
+
+def test_run_extract_job_reports_unreadable_track_of_preview_job(config, library_dir, store):
+    # GIVEN a preview job for a video whose track is unreadable
+    video_path = library_dir / "2026-09-25 Trip.mp4"
+    store.track_path(video_path.stem).write_text("{", encoding="utf-8")
+    job_def = extract.PreviewJobDefinition(
+        video_path=video_path, metadata_dir=store.root, config=config
+    )
+
+    # WHEN running it
+    error = extract.run_extract_job(job_def)
+
+    # THEN the error is returned instead of raised
+    assert error is not None
+    assert "Invalid JSON" in error
