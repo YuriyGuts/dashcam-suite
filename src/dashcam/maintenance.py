@@ -346,6 +346,14 @@ def check_videos(
                     fix=reconnect,
                 )
             )
+        elif old_stem is not None:
+            findings.append(
+                Finding(
+                    SEVERITY_WARNING,
+                    f"Video '{video_path.name}' has the same content as '{old_stem}', so "
+                    f"`dashcam extract` skips it (delete one of them)",
+                )
+            )
         else:
             findings.append(
                 Finding(

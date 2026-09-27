@@ -126,6 +126,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Track JSON parses, schema valid, overrides well-formed | Report line and field |
 | Track filename differs from its `video_filename` field | Rename the track file |
 | Two tracks share a fingerprint | Report both |
+| Video with the same content as a video that has a track | Report |
 | Videos whose names differ only in the extension or letter case | Report |
 | Video in the library without a track | Suggest `extract` |
 | Track whose video is not in the library | Reconnect renames via fingerprint; report the rest as unreachable |

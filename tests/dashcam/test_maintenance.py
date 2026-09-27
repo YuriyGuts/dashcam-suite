@@ -258,6 +258,19 @@ def test_run_doctor_reports_duplicate_fingerprints(library_dir, store, add_trip,
     assert "share the same video content" in caplog.text
 
 
+def test_run_doctor_reports_copy_of_video_with_track(library_dir, store, add_trip, caplog):
+    # GIVEN a video with a track, and a copy of the video under another name
+    video_path, _ = add_trip("2026-09-25 Trip.mp4")
+    (library_dir / "2026-09-25 Trip copy.mp4").write_bytes(video_path.read_bytes())
+
+    # WHEN running the doctor
+    run_doctor(library_dir, store)
+
+    # THEN the copy is reported as such, not as a video to extract
+    assert "'2026-09-25 Trip copy.mp4' has the same content as '2026-09-25 Trip'" in caplog.text
+    assert "has no track" not in caplog.text
+
+
 def test_run_doctor_reports_videos_sharing_a_track(library_dir, store, add_trip, caplog):
     # GIVEN a video with a track, and another video whose name differs only in the extension
     add_trip("2026-09-25 Trip.mp4")
