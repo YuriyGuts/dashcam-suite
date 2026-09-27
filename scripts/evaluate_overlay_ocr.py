@@ -1,9 +1,8 @@
-r"""
+"""
 Evaluate overlay OCR on sample videos using consistency checks instead of hand labels.
 
-Every video is sampled at 2 fps. A reading
-is flagged as a likely OCR error when it disagrees with both of its neighbors while the
-neighbors agree with each other:
+Every video is sampled at 2 fps. A reading is flagged as a likely OCR error when it disagrees
+with both of its neighbors while the neighbors agree with each other:
 
 * Clock: `camera time - video offset` should stay constant between neighboring frames.
 * GPS: latitude and longitude should change by less than `MAX_COORDINATE_STEP` per frame.

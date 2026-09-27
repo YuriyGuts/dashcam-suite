@@ -1,4 +1,4 @@
-r"""
+"""
 Build the overlay glyph templates from labeled overlay strips.
 
 Reads the strips and labels in `tests/fixtures/overlay/`, cuts out every labeled character
@@ -6,8 +6,9 @@ cell, aligns all instances of each character, and averages them into one templat
 character. The result is written to `src/dashcam/overlay_glyphs.png` (atlas) and
 `src/dashcam/overlay_glyphs.json` (labels).
 
-Afterwards, every labeled strip is read with the new templates, and any difference from its
-label is reported. A difference usually indicates a labeling mistake.
+Afterwards, every labeled strip is read with the new templates. Any difference from its label
+is reported and makes the script exit with an error. A difference usually indicates a labeling
+mistake.
 
 Usage:
 > uv run python scripts/build_glyph_templates.py
@@ -15,6 +16,7 @@ Usage:
 
 import json
 import logging
+import sys
 from pathlib import Path
 
 import cv2
@@ -131,7 +133,7 @@ def verify_labeled_strips() -> int:
     return mismatch_count
 
 
-def main() -> None:
+def main() -> int:
     cells_by_character = collect_labeled_cells()
     labels = sorted(cells_by_character)
     LOGGER.info(f"Characters: {''.join(labels)}")
@@ -147,8 +149,9 @@ def main() -> None:
     overlay.GLYPH_LABELS_PATH.write_text(json.dumps(labels) + "\n", encoding="utf-8")
     LOGGER.info(f"Wrote {len(labels)} templates to '{overlay.GLYPH_ATLAS_PATH}'")
 
-    verify_labeled_strips()
+    mismatch_count = verify_labeled_strips()
+    return 1 if mismatch_count else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
