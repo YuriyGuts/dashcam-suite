@@ -27,7 +27,8 @@ def import_trips(
     metadata_dir: Path,
     config: Config,
     min_trip_gap_hours: float,
-    job_count: int,
+    encode_job_count: int,
+    extract_job_count: int,
     dry_run: bool,
     check_readability: bool,
     suggest_names: bool,
@@ -47,7 +48,7 @@ def import_trips(
         metadata_dir=metadata_dir,
         config=config,
         min_trip_gap_hours=min_trip_gap_hours,
-        job_count=job_count,
+        job_count=encode_job_count,
         dry_run=dry_run,
         check_readability=check_readability,
     )
@@ -64,6 +65,7 @@ def import_trips(
         only=[],
         force=False,
         make_previews=False,
+        job_count=extract_job_count,
     )
 
     if osm.read_database_timestamp(metadata_dir) is None:

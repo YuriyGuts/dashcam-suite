@@ -48,7 +48,7 @@ def test_parse_command_line_args_encode_trips_uses_config_defaults(config, libra
     assert parsed_args.encode_mode == "trips"
     assert parsed_args.raw_video_dir == Path(config.raw_video_dir)
     assert parsed_args.min_trip_gap_hours == config.min_trip_gap_hours
-    assert parsed_args.job_count == config.job_count
+    assert parsed_args.job_count == config.encode_job_count
     assert parsed_args.library_dir == library_dir
 
 
@@ -328,6 +328,7 @@ def test_parse_command_line_args_extract_defaults(config, library_dir):
     assert parsed_args.library_dir == library_dir
     assert parsed_args.metadata_dir == library_dir / config.metadata_dir
     assert parsed_args.include == []
+    assert parsed_args.job_count == config.extract_job_count
     assert not parsed_args.reclean
 
 
@@ -349,6 +350,8 @@ def test_main_runs_extract_with_patterns(monkeypatch, config, recorded_calls):
             "--exclude",
             "*old*",
             "--previews",
+            "--job-count",
+            "8",
         ],
     )
 
@@ -360,6 +363,7 @@ def test_main_runs_extract_with_patterns(monkeypatch, config, recorded_calls):
     assert kwargs["include"] == ["2026-*", "2025-*"]
     assert kwargs["exclude"] == ["*old*"]
     assert kwargs["make_previews"] is True
+    assert kwargs["job_count"] == 8
 
 
 def test_main_runs_reclean(monkeypatch, config, recorded_calls):
@@ -481,7 +485,13 @@ def test_main_runs_import_with_metadata_inside_library_dir(
     exit_code = run_main(
         monkeypatch,
         config,
-        ["import", "-d", str(library_dir), "--raw-video-dir", "sd", "--job-count", "3"],
+        [
+            "import",
+            *["-d", str(library_dir)],
+            *["--raw-video-dir", "sd"],
+            *["--encode-job-count", "3"],
+            *["--extract-job-count", "7"],
+        ],
     )
 
     # THEN the directory is created and the metadata lives inside it
@@ -492,7 +502,8 @@ def test_main_runs_import_with_metadata_inside_library_dir(
     assert kwargs["library_dir"] == library_dir
     assert kwargs["metadata_dir"] == library_dir / config.metadata_dir
     assert kwargs["raw_video_dir"] == Path("sd")
-    assert kwargs["job_count"] == 3
+    assert kwargs["encode_job_count"] == 3
+    assert kwargs["extract_job_count"] == 7
     assert kwargs["suggest_names"] is True
     assert kwargs["check_readability"] is True
 
@@ -522,6 +533,8 @@ def test_main_runs_import_with_options(monkeypatch, config, recorded_calls, tmp_
     assert kwargs["suggest_names"] is False
     assert kwargs["dry_run"] is True
     assert kwargs["check_readability"] is False
+    assert kwargs["encode_job_count"] == config.encode_job_count
+    assert kwargs["extract_job_count"] == config.extract_job_count
 
 
 def test_main_exits_with_error_without_osm_data(monkeypatch, config, tmp_path):
@@ -623,7 +636,7 @@ def test_main_runs_config_with_file(monkeypatch, config, tmp_path, capsys):
     # THEN the overridden setting is marked
     output_lines = capsys.readouterr().out.splitlines()
     library_dir_line = next(line for line in output_lines if "library_dir" in line)
-    job_count_line = next(line for line in output_lines if "job_count" in line)
+    job_count_line = next(line for line in output_lines if "encode_job_count" in line)
     assert '"/srv/dashcam"' in library_dir_line
     assert "from the config file" in library_dir_line
     assert "from the config file" not in job_count_line

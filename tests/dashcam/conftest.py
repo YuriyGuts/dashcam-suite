@@ -110,7 +110,8 @@ def config():
         hwaccel_options="-hwaccel videotoolbox",
         video_codec_options="-c:v libx265 -crf 30 -preset fast",
         audio_codec_options="-c:a aac -b:a 128k",
-        job_count=2,
+        encode_job_count=2,
+        extract_job_count=4,
         min_trip_gap_hours=3,
     )
 

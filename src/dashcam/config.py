@@ -11,7 +11,8 @@ Example config file:
     raw_video_dir = "/media/me/DASHCAM/DCIM/Movie"
     hwaccel_options = "-hwaccel vulkan"
     video_codec_options = "-c:v libx265 -crf 28 -preset medium"
-    job_count = 3
+    encode_job_count = 2
+    extract_job_count = 6
     car_model = "Car"
 """
 
@@ -59,7 +60,10 @@ class Config:
     audio_codec_options: str
 
     # The maximum number of trips encoded in parallel.
-    job_count: int
+    encode_job_count: int
+
+    # The maximum number of videos extracted in parallel.
+    extract_job_count: int
 
     # The minimum time difference (in hours) between consecutive segments
     # for them to be considered separate trips.
@@ -89,7 +93,8 @@ def get_platform_defaults() -> Config:
         # seek, which takes up to a minute in a long trip.
         "video_codec_options": "-c:v libx265 -crf 30 -preset fast -x265-params open-gop=0",
         "audio_codec_options": "-c:a aac -b:a 128k",
-        "job_count": 2,
+        "encode_job_count": 1,
+        "extract_job_count": 10,
         "min_trip_gap_hours": 3,
         "car_model": "Car",
         "metadata_dir": ".metadata",

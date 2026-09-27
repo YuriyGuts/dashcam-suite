@@ -31,7 +31,8 @@ def run_import(tmp_path, config, metadata_dir, dry_run=False, suggest_names=True
         metadata_dir=metadata_dir,
         config=config,
         min_trip_gap_hours=3,
-        job_count=2,
+        encode_job_count=2,
+        extract_job_count=5,
         dry_run=dry_run,
         check_readability=True,
         suggest_names=suggest_names,
@@ -49,8 +50,10 @@ def test_import_trips_runs_all_steps(tmp_path, config, osm_metadata_dir, step_ca
     kwargs_by_step = dict(step_calls)
     assert kwargs_by_step["encode"]["library_dir"] == tmp_path / "videos"
     assert kwargs_by_step["encode"]["metadata_dir"] == osm_metadata_dir
+    assert kwargs_by_step["encode"]["job_count"] == 2
     assert kwargs_by_step["extract"]["library_dir"] == tmp_path / "videos"
     assert kwargs_by_step["extract"]["metadata_dir"] == osm_metadata_dir
+    assert kwargs_by_step["extract"]["job_count"] == 5
     assert kwargs_by_step["enrich"]["update_osm"] is False
     assert kwargs_by_step["rename"]["interactive"] is True
     assert kwargs_by_step["rename"]["include_all"] is False

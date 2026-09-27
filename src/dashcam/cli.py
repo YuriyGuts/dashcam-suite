@@ -67,7 +67,7 @@ METADATA_ONLY_COMMANDS = {"enrich", "forget"}
 
 
 def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config) -> None:
-    """Add the options that group raw videos into trips and set the parallelism."""
+    """Add the options that group raw videos into trips."""
     parser.add_argument(
         "--min-trip-gap-hours",
         metavar="TG",
@@ -79,16 +79,22 @@ def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config)
         required=False,
         default=config.min_trip_gap_hours,
     )
+
+
+def add_job_count_argument(
+    parser: argparse.ArgumentParser, option_name: str, what: str, default: int
+) -> None:
+    """Add an option that sets how many jobs run in parallel."""
     parser.add_argument(
-        "--job-count",
+        option_name,
         metavar="JC",
         help=(
-            "The maximum number of trips allowed to be encoded in parallel. "
+            f"The maximum number of {what} in parallel. "
             "Adjust this number to change system resource utilization."
         ),
         type=int,
         required=False,
-        default=config.job_count,
+        default=default,
     )
 
 
@@ -134,6 +140,9 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
         ),
     )
     add_trip_grouping_arguments(parser_trips_cmd, config)
+    add_job_count_argument(
+        parser_trips_cmd, "--job-count", "trips encoded", config.encode_job_count
+    )
 
     parser_range_cmd = subparsers.add_parser(
         name="range",
@@ -210,6 +219,9 @@ def add_extract_arguments(extract_parser: argparse.ArgumentParser, config: Confi
     """Add the arguments of the `extract` command."""
     add_library_dir_argument(extract_parser, config)
     add_metadata_dir_argument(extract_parser, config)
+    add_job_count_argument(
+        extract_parser, "--job-count", "videos extracted", config.extract_job_count
+    )
     extract_parser.add_argument(
         "--include",
         metavar="GLOB",
@@ -328,6 +340,12 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Encode new trips from the SD card, extract and enrich them, and suggest names.",
     )
     add_trip_grouping_arguments(import_parser, config)
+    add_job_count_argument(
+        import_parser, "--encode-job-count", "trips encoded", config.encode_job_count
+    )
+    add_job_count_argument(
+        import_parser, "--extract-job-count", "videos extracted", config.extract_job_count
+    )
     add_raw_video_arguments(import_parser, config)
     add_library_dir_argument(import_parser, config)
     add_metadata_dir_argument(import_parser, config)
@@ -529,6 +547,7 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
         only=parsed_args.only,
         force=parsed_args.force,
         make_previews=parsed_args.previews,
+        job_count=parsed_args.job_count,
     )
 
 
@@ -541,7 +560,8 @@ def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
         metadata_dir=parsed_args.metadata_dir,
         config=config,
         min_trip_gap_hours=parsed_args.min_trip_gap_hours,
-        job_count=parsed_args.job_count,
+        encode_job_count=parsed_args.encode_job_count,
+        extract_job_count=parsed_args.extract_job_count,
         dry_run=parsed_args.dry_run,
         check_readability=not parsed_args.skip_raw_video_validation,
         suggest_names=not parsed_args.no_rename,

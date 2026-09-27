@@ -28,7 +28,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Python project managed by `uv` with a local `.venv`. External requirement: `ffmpeg` and `ffprobe` (paths configurable).
 - `src/` layout, pytest, ruff (isort with one import per line), type annotations, `ty` type checking.
 - Code style follows the original `dashcam-encode` script.
-- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job count, trip gap, car model, camera time zone. `dashcam config` prints the config file path and the effective settings.
+- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone. `dashcam config` prints the config file path and the effective settings.
 - Directories:
   - `library_dir` and `raw_video_dir` in the config expand `~` and must be absolute. A relative `metadata_dir` in the config is relative to the library directory.
   - Paths given as options are ordinary shell paths, relative to the current directory.
@@ -47,12 +47,12 @@ Port of `dashcam-encode`.
 
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
 - `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
-- Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count`, `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
+- Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count` (trips only), `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
 - Encoded raw videos are logged by filename and size in `.metadata/encoded_segments.json` (logged by the parent process after each successful job). `trips` leaves logged videos out before grouping, so clips left on the card are not encoded again after their trip is renamed, and new clips recorded within the trip gap of an imported trip form a trip of their own. `range` encodes the selected videos regardless and logs them too.
 - Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). Existing outputs are skipped with a warning and never overwritten. Incomplete outputs never appear under the final name.
 
-### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews]`
+### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews] [--job-count JC]`
 
 - Glob patterns match filenames and may be repeated.
 - Probe: 10 frames spread over each new video are checked for a readable date/time field; at least 3 must have it. Videos without it, or narrower than 1280 px, are recorded as `no_overlay` and skipped until `--force`.
@@ -104,7 +104,7 @@ Port of `dashcam-encode`.
 
 ### `dashcam import`
 
-Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode trips` options plus `--metadata-dir` and `--no-rename`.
+Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts the `encode trips` options plus `--metadata-dir` and `--no-rename`, with `--encode-job-count` and `--extract-job-count` in place of `--job-count`.
 
 - `--dry-run` only prints the encoding plan.
 - Without OSM data, `enrich` and `rename` are skipped with a hint to run `enrich --update-osm`; the large download is never started implicitly.

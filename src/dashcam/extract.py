@@ -442,6 +442,7 @@ def extract_videos(
     only: list[str],
     force: bool,
     make_previews: bool,
+    job_count: int,
 ) -> int:
     """
     Extract tracks for new and changed videos, then rebuild the index.
@@ -477,7 +478,7 @@ def extract_videos(
 
     failed_count = skipped_count
     if job_defs:
-        process_count = min(config.job_count, len(job_defs))
+        process_count = min(job_count, len(job_defs))
         LOGGER.info(f"Processing {len(job_defs)} videos with {process_count} parallel jobs")
         with prevent_os_sleep():
             with worker_pool(process_count) as process_pool:

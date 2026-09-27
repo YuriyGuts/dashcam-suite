@@ -396,6 +396,7 @@ def test_extract_videos_extracts_new_videos_and_builds_index(
         only=[],
         force=False,
         make_previews=False,
+        job_count=2,
     )
 
     # THEN both are extracted and listed in the index
@@ -433,6 +434,7 @@ def test_extract_videos_with_only_forces_one_video(
         only=["2026-09-25 Trip B.mp4", "missing.mp4"],
         force=False,
         make_previews=False,
+        job_count=2,
     )
 
     # THEN only that video is extracted
@@ -460,6 +462,7 @@ def test_extract_videos_reports_failures(
         only=[],
         force=False,
         make_previews=False,
+        job_count=2,
     )
 
     # THEN the failure is counted and no track is written
@@ -485,6 +488,7 @@ def test_extract_videos_skips_too_long_names(
         only=[],
         force=False,
         make_previews=False,
+        job_count=2,
     )
 
     # THEN only the regular video is extracted, and the long name is reported as a failure
@@ -515,6 +519,7 @@ def test_extract_videos_makes_missing_previews(
         only=[],
         force=False,
         make_previews=True,
+        job_count=2,
     )
 
     # THEN only the preview is made

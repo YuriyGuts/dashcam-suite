@@ -59,14 +59,14 @@ def test_load_config_without_file(tmp_path):
 def test_load_config_applies_overrides(tmp_path):
     # GIVEN a config file overriding some settings
     config_path = tmp_path / "config.toml"
-    config_path.write_text('job_count = 5\ncar_model = "Outback"\n')
+    config_path.write_text('extract_job_count = 5\ncar_model = "Outback"\n')
 
     # WHEN loading the config
     loaded_config = config_module.load_config(config_path)
 
     # THEN the overrides are applied and the rest stays default
     defaults = config_module.get_platform_defaults()
-    assert loaded_config.job_count == 5
+    assert loaded_config.extract_job_count == 5
     assert loaded_config.car_model == "Outback"
     assert loaded_config.video_codec_options == defaults.video_codec_options
 

@@ -67,8 +67,9 @@ car_model = "Car"
 # A gap of at least this many hours between clips starts a new trip.
 min_trip_gap_hours = 3
 
-# Number of videos encoded or extracted in parallel. Tune to your CPU.
-job_count = 2
+# Number of trips encoded and videos extracted in parallel. Tune to your machine.
+encode_job_count = 1
+extract_job_count = 10
 
 # FFmpeg and FFprobe binaries to run.
 ffmpeg_executable = "ffmpeg"
