@@ -324,15 +324,6 @@ def fit_street_labels(stretches: list[NamedStretch], max_length: int) -> str:
     return STREET_SEPARATOR.join(labels[index] for index in sorted(kept_indexes))
 
 
-def format_fallback_name(current_name: str, start_time: datetime.datetime | None) -> str:
-    """Return `Trip HH-MM` from the trip start time, or else the current placeholder name."""
-    if start_time is not None:
-        return start_time.strftime("Trip %H-%M")
-    if PLACEHOLDER_NAME_PATTERN.match(current_name):
-        return current_name
-    return "Trip"
-
-
 def build_filename(
     date_text: str,
     streets_text: str,
@@ -359,6 +350,9 @@ def suggest_filename(
     """
     Suggest a filename for a trip that is not in `taken_stems` (compared in lowercase).
 
+    A trip without streets is named `Trip HH-MM` after its start time. A trip without streets
+    or any known time keeps its current name.
+
     Returns
     -------
     str
@@ -368,7 +362,10 @@ def suggest_filename(
     assert trip_name.date is not None
     date_text = trip_name.date.isoformat()
     stretches = select_named_stretches(track.streets)
-    fallback_text = format_fallback_name(trip_name.name, get_start_time(track))
+    start_time = get_start_time(track)
+    if not stretches and start_time is None:
+        return f"{Path(track.video_filename).stem}{extension}"
+    fallback_text = start_time.strftime("Trip %H-%M") if start_time is not None else ""
     clean_car_model = clean_filename_part(to_ascii(car_model))
 
     collision_number = 0

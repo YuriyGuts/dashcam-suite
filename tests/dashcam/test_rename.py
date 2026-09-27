@@ -204,16 +204,16 @@ def test_suggest_filename_without_car_model(
     assert filename == expected_filename
 
 
-@pytest.mark.parametrize("placeholder_name", ["Trip 11-17", "Trip 3"])
-def test_suggest_filename_without_time_keeps_placeholder(make_track, placeholder_name):
-    # GIVEN a video without an overlay, named by `encode`
-    track = make_track(video_filename=f"2026-09-25 {placeholder_name}.MOV", sample_count=0)
+@pytest.mark.parametrize("current_name", ["Trip 11-17", "Trip 3", "Lake House"])
+def test_suggest_filename_without_streets_or_time_keeps_current_name(make_track, current_name):
+    # GIVEN a video without an overlay
+    track = make_track(video_filename=f"2026-09-25 {current_name}.MOV", sample_count=0)
 
     # WHEN suggesting a name
     filename = rename.suggest_filename(track, "Car", ".MOV", taken_stems=set())
 
-    # THEN the placeholder name is kept, and so is the extension
-    assert filename == f"2026-09-25 {placeholder_name} (Car).MOV"
+    # THEN the current name is kept as it is
+    assert filename == f"2026-09-25 {current_name}.MOV"
 
 
 def test_suggest_filename_stays_within_length_limit(make_named_track):
@@ -345,6 +345,21 @@ def test_plan_renames_skips_trips_without_changes(library, add_named_trip):
     plans = rename.plan_renames(library_dir, store, "Car", include_all=True)
 
     # THEN nothing is planned
+    assert plans == []
+
+
+def test_plan_renames_all_keeps_names_of_trips_without_overlay(library, make_track):
+    # GIVEN a hand-named video without an overlay
+    library_dir, store = library
+    (library_dir / "2026-09-25 Lake House.mp4").write_bytes(b"video")
+    track = make_track(video_filename="2026-09-25 Lake House.mp4", sample_count=0)
+    track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
+    store.save_track(track)
+
+    # WHEN planning renames of all trips
+    plans = rename.plan_renames(library_dir, store, "Car", include_all=True)
+
+    # THEN its name is kept
     assert plans == []
 
 
