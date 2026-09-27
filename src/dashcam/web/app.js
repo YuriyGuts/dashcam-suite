@@ -1059,7 +1059,11 @@ function countTripsPerCell(routes) {
       cells.set(key, (cells.get(key) ?? 0) + 1);
     }
   }
-  const maxCount = Math.max(HEAT_MIN_SCALE_COUNT, ...cells.values());
+  // A loop, because spreading millions of cells into `Math.max` exceeds the argument limit.
+  let maxCount = HEAT_MIN_SCALE_COUNT;
+  for (const count of cells.values()) {
+    maxCount = Math.max(maxCount, count);
+  }
   return {cells, cellLat, cellLon, referenceLat, maxCount};
 }
 
