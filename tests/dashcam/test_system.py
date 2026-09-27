@@ -1,4 +1,6 @@
 import signal
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -100,14 +102,30 @@ def test_prevent_os_sleep_on_unsupported_platform(monkeypatch, started_processes
     assert started_processes == []
 
 
-def test_worker_pool_workers_ignore_ctrl_c():
+def test_worker_pool_workers_exit_quietly_on_ctrl_c():
     # GIVEN a worker pool
     with system.worker_pool(1) as process_pool:
         # WHEN asking a worker how it handles Ctrl+C
         handler = process_pool.apply(signal.getsignal, (signal.SIGINT,))
 
-    # THEN it ignores it, so that only this process reacts
-    assert handler == signal.SIG_IGN
+    # THEN it exits without a traceback
+    assert handler is system.exit_on_interrupt
+    with pytest.raises(SystemExit) as exc_info:
+        system.exit_on_interrupt(signal.SIGINT, None)
+    assert exc_info.value.code == system.INTERRUPTED_EXIT_CODE
+
+
+def test_worker_pool_programs_started_by_workers_stop_on_ctrl_c():
+    # GIVEN a worker pool
+    code = "import signal; print(signal.getsignal(signal.SIGINT) is signal.SIG_IGN)"
+    with system.worker_pool(1) as process_pool:
+        # WHEN a worker starts a program (as it starts ffmpeg)
+        output = process_pool.apply(
+            subprocess.check_output, ([sys.executable, "-c", code],), {"text": True}
+        )
+
+    # THEN the program does not inherit an ignored Ctrl+C
+    assert output.strip() == "False"
 
 
 def test_worker_pool_stops_log_forwarding_when_the_body_fails():

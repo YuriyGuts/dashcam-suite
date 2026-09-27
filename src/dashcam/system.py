@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import threading
+import types
 import typing as t
 
 from dashcam import terminal
@@ -21,14 +22,24 @@ FAILED_POOL_LOG_TIMEOUT_S = 5
 LOGGER = logging.getLogger(__name__)
 
 
+# Exit code of a worker stopped by Ctrl+C, as shells report it.
+INTERRUPTED_EXIT_CODE = 130
+
+
+def exit_on_interrupt(signal_number: int, frame: types.FrameType | None) -> None:
+    """Stop a worker process quietly on Ctrl+C, without a `KeyboardInterrupt` traceback."""
+    raise SystemExit(INTERRUPTED_EXIT_CODE)
+
+
 def initialize_worker(log_queue: multiprocessing.queues.SimpleQueue) -> None:
     """
-    Prepare a worker process: send its log records to the parent, and ignore Ctrl+C.
+    Prepare a worker process: send its log records to the parent, and exit quietly on Ctrl+C.
 
-    Ctrl+C reaches every process of the terminal. The parent stops the workers itself, so they
-    do not print tracebacks of their own.
+    Ctrl+C reaches every process of the terminal, and the parent reports the interruption. The
+    handler is a Python function rather than `SIG_IGN`, because programs that the worker starts
+    (e.g. ffmpeg) inherit an ignored signal, but get the default handling back for a handler.
     """
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGINT, exit_on_interrupt)
     terminal.configure_worker_logging(log_queue)
 
 
