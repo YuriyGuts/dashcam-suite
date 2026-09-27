@@ -13,9 +13,7 @@ the video again. The steps are:
 3. Reject segments whose camera clock shows a date too far from the date in the filename, and
    segments whose displayed speed does not match the speed implied by their coordinates.
    Consecutive segments without a teleport between them are grouped into places, and the
-   clock check is also applied to each place as a whole. A spoof often starts with the real
-   date and only later sets the camera clock to its own, so the first part of it is caught
-   this way.
+   clock check is also applied to each place as a whole.
 4. Keep the heaviest time-ordered chain of the remaining segments in which every segment is
    reachable from the previous one. Everything else is spoofed. This catches long spoofs in
    which the fake points agree with each other.
@@ -23,8 +21,6 @@ the video again. The steps are:
    video offset, anchored to the nearest good fix. Forward jumps of the camera clock (up to
    `MAX_MERGE_GAP_HOURS`) mark gaps between merged segments and are added to derived times.
    Derived times that cross samples without a trustworthy clock are flagged as estimated.
-   Clock arithmetic is done in UTC, so daylight saving time changes are not mistaken for gaps
-   (see `resolve_clock_instants`).
 6. Fill gaps of at most `MAX_INTERPOLATION_GAP_S` between good fixes by linear interpolation.
 
 Manual overrides from the track are applied on top: bad ranges are excluded before step 2,
@@ -520,6 +516,8 @@ def detect_good_fixes(parsed_samples: list[ParsedSample], overrides: Overrides) 
 
     segments = []
     for place in group_into_places(split_into_segments(parsed_samples), parsed_samples):
+        # A spoof often starts with the real date and only later sets the camera clock to its
+        # own, so its first part is only caught by checking the place as a whole.
         place_indexes = [index for segment in place for index in segment]
         if has_implausible_clock(place_indexes, parsed_samples):
             continue

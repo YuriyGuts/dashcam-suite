@@ -1,42 +1,4 @@
-r"""
-Command-line entry point of the `dashcam` tool.
-
-Usage examples:
----------------
-
-The raw video directory, the library directory, and the metadata directory default to the
-values in the config file (see `dashcam.config` and `dashcam config`).
-
-Encode all raw video files in the default raw video directory, group them into trips, and save
-each trip as a separate video file in the default library directory:
-> dashcam encode trips
-
-Encode all raw video files in the specified location, group them into trips
-where trips should be at least 8 hours apart, encode 3 trips in parallel:
-> dashcam encode trips --raw-video-dir "/media/me/DASHCAM/DCIM" \
-    --min-trip-gap-hours 8 --job-count 3
-
-Encode raw video files labeled from #15 to #319 and save them as a single video file named
-"YYYY-mm-dd Road Trip.mp4" (the date of #15) in the specified library directory:
-> dashcam encode range 15 319 --output-name "Road Trip" --library-dir ~/Videos/Dashcam
-
-Download the OpenStreetMap data, then match all tracks in the library to streets:
-> dashcam enrich --update-osm
-
-Suggest street-based names for the trips in ~/Videos/Dashcam still named "Trip HH-MM", and
-rename them after confirmation:
-> dashcam rename -d ~/Videos/Dashcam --suggest
-
-Import new trips from the SD card into the library: encode, extract, match streets, and
-suggest names:
-> dashcam import
-
-Browse the trips in the library on a map at http://127.0.0.1:8765/:
-> dashcam serve
-
-Show the config file path and the effective settings:
-> dashcam config
-"""
+"""Command-line entry point of the `dashcam` tool."""
 
 import argparse
 import dataclasses

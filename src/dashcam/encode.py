@@ -1,52 +1,29 @@
-r"""
+"""
 Concatenate and encode dashcam videos stored on an SD card.
 
-Assumes the raw videos are stored as `YYYYMMDDhhmmss_NNNNNN.MP4`, where the first part is
-the recording start time and `NNNNNN` is a sequential index. Files named differently are
-supported if their name ends with the index (e.g. `xxxx0042.avi`); their start time is then
-taken from the file modification time.
+Raw videos are collected from the input directory and all of its subdirectories. The tool can
+operate in two modes:
 
-The raw videos are collected from the input directory and all of its subdirectories, so that
-clips the camera moved to a locked `RO` folder are part of their trips. A clip found in more
-than one folder is taken from `RO`. Parking mode clips (`YYYYMMDDhhmmss_NNNNNNP.MP4`) are left
-out.
-
-The tool can operate in two modes:
-
-1) "trips" mode: encodes all videos in the input directory, organizing them into trips
-   according to the recording start times. Each logical trip will be encoded as a single
-   output video named after the trip start time.
+1) "trips" mode: groups the raw videos into trips by the gaps between their start times, and
+   encodes each trip as a single video named after its start time.
 
    Example (default trip gap = 3 hours):
 
-   Filename                               Date           Inferred Trip   Output File
-   /DCIM
-   |---/Movie
-   |-------/20230112152345_000001.MP4     Jan 12, 15:23  | => Trip 1  |  2023-01-12 Trip 15-23.mp4
-   |-------/20230112152445_000002.MP4     Jan 12, 15:24  | => Trip 1  |
-   |-------/20230112193820_000003.MP4     Jan 12, 19:38  | => Trip 2  |  2023-01-12 Trip 19-38.mp4
-   |-------/20230113101200_000004.MP4     Jan 13, 10:12  | => Trip 3  |  2023-01-13 Trip 10-12.mp4
-   |-------/20230113101300_000005.MP4     Jan 13, 10:13  | => Trip 3  |
+   20230112152345_000001.MP4    =>  2023-01-12 Trip 15-23.mp4
+   20230112152445_000002.MP4
+   20230112193820_000003.MP4    =>  2023-01-12 Trip 19-38.mp4
+   20230113101200_000004.MP4    =>  2023-01-13 Trip 10-12.mp4
+   20230113101300_000005.MP4
 
-2) "range" mode: selects all raw videos between the specified start/end index and
-   encodes them as a single output video.
+2) "range" mode: encodes all raw videos between the given start and end index as a single video.
 
    Example ("range 3 6"):
 
-   /DCIM
-   |---/Movie
-   |-------/20230112152345_000001.MP4
-   |-------/20230112152445_000003.MP4     <= These videos
-   |-------/20230112193820_000004.MP4     <= will be selected
-   |-------/20230113101200_000006.MP4     <= and merged
-   |-------/20230113101300_000007.MP4
-
-Existing output videos are never overwritten. While a video is being encoded, it is written
-under a temporary name, so an interrupted run never leaves an incomplete video behind.
-
-Encoded raw videos are logged by filename and size in the metadata directory. The "trips" mode
-skips them, so raw videos left on the SD card are not encoded again after their trip has been
-renamed. The "range" mode encodes the selected videos regardless.
+   20230112152345_000001.MP4
+   20230112152445_000003.MP4    <= These videos
+   20230112193820_000004.MP4    <= will be selected
+   20230113101200_000006.MP4    <= and merged
+   20230113101300_000007.MP4
 """
 
 import contextlib
@@ -129,7 +106,12 @@ class Trip:
 
 @dataclasses.dataclass
 class EncodedSegmentLog:
-    """Raw videos that have been encoded, with their sizes in bytes, keyed by filename."""
+    """
+    Raw videos that have been encoded, with their sizes in bytes, keyed by filename.
+
+    The "trips" mode skips them, so that raw videos left on the SD card are not encoded again
+    after their trip has been renamed.
+    """
 
     path: Path
     sizes: dict[str, int]

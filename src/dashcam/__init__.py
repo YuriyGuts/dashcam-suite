@@ -1,1 +1,1 @@
-"""Dashcam video toolkit: merge SD card segments, extract GPS tracks, and visualize routes."""
+"""Dashcam video toolkit: merge SD card clips, extract GPS coordinates, and visualize routes."""

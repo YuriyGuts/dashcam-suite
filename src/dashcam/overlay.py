@@ -15,7 +15,7 @@ padded. It looks for these tokens anywhere along the line:
 
 Every character position along the line is compared against glyph templates using normalized
 cross-correlation. Only the glyph fill and its thin dark outline take part in the comparison,
-so the result does not depend on the background behind the text (night sky, snow, sun glare).
+so the result does not depend on the background behind the text.
 Each token pattern is then matched at every horizontal position, with its characters one cell
 pitch apart and each cell allowed a small shift. Constraining every cell to the characters its
 pattern allows there (a digit, a hemisphere letter, a separator) rules out misplaced

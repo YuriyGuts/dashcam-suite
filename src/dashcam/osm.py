@@ -1,20 +1,9 @@
 """
 Download OpenStreetMap data and keep only what map matching needs.
 
-The Geofabrik extract (several hundred MB) is filtered down to named drivable roads and
-localities (cities, towns, villages, hamlets), which are stored in a SQLite database with
-R*Tree spatial indexes:
-
-    meta                 Key-value pairs: format version, OSM data timestamp, source.
-    roads                One row per distinct set of road tags (name, name:en, ref, highway).
-    road_chunks          Road geometry: each OSM way is cut into short polylines, so that the
-                         bounding boxes in the spatial index stay small.
-    road_chunk_index     R*Tree over the chunk bounding boxes.
-    localities           Place nodes with their names and population.
-    locality_index       R*Tree over the locality points.
-
-Coordinates in chunks are packed as little-endian int32 pairs (lat, lon) in units of 1e-7
-degrees, the precision of OSM itself.
+The Geofabrik extract is filtered down to named drivable roads and localities, which are stored
+in a SQLite database with R*Tree spatial indexes. Coordinates in road chunks are packed as
+little-endian int32 pairs (lat, lon), scaled by `COORDINATE_SCALE`.
 """
 
 import array
@@ -76,7 +65,8 @@ DRIVABLE_HIGHWAY_CLASSES = frozenset(
 # Place types kept as localities.
 LOCALITY_PLACE_TYPES = frozenset(["city", "town", "village", "hamlet"])
 
-# The largest number of nodes in one road chunk.
+# The largest number of nodes in one road chunk. Short chunks keep the bounding boxes in the
+# spatial index small.
 CHUNK_NODE_COUNT = 8
 
 # OSM coordinates are fixed-point numbers with 7 decimal places.

@@ -1,31 +1,8 @@
 """
 Serve the trip visualizer: a static web app, the trip index, tracks, previews, and videos.
 
-Routes:
-
-    /                        The web app (`dashcam/web`).
-    /api/trips               The trip index, with the video and preview availability of each trip.
-    /api/geometry            Simplified routes of all trips, for the coverage mode.
-    /api/suggestion?id=ID    The suggested new filename of a trip (see `dashcam.rename`).
-    POST /api/rename         Rename a trip: `{"id": ID, "filename": NEW_FILENAME}`.
-    /tracks/<stem>.json      Track files.
-    /previews/<stem>.mp4     Previews.
-    /videos/<filename>       Trip videos from the library directory.
-
 Files are served with HTTP range requests (`206 Partial Content`), which browsers need to seek
 in videos.
-
-The server binds to `127.0.0.1` by default, so it is only reachable from this machine. Every
-request must address the server by a loopback name. On other addresses, IP addresses, mDNS names
-(`*.local`) and this machine's host name are accepted too. A DNS rebinding attack always
-addresses the server by the attacker's domain name, so it is refused.
-
-Renaming is enabled on a loopback address, or on any address with `--allow-rename`. It is only
-accepted for requests from the web app itself: they must send JSON (which other websites cannot
-do without a CORS preflight that the server does not allow) and come from the same origin.
-
-Usage example:
-> dashcam serve -d ~/Videos/Dashcam --port 8765
 """
 
 import http.server
@@ -526,6 +503,8 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
     def check_rename_request(self) -> tuple[int, str] | None:
         """
         Check that renaming is enabled and that the request comes from the web app.
+
+        Other websites cannot send JSON without a CORS preflight, which the server does not allow.
 
         Returns
         -------

@@ -1,7 +1,7 @@
 [project]
 name = "dashcam-suite"
 version = "0.1.0"
-description = "Dashcam video toolkit: merge SD card segments, extract GPS tracks from the overlay, and visualize routes."
+description = "Dashcam video toolkit: merge SD card clips, extract GPS coordinates, and visualize routes."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

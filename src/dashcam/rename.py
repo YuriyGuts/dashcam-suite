@@ -5,7 +5,8 @@ A suggested name looks like `2026-09-25 Ivana Franka, Vasylia Stusa (Car).mp4`, 
 model suffix is left out if no car model is configured:
 
 * The date comes from the current video filename.
-* Streets are listed in travel order. Stretches under 300 m and consecutive repeats are dropped.
+* Streets are listed in travel order. Stretches under `MIN_NAMED_STRETCH_M` and consecutive
+  repeats are dropped.
   If the name gets too long, the first, the last, and the longest streets in between are kept.
 * A street is named by OSM `name:en`, or else by the KMU 2010 transliteration of `name`, with
   street-type words ("vulytsia", "Street", ...) dropped. Motorways, trunks, and roads without a

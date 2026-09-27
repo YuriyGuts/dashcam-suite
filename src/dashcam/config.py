@@ -4,17 +4,6 @@ Per-machine configuration.
 Defaults depend on the platform and can be overridden in a TOML file located at
 `<user config dir>/dashcam/config.toml` (e.g. `~/.config/dashcam/config.toml` on Linux),
 or at the path given by the `DASHCAM_CONFIG` environment variable.
-
-Example config file:
-
-    library_dir = "~/Videos/Dashcam"
-    raw_video_dir = "/media/me/DASHCAM/DCIM"
-    hwaccel_options = "-hwaccel vulkan"
-    video_codec_options = "-c:v libx265 -crf 28 -preset medium"
-    encode_job_count = 2
-    extract_job_count = 6
-    car_model = "Car"
-    allowed_areas = [[44.0, 22.0, 52.5, 40.5]]
 """
 
 import dataclasses

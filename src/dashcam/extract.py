@@ -3,8 +3,7 @@ Extract GPS tracks from the overlay of trip videos.
 
 For every video in the library directory:
 
-* A video whose track is up to date is skipped. The size and modification time are compared
-  first, and the content fingerprint only when they differ.
+* A video whose track is up to date is skipped.
 * A video without a track of the same name is fingerprinted. If an existing track has the same
   fingerprint, the video was renamed: the track (and its preview) are renamed, with no OCR.
 * A video whose content changed gets a new track. The old one is moved to the trash.

@@ -2,8 +2,7 @@
 Import trips from the SD card in one go: `encode trips`, `extract`, `enrich`, and `rename`.
 
 Each step is incremental, so importing again after an interruption only does what is left.
-Enrichment and renaming are skipped with a warning when there is no OSM data yet, since the
-download is large and should be started on purpose (`dashcam enrich --update-osm`).
+Enrichment and renaming are skipped with a warning when there is no OSM data yet.
 """
 
 import logging
