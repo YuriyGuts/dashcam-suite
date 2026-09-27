@@ -738,6 +738,18 @@ def test_get_trips_reports_library_dir(app, library_dir, add_track):
     assert index["library_dir"] == str(library_dir.resolve())
 
 
+def test_get_trips_hides_library_dir_from_the_network(library_dir, store, add_track):
+    # GIVEN a track, and an app that other devices on the network may use
+    add_track()
+    app = serve.VisualizerApp(library_dir, store.root, allow_network_hosts=True)
+
+    # WHEN listing the trips
+    index = app.get_trips()
+
+    # THEN the local path of the library is not revealed
+    assert "library_dir" not in index
+
+
 def test_warn_about_library_when_no_video_is_found(app, add_track, caplog):
     # GIVEN tracks, none of whose videos is in the library directory
     add_track("2026-09-25 Trip.mp4")

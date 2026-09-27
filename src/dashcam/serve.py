@@ -292,9 +292,11 @@ class VisualizerApp:
 
         `video_url` and `preview_url` are null when the file is not available. `streets` lists
         the street names of the trip in travel order. `library_dir` is where videos are looked up.
+        It is left out when other devices may connect, since the path reveals the user name.
         """
         index = self.load_index()
-        index["library_dir"] = str(self.library_dir.resolve())
+        if not self.allow_network_hosts:
+            index["library_dir"] = str(self.library_dir.resolve())
         index["can_rename"] = self.allow_rename
         # One listing per directory, instead of a lookup per trip, which is slow on network drives.
         video_filenames = list_filenames(self.library_dir)
