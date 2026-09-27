@@ -298,20 +298,20 @@ def test_open_database_in_directory_with_uri_characters(tmp_path, osm_pbf_path):
     [
         (
             PurePosixPath("/home/me/Dashcam/.metadata/osm/roads.sqlite"),
-            "file:///home/me/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+            "file:///home/me/Dashcam/.metadata/osm/roads.sqlite?mode=ro&immutable=1",
         ),
         (
             PureWindowsPath(r"M:\Dashcam\.metadata\osm\roads.sqlite"),
-            "file:///M:/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+            "file:///M:/Dashcam/.metadata/osm/roads.sqlite?mode=ro&immutable=1",
         ),
         # A mapped network drive can resolve to its UNC path.
         (
             PureWindowsPath(r"\\192.168.1.5\share\Dashcam\.metadata\osm\roads.sqlite"),
-            "file:////192.168.1.5/share/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+            "file:////192.168.1.5/share/Dashcam/.metadata/osm/roads.sqlite?mode=ro&immutable=1",
         ),
         (
             PurePosixPath("/home/me/trips #1 ?%/roads.sqlite"),
-            "file:///home/me/trips%20%231%20%3F%25/roads.sqlite?mode=ro",
+            "file:///home/me/trips%20%231%20%3F%25/roads.sqlite?mode=ro&immutable=1",
         ),
     ],
 )

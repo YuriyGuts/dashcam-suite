@@ -567,12 +567,16 @@ def get_read_only_database_uri(database_path: PurePath) -> str:
     """
     Return the SQLite URI that opens a database file (an absolute path) read-only.
 
+    The database is only ever replaced as a whole, never changed in place, so it is opened as
+    immutable. SQLite then skips the file locks and change checks of every query, each of which
+    is a round trip to the server when the metadata directory is on a network drive.
+
     SQLite refuses a URI with a host name, so a UNC path (`\\\\server\\share\\...`) keeps its
     slashes in the path of the URI: `file:////server/share/...`.
     """
     posix_path = database_path.as_posix()
     root_slash = "" if posix_path.startswith("/") else "/"
-    return f"file://{root_slash}{urllib.parse.quote(posix_path, safe='/:')}?mode=ro"
+    return f"file://{root_slash}{urllib.parse.quote(posix_path, safe='/:')}?mode=ro&immutable=1"
 
 
 class RoadDatabase:
