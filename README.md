@@ -19,7 +19,7 @@ TODO: Screenshot.
 
 ## Requirements
 
-- Linux or macOS. Windows might work but has never been tried.
+- Linux, macOS, or Windows.
 - Python 3.12 or newer and [uv](https://docs.astral.sh/uv/).
 - [FFmpeg](https://ffmpeg.org/) in `PATH`, built with `libx265`.
 
@@ -40,6 +40,7 @@ All settings can be supplied via command line flags. You can also configure pers
 
 - Linux: `~/.config/dashcam/config.toml`
 - macOS: `~/Library/Application Support/dashcam/config.toml`
+- Windows: `C:\Users\<you>\AppData\Local\dashcam\config.toml`
 
 Set the `DASHCAM_CONFIG` environment variable to use a different file.
 
@@ -49,6 +50,8 @@ Here is a full config with the default values:
 
 ```toml
 # Where the merged, encoded trip videos will go.
+# On Windows, escape backslashes in double quotes ("D:\\Videos\\Dashcam")
+# or use single quotes ('D:\Videos\Dashcam').
 library_dir = "~/Videos/Dashcam"
 
 # The clip directory on the dashcam's SD card.

@@ -129,7 +129,7 @@ def get_config_path() -> Path:
     custom_path = os.environ.get(CONFIG_PATH_ENV_VAR)
     if custom_path:
         return Path(custom_path)
-    return platformdirs.user_config_path("dashcam") / CONFIG_FILENAME
+    return platformdirs.user_config_path("dashcam", appauthor=False) / CONFIG_FILENAME
 
 
 def read_config_file(config_path: Path) -> dict[str, t.Any]:
