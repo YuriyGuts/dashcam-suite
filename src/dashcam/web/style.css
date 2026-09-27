@@ -44,7 +44,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root {
     color-scheme: dark;
     --bg: #0c111d;
     --surface: #161b26;
@@ -72,35 +72,6 @@
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 12px 16px -4px rgba(0, 0, 0, 0.45);
   }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0c111d;
-  --surface: #161b26;
-  --surface-hover: #1f242f;
-  --surface-sunken: #0c111d;
-  --border: #1f242f;
-  --border-strong: #333741;
-  --text: #f5f5f6;
-  --text-secondary: #cecfd2;
-  --text-muted: #94969c;
-  --text-faint: #85888e;
-  --primary: #6172f3;
-  --primary-hover: #8098f9;
-  --primary-soft: rgba(97, 114, 243, 0.14);
-  --primary-ring: rgba(97, 114, 243, 0.28);
-  --success-bg: rgba(23, 178, 106, 0.12);
-  --success-border: rgba(23, 178, 106, 0.35);
-  --success-text: #47cd89;
-  --warning-bg: rgba(247, 144, 9, 0.12);
-  --warning-border: rgba(247, 144, 9, 0.35);
-  --warning-text: #fdb022;
-  --error-bg: rgba(240, 68, 56, 0.12);
-  --error-border: rgba(240, 68, 56, 0.35);
-  --error-text: #f97066;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 12px 16px -4px rgba(0, 0, 0, 0.45);
 }
 
 *,
@@ -1139,6 +1110,7 @@ h1 {
   filter: saturate(0.5) brightness(1.06) contrast(0.85);
 }
 
+/* Controls on the map keep light colors in both themes, like the basemap they sit on. */
 .leaflet-bar {
   border: 1px solid #d0d5dd !important;
   border-radius: var(--radius) !important;
