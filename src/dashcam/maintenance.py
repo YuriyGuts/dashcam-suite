@@ -129,7 +129,7 @@ def print_status(library_dir: Path, metadata_dir: Path) -> None:
     unprocessed_names = sorted(
         path.name
         for stem, path in scan.video_paths_by_stem.items()
-        if stem not in scan.tracks_by_stem
+        if stem not in scan.tracks_by_stem and stem not in scan.unreadable_tracks
     )
 
     print_section_title("Trips", len(trip_rows))
@@ -290,6 +290,9 @@ def check_videos(
                     f"Video '{video_path.name}' has a name that is too long: {length_problem}",
                 )
             )
+            continue
+        # An unreadable track is reported by `check_tracks`, and `extract` leaves its video alone.
+        if stem in scan.unreadable_tracks:
             continue
         if stem not in scan.tracks_by_stem and stem in declared_stems:
             continue

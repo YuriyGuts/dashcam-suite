@@ -451,7 +451,7 @@ def test_make_extract_job_for_new_video(tmp_path, config):
     assert job_def.make_preview
 
 
-def test_plan_extraction_skips_unreadable_tracks(store, make_video_file):
+def test_plan_extraction_skips_video_with_unreadable_track(store, make_video_file, caplog):
     # GIVEN a video whose track file is broken
     video_path = make_video_file("2026-09-25 Trip.mp4")
     store.track_path(video_path.stem).write_text("{", encoding="utf-8")
@@ -459,8 +459,53 @@ def test_plan_extraction_skips_unreadable_tracks(store, make_video_file):
     # WHEN planning
     planned = extract.plan_extraction([video_path], store, force=False)
 
-    # THEN the video is extracted again
-    assert [item.video_path for item in planned] == [video_path]
+    # THEN the video is left alone and the user is pointed to the doctor
+    assert planned == []
+    assert "Not extracting '2026-09-25 Trip.mp4'" in caplog.text
+    assert "dashcam doctor" in caplog.text
+
+
+def test_plan_extraction_with_force_skips_video_with_unreadable_track(store, make_video_file):
+    # GIVEN a video whose track file is broken
+    video_path = make_video_file("2026-09-25 Trip.mp4")
+    store.track_path(video_path.stem).write_text("{", encoding="utf-8")
+
+    # WHEN planning with force
+    planned = extract.plan_extraction([video_path], store, force=True)
+
+    # THEN the video is still left alone
+    assert planned == []
+
+
+def test_extract_videos_keeps_unreadable_track(
+    config,
+    library_dir,
+    store,
+    make_video_file,
+    fake_extract_video,
+    serial_extract_pool,
+):
+    # GIVEN a video whose track has a broken hand edit
+    video_path = make_video_file("2026-09-25 Trip.mp4")
+    broken_text = '{"overrides": {"bad_ranges_s": [[10, 20]],}}'
+    store.track_path(video_path.stem).write_text(broken_text, encoding="utf-8")
+
+    # WHEN extracting only that video
+    extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=[],
+        exclude=[],
+        only=[video_path.name],
+        force=False,
+        make_previews=True,
+        job_count=1,
+    )
+
+    # THEN nothing is extracted and the track file is untouched
+    assert fake_extract_video == []
+    assert store.track_path(video_path.stem).read_text(encoding="utf-8") == broken_text
 
 
 @pytest.fixture

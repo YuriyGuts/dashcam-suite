@@ -369,6 +369,8 @@ def plan_extraction(
     Renamed videos get their tracks renamed. Changed videos get their old tracks moved to the
     trash. A track is only taken over by a video with the same content if its own video is not
     among `library_stems`, the stems of all videos in the library (by default, of `video_paths`).
+    Videos whose track file cannot be read are skipped, even with `force`, so that a broken hand
+    edit is never overwritten.
 
     Returns
     -------
@@ -376,6 +378,7 @@ def plan_extraction(
         The videos to extract.
     """
     tracks_by_stem = store.load_tracks_by_stem()
+    unreadable_stems = {path.stem for path in store.list_track_paths()} - tracks_by_stem.keys()
     present_stems = library_stems if library_stems is not None else {p.stem for p in video_paths}
     stems_by_fingerprint = {track.fingerprint: stem for stem, track in tracks_by_stem.items()}
 
@@ -383,6 +386,12 @@ def plan_extraction(
     progress_logger = terminal.ItemProgressLogger(LOGGER, "Checking videos", len(video_paths))
     for checked_count, video_path in enumerate(video_paths, start=1):
         progress_logger.update(checked_count - 1)
+        if video_path.stem in unreadable_stems:
+            LOGGER.warning(
+                f"Not extracting '{video_path.name}', so that its unreadable track is not "
+                f"overwritten (fix or delete the track, see `dashcam doctor`)"
+            )
+            continue
         stat = video_path.stat()
         track = tracks_by_stem.get(video_path.stem)
 

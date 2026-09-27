@@ -87,6 +87,21 @@ def test_run_doctor_reports_unreadable_track(library_dir, store, caplog):
     assert "line 2" in caplog.text
 
 
+def test_run_doctor_does_not_suggest_extracting_video_with_unreadable_track(
+    library_dir, store, caplog
+):
+    # GIVEN a video whose track file is broken
+    (library_dir / "2026-09-25 Trip.mp4").write_bytes(b"video")
+    store.track_path("2026-09-25 Trip").write_text("{", encoding="utf-8")
+
+    # WHEN running the doctor
+    error_count = run_doctor(library_dir, store)
+
+    # THEN only the broken track is reported
+    assert error_count == 1
+    assert "has no track" not in caplog.text
+
+
 def test_run_doctor_fixes_track_filename(library_dir, store, add_trip):
     # GIVEN a track file renamed by hand so that it no longer matches its video
     add_trip("2026-09-25 Trip.mp4")
@@ -422,6 +437,20 @@ def test_print_status(library_dir, store, add_trip, make_track, capsys):
     assert "Videos not extracted yet" in output and "2026-09-26 New.mp4" in output
     assert "Videos without an overlay" in output and "2019-01-01 Old Camera.mp4" in output
     assert "not in" in output and "2026-01-01 Deleted.mp4" in output
+
+
+def test_print_status_lists_video_with_unreadable_track_once(library_dir, store, capsys):
+    # GIVEN a video whose track file is broken
+    (library_dir / "2026-09-25 Trip.mp4").write_bytes(b"video")
+    store.track_path("2026-09-25 Trip").write_text("{", encoding="utf-8")
+
+    # WHEN printing the status
+    maintenance.print_status(library_dir, store.root)
+
+    # THEN the track is listed as unreadable, and the video is not listed as not extracted
+    output = capsys.readouterr().out
+    assert "Unreadable tracks" in output
+    assert "Videos not extracted yet" not in output
 
 
 def test_format_duration():
