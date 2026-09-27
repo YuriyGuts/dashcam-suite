@@ -23,6 +23,7 @@ import os
 import sys
 import tomllib
 import typing as t
+import zoneinfo
 from pathlib import Path
 
 import platformdirs
@@ -36,6 +37,12 @@ CONFIG_FILENAME = "config.toml"
 # Directory settings in which `~` is expanded, and those of them that must be absolute.
 PATH_SETTINGS = ("library_dir", "raw_video_dir", "metadata_dir")
 ABSOLUTE_PATH_SETTINGS = ("library_dir", "raw_video_dir")
+
+# How the expected type of a setting is described in error messages.
+TYPE_DESCRIPTIONS = {str: "a string", int: "an integer", float: "a number"}
+
+# Settings that must be at least 1.
+POSITIVE_INT_SETTINGS = ("encode_job_count", "extract_job_count")
 
 # Latitude and longitude limits of an allowed area.
 MAX_ABS_LAT = 90
@@ -142,6 +149,49 @@ def get_config_path() -> Path:
     return platformdirs.user_config_path("dashcam", appauthor=False) / CONFIG_FILENAME
 
 
+def is_of_type(value: t.Any, expected_type: type) -> bool:
+    """Check a TOML value against a setting type, where an integer also counts as a number."""
+    if isinstance(value, bool):
+        return False
+    if expected_type is float:
+        return isinstance(value, int | float)
+    return isinstance(value, expected_type)
+
+
+def validate_setting_values(overrides: dict[str, t.Any], config_path: Path) -> None:
+    """
+    Check the types and ranges of the scalar settings, and that the time zone exists.
+
+    Raises
+    ------
+    ValueError
+        If a setting has the wrong type or an invalid value.
+    """
+    field_types = t.get_type_hints(Config)
+    for setting, value in overrides.items():
+        # `str | None` settings may only be set to strings, since TOML has no null.
+        expected_type = str if field_types[setting] == str | None else field_types[setting]
+        if expected_type not in TYPE_DESCRIPTIONS:
+            continue
+        if not is_of_type(value, expected_type):
+            raise ValueError(
+                f"'{setting}' in '{config_path}' must be {TYPE_DESCRIPTIONS[expected_type]}"
+            )
+
+    for setting in POSITIVE_INT_SETTINGS:
+        if setting in overrides and overrides[setting] < 1:
+            raise ValueError(f"'{setting}' in '{config_path}' must be at least 1")
+    if "min_trip_gap_hours" in overrides and overrides["min_trip_gap_hours"] <= 0:
+        raise ValueError(f"'min_trip_gap_hours' in '{config_path}' must be positive")
+    if "timezone" in overrides:
+        try:
+            zoneinfo.ZoneInfo(overrides["timezone"])
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"Unknown time zone '{overrides['timezone']}' in '{config_path}'"
+            ) from exc
+
+
 def validate_allowed_areas(allowed_areas: t.Any, config_path: Path) -> None:
     """
     Check that `allowed_areas` is a list of `[min_lat, min_lon, max_lat, max_lon]` boxes.
@@ -188,19 +238,23 @@ def read_config_file(config_path: Path) -> dict[str, t.Any]:
     Raises
     ------
     ValueError
-        If the config file contains unknown settings, relative directory paths, or malformed
-        allowed areas.
+        If the config file is not valid TOML, or contains unknown settings, values of the wrong
+        type, relative directory paths, or malformed allowed areas.
     """
     if not config_path.is_file():
         return {}
 
     with config_path.open("rb") as fp:
-        overrides = tomllib.load(fp)
+        try:
+            overrides = tomllib.load(fp)
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"Invalid TOML in '{config_path}': {exc}") from exc
 
     known_settings = {field.name for field in dataclasses.fields(Config)}
     unknown_settings = sorted(set(overrides) - known_settings)
     if unknown_settings:
         raise ValueError(f"Unknown settings in '{config_path}': {', '.join(unknown_settings)}")
+    validate_setting_values(overrides, config_path)
 
     for setting in PATH_SETTINGS:
         if setting not in overrides:
@@ -223,8 +277,7 @@ def load_config(config_path: Path | None = None) -> Config:
     Raises
     ------
     ValueError
-        If the config file contains unknown settings, relative directory paths, or malformed
-        allowed areas.
+        If the config file is invalid (see `read_config_file`).
     """
     if config_path is None:
         config_path = get_config_path()

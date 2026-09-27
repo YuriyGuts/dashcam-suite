@@ -82,6 +82,56 @@ def test_load_config_with_unknown_setting(tmp_path):
         config_module.load_config(config_path)
 
 
+def test_load_config_with_invalid_toml(tmp_path):
+    # GIVEN a config file with a syntax error
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("library_dir = /videos\n")
+
+    # WHEN loading the config
+    # THEN it fails and names the file
+    with pytest.raises(ValueError, match="Invalid TOML in .*config.toml"):
+        config_module.load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("setting_text", "message"),
+    [
+        ('encode_job_count = "2"', "'encode_job_count' .* must be an integer"),
+        ("extract_job_count = 2.5", "'extract_job_count' .* must be an integer"),
+        ("extract_job_count = true", "'extract_job_count' .* must be an integer"),
+        ("encode_job_count = 0", "'encode_job_count' .* must be at least 1"),
+        ('min_trip_gap_hours = "3"', "'min_trip_gap_hours' .* must be a number"),
+        ("min_trip_gap_hours = 0", "'min_trip_gap_hours' .* must be positive"),
+        ("library_dir = 5", "'library_dir' .* must be a string"),
+        ("car_model = []", "'car_model' .* must be a string"),
+        ('timezone = "Europe/Atlantis"', "Unknown time zone 'Europe/Atlantis'"),
+        ('timezone = "../etc"', "Unknown time zone '../etc'"),
+    ],
+)
+def test_load_config_with_invalid_value(tmp_path, setting_text, message):
+    # GIVEN a config file with a value of the wrong type or out of range
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(setting_text + "\n")
+
+    # WHEN loading the config
+    # THEN it fails and names the setting
+    with pytest.raises(ValueError, match=message):
+        config_module.load_config(config_path)
+
+
+def test_load_config_accepts_integer_trip_gap_and_valid_time_zone(tmp_path):
+    # GIVEN a config file with an integer trip gap and a valid time zone
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('min_trip_gap_hours = 2\ntimezone = "America/New_York"\n')
+
+    # WHEN loading the config
+    config = config_module.load_config(config_path)
+
+    # THEN both are applied
+    assert config.min_trip_gap_hours == 2
+    assert config.timezone == "America/New_York"
+
+
 def test_load_config_with_allowed_areas(tmp_path):
     # GIVEN a config file with two allowed areas
     config_path = tmp_path / "config.toml"
