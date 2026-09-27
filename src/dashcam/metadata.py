@@ -96,6 +96,25 @@ def get_partial_path(path: Path) -> Path:
     return path.with_name(f"{PARTIAL_FILE_PREFIX}{secrets.token_hex(4)}{PARTIAL_FILE_SUFFIX}")
 
 
+def write_text_atomically(path: Path, text: str) -> None:
+    """
+    Write a text file so that an interruption or a power loss never leaves it truncated.
+
+    The text goes to a temporary file next to `path`, which is flushed to the disk and then
+    renamed over `path`.
+    """
+    partial_path = get_partial_path(path)
+    try:
+        with partial_path.open("w", encoding="utf-8") as fp:
+            fp.write(text)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(partial_path, path)
+    except BaseException:
+        partial_path.unlink(missing_ok=True)
+        raise
+
+
 def get_max_video_filename_bytes(extension: str) -> int:
     """Return the longest video filename whose track and preview filenames fit the limit."""
     longest_extension_length = max(len(TRACK_EXTENSION), len(PREVIEW_EXTENSION), len(extension))
@@ -661,9 +680,7 @@ class MetadataStore:
 
     def write_track_file(self, track: Track, path: Path) -> None:
         """Write a track to the given path atomically."""
-        partial_path = get_partial_path(path)
-        partial_path.write_text(dump_track(track), encoding="utf-8")
-        os.replace(partial_path, path)
+        write_text_atomically(path, dump_track(track))
 
     def move_to_trash(self, stem: str) -> list[Path]:
         """
@@ -803,6 +820,4 @@ class MetadataStore:
             (self.geometry_path, json.dumps(geometry, ensure_ascii=False, separators=(",", ":"))),
             (self.index_path, json.dumps(index, indent=2, ensure_ascii=False)),
         ]:
-            partial_path = get_partial_path(path)
-            partial_path.write_text(text + "\n", encoding="utf-8")
-            os.replace(partial_path, path)
+            write_text_atomically(path, text + "\n")

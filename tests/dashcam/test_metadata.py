@@ -734,3 +734,35 @@ def test_find_videos_announces_the_scan(tmp_path, monkeypatch, caplog):
 
     # THEN the scan is logged before the directory is listed
     assert messages_before_listing == [f"Scanning '{tmp_path}' for videos"]
+
+
+def test_write_text_atomically_replaces_the_file(tmp_path):
+    # GIVEN an existing file
+    path = tmp_path / "index.json"
+    path.write_text("old", encoding="utf-8")
+
+    # WHEN writing it atomically
+    metadata.write_text_atomically(path, "new")
+
+    # THEN it has the new text, and no temporary file is left
+    assert path.read_text(encoding="utf-8") == "new"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+def test_write_text_atomically_keeps_the_old_file_on_failure(tmp_path, monkeypatch):
+    # GIVEN an existing file, and a disk that fails to flush
+    path = tmp_path / "index.json"
+    path.write_text("old", encoding="utf-8")
+
+    def failing_fsync(file_descriptor):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(metadata.os, "fsync", failing_fsync)
+
+    # WHEN writing it atomically
+    with pytest.raises(OSError, match="disk full"):
+        metadata.write_text_atomically(path, "new")
+
+    # THEN the old text is kept, and no temporary file is left
+    assert path.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.iterdir()) == [path]

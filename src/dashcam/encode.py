@@ -48,7 +48,6 @@ import dataclasses
 import datetime
 import json
 import logging
-import os
 import re
 import shlex
 import subprocess
@@ -152,9 +151,7 @@ class EncodedSegmentLog:
     def save(self) -> None:
         """Write the log atomically."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        partial_path = metadata.get_partial_path(self.path)
-        partial_path.write_text(json.dumps(self.sizes, indent=2, sort_keys=True), encoding="utf-8")
-        os.replace(partial_path, self.path)
+        metadata.write_text_atomically(self.path, json.dumps(self.sizes, indent=2, sort_keys=True))
 
 
 @dataclasses.dataclass(frozen=True)
