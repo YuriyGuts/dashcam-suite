@@ -42,8 +42,8 @@ MIN_NAMED_STRETCH_M = 300.0
 # Highway classes named by their ref, even when they have a name.
 REF_HIGHWAY_CLASSES = frozenset(["motorway", "motorway_link", "trunk", "trunk_link"])
 
-# Placeholder names given by `encode`, e.g. `Trip 11-17`.
-PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip \d{2}-\d{2}$")
+# Placeholder names given by `encode`, e.g. `Trip 11-17`, or by older versions, e.g. `Trip 3`.
+PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip (\d{2}-\d{2}|\d+)$")
 
 # Characters that are not allowed in filenames on common file systems.
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
@@ -324,7 +324,7 @@ def fit_street_labels(stretches: list[NamedStretch], max_length: int) -> str:
 
 
 def format_fallback_name(current_name: str, start_time: datetime.datetime | None) -> str:
-    """Return `Trip HH-MM`, using the trip start time or the time in the current name."""
+    """Return `Trip HH-MM` from the trip start time, or else the current placeholder name."""
     if start_time is not None:
         return start_time.strftime("Trip %H-%M")
     if PLACEHOLDER_NAME_PATTERN.match(current_name):

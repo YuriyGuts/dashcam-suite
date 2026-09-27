@@ -183,15 +183,16 @@ def test_suggest_filename_without_streets_uses_start_time(make_named_track):
     assert filename == "2026-09-25 Trip 08-17 (Car).mp4"
 
 
-def test_suggest_filename_without_time_keeps_placeholder(make_track):
+@pytest.mark.parametrize("placeholder_name", ["Trip 11-17", "Trip 3"])
+def test_suggest_filename_without_time_keeps_placeholder(make_track, placeholder_name):
     # GIVEN a video without an overlay, named by `encode`
-    track = make_track(video_filename="2026-09-25 Trip 11-17.MOV", sample_count=0)
+    track = make_track(video_filename=f"2026-09-25 {placeholder_name}.MOV", sample_count=0)
 
     # WHEN suggesting a name
     filename = rename.suggest_filename(track, "Car", ".MOV", taken_stems=set())
 
-    # THEN the time from the current name is kept, and so is the extension
-    assert filename == "2026-09-25 Trip 11-17 (Car).MOV"
+    # THEN the placeholder name is kept, and so is the extension
+    assert filename == f"2026-09-25 {placeholder_name} (Car).MOV"
 
 
 def test_suggest_filename_stays_within_length_limit(make_named_track):
@@ -239,17 +240,19 @@ def add_named_trip(library, make_named_track):
 
 
 def test_plan_renames_targets_placeholders_only(library, add_named_trip):
-    # GIVEN a trip with a placeholder name and one with a real name
+    # GIVEN trips with current and legacy placeholder names, and one with a real name
     library_dir, store = library
+    add_named_trip("2026-09-24 Trip 3.mp4", [FRANKA])
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
     add_named_trip("2026-09-25 Trip with Bad GPS.mp4", [FRANKA])
 
     # WHEN planning renames
     plans = rename.plan_renames(library_dir, store, "Car", include_all=False)
 
-    # THEN only the placeholder is renamed
+    # THEN only the placeholders are renamed
     assert [(plan.video_path.name, plan.new_filename) for plan in plans] == [
-        ("2026-09-25 Trip 11-17.mp4", "2026-09-25 Vasylia Stusa (Car).mp4")
+        ("2026-09-24 Trip 3.mp4", "2026-09-24 Ivana Franka (Car).mp4"),
+        ("2026-09-25 Trip 11-17.mp4", "2026-09-25 Vasylia Stusa (Car).mp4"),
     ]
 
 

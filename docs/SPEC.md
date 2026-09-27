@@ -100,8 +100,8 @@ Port of `dashcam-encode`.
   - Motorways, trunks, and roads without a name use their ref, transliterated and without spaces or hyphens (`М-06` → `M06`). City streets that carry a ref keep their name.
   - Characters not allowed in filenames (`/ \ : * ? " < > |`) are removed.
 - Collisions: the first trip (by date and start time) keeps the plain name; later ones get `(1)`, `(2)`, … before the car model. Names of existing videos and tracks (including unreachable ones) count as taken.
-- Fallback for trips without usable GPS: `YYYY-mm-dd Trip HH-MM (<car model>).mp4`.
-- Targets trips still named `Trip HH-MM` unless `--all` is given. Trips whose street list is missing or older than their samples are skipped with a hint to run `enrich`.
+- Fallback for trips without usable GPS: `YYYY-mm-dd Trip HH-MM (<car model>).mp4`. Without any known time, the current placeholder name is kept.
+- Targets trips still named `Trip HH-MM` (or the legacy `Trip <number>`) unless `--all` is given. Trips whose street list is missing or older than their samples are skipped with a hint to run `enrich`.
 - Without options, prints the old → new table only. `--suggest` asks for confirmation: yes, no, or edit individually (Enter accepts, `-` skips, or type a name; typed names are validated). The end of input counts as no. `--yes` applies without asking.
 - Renames the video, its track, and its preview together.
 
