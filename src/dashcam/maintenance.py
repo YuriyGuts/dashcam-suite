@@ -210,21 +210,26 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
                 )
             )
 
-        is_outdated = (
-            track.extractor_version < metadata.EXTRACTOR_VERSION
-            or track.cleaning_version < metadata.CLEANING_VERSION
-        )
-        if is_outdated:
+        is_extracted = track.extraction_status == metadata.EXTRACTION_OK
+        if track.extractor_version < metadata.EXTRACTOR_VERSION:
             findings.append(
                 Finding(
                     SEVERITY_INFO,
-                    f"Track '{stem}' was made by an older version "
-                    f"(run `dashcam extract --reclean`, or `--only` to re-extract)",
+                    f"Track '{stem}' was made by an older extractor "
+                    f"(run `dashcam extract --only '{track.video_filename}'`)",
+                )
+            )
+        # Videos without an overlay have no readings to clean.
+        elif is_extracted and track.cleaning_version < metadata.CLEANING_VERSION:
+            findings.append(
+                Finding(
+                    SEVERITY_INFO,
+                    f"Track '{stem}' was cleaned by an older version "
+                    f"(run `dashcam extract --reclean`)",
                 )
             )
 
         # Street lists are only expected once there is OSM data to make them from.
-        is_extracted = track.extraction_status == metadata.EXTRACTION_OK
         has_outdated_streets = (
             is_extracted
             and osm_data is not None

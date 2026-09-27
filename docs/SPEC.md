@@ -133,7 +133,8 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 | Track whose video is not in the library | Reconnect renames via fingerprint; report the rest as unreachable |
 | Same stem, fingerprint mismatch | Suggest `extract --only` |
 | `index.json` stale or missing | Rebuild (with `geometry.json`) |
-| Track from an older extractor or cleaning version | Suggest `--reclean` |
+| Track from an older extractor | Suggest `extract --only` |
+| Extracted track from an older cleaning version | Suggest `extract --reclean` |
 | Street list older than the track or the OSM data | Suggest `enrich` |
 | Video name too long for its track name to fit | Report |
 | Orphaned previews or temp files (also in the library) | Delete (listed); temp files modified in the last hour may belong to a running job and are only reported |

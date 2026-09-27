@@ -341,6 +341,38 @@ def test_run_doctor_reports_outdated_track(library_dir, store, add_trip, caplog)
     assert "--reclean" in caplog.text
 
 
+def test_run_doctor_ignores_cleaning_version_of_track_without_overlay(
+    library_dir, store, add_trip, caplog
+):
+    # GIVEN a track of a video without an overlay, from an older cleaning version
+    _, track = add_trip("2019-05-01 Trip.mp4")
+    track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
+    track.raw_samples = []
+    track.clean_samples = []
+    track.cleaning_version = 0
+    store.save_track(track)
+
+    # WHEN running the doctor
+    run_doctor(library_dir, store)
+
+    # THEN nothing is suggested, since there are no readings to clean
+    assert "older" not in caplog.text
+
+
+def test_run_doctor_reports_track_from_older_extractor(library_dir, store, add_trip, caplog):
+    # GIVEN a track made by an older extractor
+    _, track = add_trip("2026-09-25 Trip.mp4")
+    track.extractor_version = 0
+    store.save_track(track)
+
+    # WHEN running the doctor
+    run_doctor(library_dir, store)
+
+    # THEN re-extracting the video is suggested
+    assert "`dashcam extract --only '2026-09-25 Trip.mp4'`" in caplog.text
+    assert "--reclean" not in caplog.text
+
+
 def test_run_doctor_keeps_recent_temporary_files(library_dir, store, add_trip, caplog):
     # GIVEN temporary files that a running job may still be writing
     add_trip("2026-09-25 Trip.mp4")
