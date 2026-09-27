@@ -585,6 +585,45 @@ def test_server_refuses_paths_outside_served_directories(server, library_dir, ur
     assert status == 404
 
 
+def test_server_rejects_foreign_host(server, add_track):
+    # GIVEN a server with a trip
+    add_track()
+
+    # WHEN a request addresses the server by another name (as after DNS rebinding)
+    status, _, body = fetch(f"{server}/api/trips", headers={"Host": "attacker.example:8765"})
+
+    # THEN it is refused
+    assert status == 403
+    assert "Host" in json.loads(body)["error"]
+
+
+@pytest.mark.parametrize("host_header", ["192.168.1.5:8765", "studio.local:8765"])
+def test_server_accepts_network_names_when_listening_on_the_network(
+    library_dir, store, add_track, host_header
+):
+    # GIVEN a server that accepts network names, with a trip
+    add_track()
+    app = serve.VisualizerApp(library_dir, store.root, allow_network_hosts=True)
+    http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
+    thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+    thread.start()
+
+    # WHEN a device on the network addresses it by IP address or mDNS name
+    try:
+        status, _, body = fetch(
+            f"http://127.0.0.1:{http_server.server_address[1]}/api/trips",
+            headers={"Host": host_header},
+        )
+    finally:
+        http_server.shutdown()
+        http_server.server_close()
+        thread.join()
+
+    # THEN the request is served
+    assert status == 200
+    assert len(json.loads(body)["trips"]) == 1
+
+
 def test_server_missing_file(server):
     # GIVEN a running server
 
@@ -719,19 +758,32 @@ def test_is_loopback_host(host, expected):
 
 
 @pytest.mark.parametrize(
-    ("host", "allow_ip_addresses", "expected"),
+    ("host", "allow_network_names", "expected"),
     [
         ("localhost", False, True),
+        ("localhost.", False, True),
         ("127.0.0.1", False, True),
         ("192.168.1.5", False, False),
         ("192.168.1.5", True, True),
         ("[fe80::1]", True, True),
-        ("mac.local", True, False),
+        ("mac.local", False, False),
+        ("Mac.local", True, True),
+        ("studio", False, False),
+        ("studio", True, True),
+        ("studio.lan", True, True),
         ("attacker.example", True, False),
+        ("local.attacker.example", True, False),
     ],
 )
-def test_is_trusted_host(host, allow_ip_addresses, expected):
-    assert serve.is_trusted_host(host, allow_ip_addresses) is expected
+def test_is_trusted_host(host, allow_network_names, expected, monkeypatch):
+    # GIVEN a machine named `Studio.lan`
+    monkeypatch.setattr(serve.socket, "gethostname", lambda: "Studio.lan")
+
+    # WHEN checking the host
+    is_trusted = serve.is_trusted_host(host, allow_network_names)
+
+    # THEN only names that a website cannot make its own are trusted
+    assert is_trusted is expected
 
 
 @pytest.mark.parametrize(
@@ -750,14 +802,14 @@ STUSA = {"name": "вулиця Василя Стуса", "distance_m": 967}
 
 
 @contextlib.contextmanager
-def run_rename_server(library_dir, store, allow_rename_by_ip=False):
+def run_rename_server(library_dir, store, allow_network_hosts=False):
     """Run a server that allows renaming, and yield its base URL."""
     app = serve.VisualizerApp(
         library_dir,
         store.root,
         car_model="Car",
         allow_rename=True,
-        allow_rename_by_ip=allow_rename_by_ip,
+        allow_network_hosts=allow_network_hosts,
     )
     http_server = serve.VisualizerServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=http_server.serve_forever, daemon=True)
@@ -780,7 +832,7 @@ def rename_server(library_dir, store):
 @pytest.fixture
 def network_rename_server(library_dir, store):
     """Run a server that allows renaming from the network, and yield its base URL."""
-    with run_rename_server(library_dir, store, allow_rename_by_ip=True) as base_url:
+    with run_rename_server(library_dir, store, allow_network_hosts=True) as base_url:
         yield base_url
 
 
@@ -1083,8 +1135,9 @@ def test_serve_disables_renaming_on_all_interfaces(library_dir, store, started_a
     # WHEN running it
     serve.serve(library_dir, store.root, host="0.0.0.0")
 
-    # THEN renaming is disabled, with a hint to enable it
+    # THEN renaming is disabled, with a hint to enable it, and network names are accepted
     assert started_apps[0].allow_rename is False
+    assert started_apps[0].allow_network_hosts is True
     assert "Renaming trips in the browser is disabled" in caplog.text
     assert "--allow-rename" in caplog.text
 
@@ -1096,9 +1149,9 @@ def test_serve_allows_network_renaming_on_request(library_dir, store, started_ap
     # WHEN running it
     serve.serve(library_dir, store.root, host="0.0.0.0", allow_network_rename=True)
 
-    # THEN renaming is enabled by IP address, with a warning
+    # THEN renaming is enabled from the network, with a warning
     assert started_apps[0].allow_rename is True
-    assert started_apps[0].allow_rename_by_ip is True
+    assert started_apps[0].allow_network_hosts is True
     assert "Anyone who can reach this server can rename trips" in caplog.text
 
 
@@ -1106,6 +1159,6 @@ def test_serve_allows_local_renaming_by_default(library_dir, store, started_apps
     # WHEN running a server on the loopback address
     serve.serve(library_dir, store.root, host="127.0.0.1")
 
-    # THEN renaming is enabled for loopback names only
+    # THEN renaming is enabled, and only loopback names are accepted
     assert started_apps[0].allow_rename is True
-    assert started_apps[0].allow_rename_by_ip is False
+    assert started_apps[0].allow_network_hosts is False

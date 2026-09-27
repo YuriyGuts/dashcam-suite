@@ -141,6 +141,8 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 
 Local HTTP server for the static web app, the metadata directory, and the videos in the library directory.
 
+Every request must address the server by a loopback host name. When it listens on another address, IP addresses, `*.local` names and the machine's host name are accepted too. DNS rebinding always uses the attacker's host name, so it is refused.
+
 - Leaflet (vendored) with OpenStreetMap tiles. Main browser: Firefox; secondary: Brave.
 - Sidebar: date range, one search box matching trip names, street names, and start/end localities (comma-separated terms must all match), trip list with stats (date, start/end time, distance, duration, average/max speed, GPS coverage badge), aggregate stats for the selection. Selected trips that the filters leave out stay selected but are not drawn; "Select all" selects exactly the listed trips. Filter state lives in the URL hash.
 - Map:
@@ -150,7 +152,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
   - Hover shows the trip name, date, time, video offset, speed, and coordinates. C copies them; H hides the trip (unchecks it, or hides it from the coverage map until shown again).
   - A status on the map shows while trips load or many routes are drawn.
 - Trip detail: stats, street list, and a closable video panel that loads nothing until opened. A marker follows playback without moving the map; clicking the route seeks the video. Disabled when the video is unreachable. Uses the preview if one exists.
-- Renaming: the trip name in the trip detail can be edited in place (date and extension fixed), prefilled with the current name, with the `rename` suggestion one click away. Names are validated like `rename`; errors appear under the field. A playing video is reopened at the same position under the new name. Only available when the server listens on a loopback address, or with `--allow-rename` on any address. Only same-origin JSON requests are accepted, addressed to a loopback host name, or also to an IP address with `--allow-rename` (DNS rebinding always uses the attacker's host name).
+- Renaming: the trip name in the trip detail can be edited in place (date and extension fixed), prefilled with the current name, with the `rename` suggestion one click away. Names are validated like `rename`; errors appear under the field. A playing video is reopened at the same position under the new name. Only available when the server listens on a loopback address, or with `--allow-rename` on any address. Only same-origin JSON requests are accepted.
 
 ## Metadata Layout
 

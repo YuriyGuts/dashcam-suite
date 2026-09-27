@@ -15,12 +15,14 @@ Routes:
 Files are served with HTTP range requests (`206 Partial Content`), which browsers need to seek
 in videos.
 
-The server binds to `127.0.0.1` by default, so it is only reachable from this machine. Renaming
-is enabled on a loopback address, or on any address with `--allow-rename`. It is only accepted
-for requests from the web app itself: they must send JSON (which other websites cannot do without
-a CORS preflight that the server does not allow), come from the same origin, and address the
-server by a loopback name, or by an IP address with `--allow-rename`. A DNS rebinding attack
-always addresses the server by the attacker's domain name, so it is refused.
+The server binds to `127.0.0.1` by default, so it is only reachable from this machine. Every
+request must address the server by a loopback name. On other addresses, IP addresses, mDNS names
+(`*.local`) and this machine's host name are accepted too. A DNS rebinding attack always
+addresses the server by the attacker's domain name, so it is refused.
+
+Renaming is enabled on a loopback address, or on any address with `--allow-rename`. It is only
+accepted for requests from the web app itself: they must send JSON (which other websites cannot
+do without a CORS preflight that the server does not allow) and come from the same origin.
 
 Usage example:
 > dashcam serve -d ~/Videos/Dashcam --port 8765
@@ -32,6 +34,7 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 import threading
 import typing as t
@@ -162,18 +165,28 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def is_trusted_host(host: str, allow_ip_addresses: bool) -> bool:
+def get_machine_host_names() -> set[str]:
+    """Return the lowercase host name of this machine, with and without its domain."""
+    host_name = socket.gethostname().lower()
+    return {host_name, host_name.split(".")[0]}
+
+
+def is_trusted_host(host: str, allow_network_names: bool) -> bool:
     """
     Check whether a host name cannot belong to a DNS rebinding attack.
 
-    Loopback names are always trusted. IP addresses are trusted if `allow_ip_addresses` is set.
+    Loopback names are always trusted. With `allow_network_names`, so are IP addresses, mDNS
+    names (`*.local`) and this machine's host name, none of which a website can make its own.
     """
+    host = host.strip("[]").lower().rstrip(".")
     if is_loopback_host(host):
         return True
-    if not allow_ip_addresses:
+    if not allow_network_names:
         return False
+    if host.endswith(".local") or host in get_machine_host_names():
+        return True
     try:
-        ipaddress.ip_address(host.strip("[]"))
+        ipaddress.ip_address(host)
     except ValueError:
         return False
     return True
@@ -242,16 +255,16 @@ class VisualizerApp:
         metadata_dir: Path,
         car_model: str = "",
         allow_rename: bool = False,
-        allow_rename_by_ip: bool = False,
+        allow_network_hosts: bool = False,
     ):
         self.library_dir = library_dir
         self.store = metadata.MetadataStore(metadata_dir)
         self.car_model = car_model
         self.allow_rename = allow_rename
 
-        # Whether rename requests may address the server by an IP address, not only by a
-        # loopback name, so that other devices on the network can rename trips.
-        self.allow_rename_by_ip = allow_rename_by_ip
+        # Whether requests may address the server by a network name or IP address, not only by a
+        # loopback name, so that other devices on the network can use it.
+        self.allow_network_hosts = allow_network_hosts
         self.index_lock = threading.Lock()
 
     def load_index(self) -> dict[str, t.Any]:
@@ -410,7 +423,15 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         self.handle_request(send_body=False)
 
+    def is_host_trusted(self) -> bool:
+        """Check that the request addresses the server by a name that cannot be rebound."""
+        host = split_host_header(self.headers.get("Host") or "")
+        return is_trusted_host(host, self.app.allow_network_hosts)
+
     def do_POST(self) -> None:
+        if not self.is_host_trusted():
+            self.send_json_error(403, "Unexpected Host header")
+            return
         url_path = urllib.parse.urlsplit(self.path).path
         if url_path != "/api/rename":
             self.send_json_error(404, "Not found")
@@ -453,11 +474,8 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         """
         if not self.app.allow_rename:
             return 403, RENAME_DISABLED_MESSAGE
-        host_header = self.headers.get("Host") or ""
-        if not is_trusted_host(split_host_header(host_header), self.app.allow_rename_by_ip):
-            return 403, "Unexpected Host header"
         origin = self.headers.get("Origin")
-        if origin is not None and origin != f"http://{host_header}":
+        if origin is not None and origin != f"http://{self.headers.get('Host')}":
             return 403, "Cross-origin requests are not allowed"
         content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
@@ -466,6 +484,9 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_request(self, send_body: bool) -> None:
         """Dispatch a GET or HEAD request."""
+        if not self.is_host_trusted():
+            self.send_json_error(403, "Unexpected Host header", send_body)
+            return
         url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         try:
             if url_path == "/api/trips":
@@ -599,7 +620,7 @@ def serve(
         metadata_dir,
         car_model=car_model,
         allow_rename=allow_rename,
-        allow_rename_by_ip=allow_network_rename,
+        allow_network_hosts=not is_loopback,
     )
     app.warn_about_library()
     trip_count = len(app.load_index()["trips"])
