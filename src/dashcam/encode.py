@@ -339,11 +339,11 @@ def build_ffmpeg_command(
         *["-v", "error", "-nostats", "-progress", "pipe:1"],
         # Allow ffmpeg to use absolute input paths (-safe 0).
         *["-f", "concat", "-safe", "0"],
-        *shlex.split(config.hwaccel_options),
+        *video.split_options(config.hwaccel_options),
         *["-i", str(concat_list_path)],
         # Video and audio codec parameters.
-        *shlex.split(config.video_codec_options),
-        *shlex.split(config.audio_codec_options),
+        *video.split_options(config.video_codec_options),
+        *video.split_options(config.audio_codec_options),
         # The partial output file has an unusual extension, so specify the format explicitly.
         *["-f", OUTPUT_FORMAT, "-y", str(partial_output_path)],
     ]

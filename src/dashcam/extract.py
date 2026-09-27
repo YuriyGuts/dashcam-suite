@@ -245,10 +245,10 @@ def make_preview(
         "-nostdin",
         # Report errors only, and the progress as `key=value` lines on stdout.
         *["-v", "error", "-nostats", "-progress", "pipe:1"],
-        *shlex.split(config.hwaccel_options),
+        *video.split_options(config.hwaccel_options),
         *["-i", str(video_path)],
-        *shlex.split(PREVIEW_VIDEO_OPTIONS),
-        *shlex.split(PREVIEW_AUDIO_OPTIONS),
+        *video.split_options(PREVIEW_VIDEO_OPTIONS),
+        *video.split_options(PREVIEW_AUDIO_OPTIONS),
         *["-movflags", "+faststart", "-f", "mp4", "-y", str(partial_path)],
     ]
     LOGGER.info(shlex.join(cmd), extra=terminal.COMMAND)

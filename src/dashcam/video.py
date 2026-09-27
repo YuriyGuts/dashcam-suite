@@ -4,6 +4,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import os
 import shlex
 import subprocess
 import tempfile
@@ -168,6 +169,17 @@ def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
             raise subprocess.CalledProcessError(proc.returncode, cmd, stderr=get_error_tail(stderr))
 
 
+def split_options(options: str) -> list[str]:
+    """
+    Split command-line options from the config the way a POSIX shell would.
+
+    On Windows, backslashes are kept as they are, so that the options can contain Windows paths.
+    """
+    if os.name == "nt":
+        options = options.replace("\\", "\\\\")
+    return shlex.split(options)
+
+
 def build_strip_filter(frame_width: int) -> str:
     """
     Build the ffmpeg filter that cuts the bottom strip of a frame, scaled to the nominal width.
@@ -215,7 +227,7 @@ def build_strip_reader_command(
         ffmpeg_executable,
         "-nostdin",
         *["-v", "error"],
-        *shlex.split(hwaccel_options),
+        *split_options(hwaccel_options),
         *input_options,
         *["-i", str(path)],
         *["-an", "-sn"],

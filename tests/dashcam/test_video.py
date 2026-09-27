@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -347,7 +348,7 @@ def test_iter_ffmpeg_progress_yields_reports():
         "out_time_us=N/A\nspeed=N/A\nprogress=continue\n"
         "frame=10\nout_time_us=1500000\nspeed=1.23x\nprogress=end\n"
     )
-    cmd = ["sh", "-c", f"printf '{progress_lines}'"]
+    cmd = [sys.executable, "-c", f"print({progress_lines!r}, end='')"]
 
     # WHEN reading its progress
     reports = list(video.iter_ffmpeg_progress(cmd))
@@ -361,7 +362,11 @@ def test_iter_ffmpeg_progress_yields_reports():
 
 def test_iter_ffmpeg_progress_raises_with_error_tail():
     # GIVEN a command that fails with error output
-    cmd = ["sh", "-c", "echo 'Unknown encoder' >&2; exit 3"]
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; print('Unknown encoder', file=sys.stderr); sys.exit(3)",
+    ]
 
     # WHEN reading its progress
     # THEN the error carries the exit code and the error output
@@ -369,6 +374,27 @@ def test_iter_ffmpeg_progress_raises_with_error_tail():
         list(video.iter_ffmpeg_progress(cmd))
     assert exc_info.value.returncode == 3
     assert exc_info.value.stderr == "Unknown encoder"
+
+
+@pytest.mark.parametrize(
+    ("os_name", "options", "expected"),
+    [
+        ("posix", "-hwaccel vulkan", ["-hwaccel", "vulkan"]),
+        ("posix", '-x265-params "open-gop=0:keyint=60"', ["-x265-params", "open-gop=0:keyint=60"]),
+        ("posix", "", []),
+        ("nt", r"-init_hw_device qsv=hw:C:\GPU\0", ["-init_hw_device", r"qsv=hw:C:\GPU\0"]),
+        ("nt", r'-filter_hw_device "C:\My GPU"', ["-filter_hw_device", r"C:\My GPU"]),
+    ],
+)
+def test_split_options(monkeypatch, os_name, options, expected):
+    # GIVEN options from the config on an operating system
+    monkeypatch.setattr(video.os, "name", os_name)
+
+    # WHEN splitting them
+    split = video.split_options(options)
+
+    # THEN quotes are handled like a shell, and Windows paths keep their backslashes
+    assert split == expected
 
 
 @pytest.mark.parametrize(
