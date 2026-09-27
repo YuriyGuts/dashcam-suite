@@ -374,7 +374,7 @@ def test_main_runs_reclean(monkeypatch, config, recorded_calls):
 
     # THEN only recleaning runs
     assert [call[0] for call in recorded_calls] == ["reclean_tracks"]
-    assert recorded_calls[0][1][0] == Path("meta")
+    assert recorded_calls[0][2]["metadata_dir"] == Path("meta")
 
 
 def test_main_runs_status(monkeypatch, config, recorded_calls):
@@ -386,7 +386,7 @@ def test_main_runs_status(monkeypatch, config, recorded_calls):
     # THEN the status is printed for that directory
     assert exit_code == 0
     assert recorded_calls[0][0] == "print_status"
-    assert recorded_calls[0][1][0] == Path("videos")
+    assert recorded_calls[0][2]["library_dir"] == Path("videos")
 
 
 def test_main_runs_forget(monkeypatch, config, recorded_calls):
@@ -397,7 +397,7 @@ def test_main_runs_forget(monkeypatch, config, recorded_calls):
 
     # THEN both names are forgotten
     assert recorded_calls[0][0] == "forget_trips"
-    assert recorded_calls[0][1][0] == ["a.mp4", "b"]
+    assert recorded_calls[0][2]["names"] == ["a.mp4", "b"]
 
 
 def test_main_runs_doctor_with_fix(monkeypatch, config, recorded_calls):

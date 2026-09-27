@@ -82,7 +82,10 @@ def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config)
 
 
 def add_job_count_argument(
-    parser: argparse.ArgumentParser, option_name: str, what: str, default: int
+    parser: argparse.ArgumentParser,
+    option_name: str,
+    what: str,
+    default: int,
 ) -> None:
     """Add an option that sets how many jobs run in parallel."""
     parser.add_argument(
@@ -130,7 +133,11 @@ def add_raw_video_arguments(parser: argparse.ArgumentParser, config: Config) -> 
 
 def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config) -> None:
     """Add the `trips` and `range` subcommands to the `encode` command parser."""
-    subparsers = encode_parser.add_subparsers(dest="encode_mode", metavar="MODE", required=True)
+    subparsers = encode_parser.add_subparsers(
+        dest="encode_mode",
+        metavar="MODE",
+        required=True,
+    )
 
     parser_trips_cmd = subparsers.add_parser(
         name="trips",
@@ -141,7 +148,10 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
     )
     add_trip_grouping_arguments(parser_trips_cmd, config)
     add_job_count_argument(
-        parser_trips_cmd, "--job-count", "trips encoded", config.encode_job_count
+        parser=parser_trips_cmd,
+        option_name="--job-count",
+        what="trips encoded",
+        default=config.encode_job_count,
     )
 
     parser_range_cmd = subparsers.add_parser(
@@ -220,7 +230,10 @@ def add_extract_arguments(extract_parser: argparse.ArgumentParser, config: Confi
     add_library_dir_argument(extract_parser, config)
     add_metadata_dir_argument(extract_parser, config)
     add_job_count_argument(
-        extract_parser, "--job-count", "videos extracted", config.extract_job_count
+        parser=extract_parser,
+        option_name="--job-count",
+        what="videos extracted",
+        default=config.extract_job_count,
     )
     extract_parser.add_argument(
         "--include",
@@ -269,7 +282,37 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
             "and visualize routes."
         ),
     )
-    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command",
+        metavar="COMMAND",
+        required=True,
+    )
+
+    import_parser = subparsers.add_parser(
+        name="import",
+        help="Encode new trips from the SD card, extract and enrich them, and suggest names.",
+    )
+    add_trip_grouping_arguments(import_parser, config)
+    add_job_count_argument(
+        parser=import_parser,
+        option_name="--encode-job-count",
+        what="trips encoded",
+        default=config.encode_job_count,
+    )
+    add_job_count_argument(
+        parser=import_parser,
+        option_name="--extract-job-count",
+        what="videos extracted",
+        default=config.extract_job_count,
+    )
+    add_raw_video_arguments(import_parser, config)
+    add_library_dir_argument(import_parser, config)
+    add_metadata_dir_argument(import_parser, config)
+    import_parser.add_argument(
+        "--no-rename",
+        action="store_true",
+        help="Do not suggest new names for the imported trips.",
+    )
 
     encode_parser = subparsers.add_parser(
         name="encode",
@@ -335,58 +378,6 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         help="Apply the suggested names without asking.",
     )
 
-    import_parser = subparsers.add_parser(
-        name="import",
-        help="Encode new trips from the SD card, extract and enrich them, and suggest names.",
-    )
-    add_trip_grouping_arguments(import_parser, config)
-    add_job_count_argument(
-        import_parser, "--encode-job-count", "trips encoded", config.encode_job_count
-    )
-    add_job_count_argument(
-        import_parser, "--extract-job-count", "videos extracted", config.extract_job_count
-    )
-    add_raw_video_arguments(import_parser, config)
-    add_library_dir_argument(import_parser, config)
-    add_metadata_dir_argument(import_parser, config)
-    import_parser.add_argument(
-        "--no-rename",
-        action="store_true",
-        help="Do not suggest new names for the imported trips.",
-    )
-
-    status_parser = subparsers.add_parser(
-        name="status",
-        help="List trips, unprocessed videos, and unreachable tracks.",
-    )
-    add_library_dir_argument(status_parser, config)
-    add_metadata_dir_argument(status_parser, config)
-
-    forget_parser = subparsers.add_parser(
-        name="forget",
-        help="Move the tracks (and previews) of the given videos to the trash.",
-    )
-    forget_parser.add_argument(
-        "names",
-        metavar="VIDEO",
-        help="Video filename or name without extension.",
-        nargs="+",
-    )
-    add_library_dir_argument(forget_parser, config)
-    add_metadata_dir_argument(forget_parser, config)
-
-    doctor_parser = subparsers.add_parser(
-        name="doctor",
-        help="Check the metadata for problems and optionally fix the safe ones.",
-    )
-    add_library_dir_argument(doctor_parser, config)
-    add_metadata_dir_argument(doctor_parser, config)
-    doctor_parser.add_argument(
-        "--fix",
-        action="store_true",
-        help="Apply safe fixes: reconnect renamed videos, rebuild the index, delete leftovers.",
-    )
-
     serve_parser = subparsers.add_parser(
         name="serve",
         help="Browse the trips on a map with synchronized video playback.",
@@ -417,6 +408,38 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
             "Anyone who can reach the server can then rename trips."
         ),
     )
+
+    status_parser = subparsers.add_parser(
+        name="status",
+        help="List trips, unprocessed videos, and unreachable tracks.",
+    )
+    add_library_dir_argument(status_parser, config)
+    add_metadata_dir_argument(status_parser, config)
+
+    doctor_parser = subparsers.add_parser(
+        name="doctor",
+        help="Check the metadata for problems and optionally fix the safe ones.",
+    )
+    add_library_dir_argument(doctor_parser, config)
+    add_metadata_dir_argument(doctor_parser, config)
+    doctor_parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply safe fixes: reconnect renamed videos, rebuild the index, delete leftovers.",
+    )
+
+    forget_parser = subparsers.add_parser(
+        name="forget",
+        help="Move the tracks (and previews) of the given videos to the trash.",
+    )
+    forget_parser.add_argument(
+        "names",
+        metavar="VIDEO",
+        help="Video filename or name without extension.",
+        nargs="+",
+    )
+    add_library_dir_argument(forget_parser, config)
+    add_metadata_dir_argument(forget_parser, config)
 
     subparsers.add_parser(
         name="config",
@@ -536,7 +559,10 @@ def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
 def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
     """Entry point for the `extract` command."""
     if parsed_args.reclean:
-        return extract.reclean_tracks(parsed_args.metadata_dir, config)
+        return extract.reclean_tracks(
+            metadata_dir=parsed_args.metadata_dir,
+            config=config,
+        )
 
     return extract.extract_videos(
         library_dir=parsed_args.library_dir,
@@ -604,9 +630,15 @@ def main() -> None:
         elif parsed_args.command == "import":
             failed_count = run_import_command(parsed_args, config)
         elif parsed_args.command == "status":
-            maintenance.print_status(parsed_args.library_dir, parsed_args.metadata_dir)
+            maintenance.print_status(
+                library_dir=parsed_args.library_dir,
+                metadata_dir=parsed_args.metadata_dir,
+            )
         elif parsed_args.command == "forget":
-            failed_count = maintenance.forget_trips(parsed_args.names, parsed_args.metadata_dir)
+            failed_count = maintenance.forget_trips(
+                names=parsed_args.names,
+                metadata_dir=parsed_args.metadata_dir,
+            )
         elif parsed_args.command == "doctor":
             failed_count = maintenance.run_doctor(
                 library_dir=parsed_args.library_dir,
