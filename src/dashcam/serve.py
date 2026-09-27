@@ -37,6 +37,7 @@ import threading
 import typing as t
 import urllib.parse
 from pathlib import Path
+from pathlib import PurePath
 
 from dashcam import extract
 from dashcam import metadata
@@ -130,20 +131,24 @@ def parse_byte_range(range_header: str | None, file_size: int) -> tuple[int, int
     return start, end
 
 
-def safe_join(root: Path, relative_path: str) -> Path | None:
+def safe_join[RootPath: PurePath](root: RootPath, relative_path: str) -> RootPath | None:
     """
     Join a URL path (already unquoted) to a directory, refusing anything that could leave it.
 
     Returns
     -------
-    Path | None
+    RootPath | None
         The joined path, or None if a segment is empty, hidden (including `..`), or unsafe.
     """
     segments = relative_path.split("/")
     for segment in segments:
         if not segment or segment.startswith(".") or "\\" in segment or "\0" in segment:
             return None
-    return root.joinpath(*segments)
+    joined_path = root.joinpath(*segments)
+    # A segment with a drive (`D:secret.txt` on Windows) replaces the root instead of joining it.
+    if not joined_path.is_relative_to(root):
+        return None
+    return joined_path
 
 
 def is_loopback_host(host: str) -> bool:

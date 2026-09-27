@@ -5,6 +5,7 @@ import os
 import threading
 import urllib.error
 import urllib.request
+from pathlib import PureWindowsPath
 
 import pytest
 
@@ -139,6 +140,18 @@ def test_safe_join_refuses_unsafe_paths(tmp_path, relative_path):
     path = serve.safe_join(tmp_path, relative_path)
 
     # THEN it is refused
+    assert path is None
+
+
+@pytest.mark.parametrize("relative_path", ["D:secret.txt", "D:/secret.txt", "a/D:secret.txt"])
+def test_safe_join_refuses_other_windows_drives(relative_path):
+    # GIVEN a Windows root and a path with a drive segment
+    root = PureWindowsPath("C:/site/web")
+
+    # WHEN joining it
+    path = serve.safe_join(root, relative_path)
+
+    # THEN it is refused instead of switching to the other drive
     assert path is None
 
 
