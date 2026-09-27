@@ -4,13 +4,13 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 ## Terms
 
-- **Raw video directory**: the movie directory on the SD card, with the raw segments (config: `raw_video_dir`, option: `--raw-video-dir`).
+- **Raw video directory**: the `DCIM` directory on the SD card, with the raw segments in its subdirectories (config: `raw_video_dir`, option: `--raw-video-dir`).
 - **Library directory**: the directory with the trip videos and the metadata directory (config: `library_dir`, option: `--library-dir` / `-d`).
 - **Metadata directory**: tracks, the trip index, previews, and OSM data; `.metadata` inside the library directory by default (config: `metadata_dir`, option: `--metadata-dir`).
 
 ## Background
 
-- Camera: VIOFO A119 V3. Raw segments on the SD card are named `YYYYMMDDhhmmss_NNNNNN.MP4` (start time, 6-digit index), 60 s, H.264.
+- Camera: VIOFO A119 V3. Raw segments on the SD card are named `YYYYMMDDhhmmss_NNNNNN.MP4` (start time, 6-digit index), 60 s, H.264. Loop recordings are in `DCIM/Movie`. Clips locked by the G-sensor or the emergency button are moved, under the same name, to an `RO` folder (`DCIM/Movie/RO` or `DCIM/RO`, depending on the firmware). Parking mode clips are named `YYYYMMDDhhmmss_NNNNNNP.MP4`.
 - Trip videos are raw segments merged and re-encoded to HEVC. The original segments are not kept, so everything is extracted from the burned-in overlay, not from embedded GPS.
 - Overlay (bottom of frame, fixed monospace font, updates at 1 Hz):
   - Left: `46 KM/H N49.810205 E24.028992`. Blank when there is no GPS fix.
@@ -42,6 +42,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 ### `dashcam encode trips|range`
 
+- Collects videos from the raw video directory and all its subdirectories, skipping hidden files and directories. A filename found in several folders is taken from an `RO` folder (else the first in path order) with a warning. Parking mode clips are skipped with one summary line.
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
 - `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
 - Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count` (trips only), `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).

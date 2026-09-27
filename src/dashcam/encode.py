@@ -6,6 +6,11 @@ the recording start time and `NNNNNN` is a sequential index. Files named differe
 supported if their name ends with the index (e.g. `xxxx0042.avi`); their start time is then
 taken from the file modification time.
 
+The raw videos are collected from the input directory and all of its subdirectories, so that
+clips the camera moved to a locked `RO` folder are part of their trips. A clip found in more
+than one folder is taken from `RO`. Parking mode clips (`YYYYMMDDhhmmss_NNNNNNP.MP4`) are left
+out.
+
 The tool can operate in two modes:
 
 1) "trips" mode: encodes all videos in the input directory, organizing them into trips
@@ -68,8 +73,15 @@ EXPECTED_VIDEO_EXTENSIONS = (".avi", ".mp4", ".mov")
 RAW_VIDEO_STEM_PATTERN = re.compile(r"^(?P<start_time>\d{14})_(?P<index>\d+)$")
 RAW_VIDEO_START_TIME_FORMAT = "%Y%m%d%H%M%S"
 
+# Parking mode clip written by the camera, e.g. `20260925111707_000271P`.
+PARKING_VIDEO_STEM_PATTERN = re.compile(r"^\d{14}_\d+P$", re.IGNORECASE)
+
 # Fallback for other naming schemes: the index is the trailing number of the filename.
 TRAILING_INDEX_PATTERN = re.compile(r"(?P<index>\d+)$")
+
+# Folder, in any letter case, where the camera moves the clips locked by the G-sensor or the
+# emergency button.
+LOCKED_VIDEO_DIR_NAME = "ro"
 
 # Container format and extension of the output videos.
 OUTPUT_FORMAT = "mp4"
@@ -223,6 +235,41 @@ def is_raw_video_readable(path: Path, ffmpeg_executable: str) -> bool:
     return result.returncode == 0
 
 
+def find_raw_video_paths(raw_video_dir: Path) -> list[Path]:
+    """
+    Find the video files in a directory and its subdirectories, one per filename.
+
+    Hidden files and directories are skipped, such as the `._*` metadata files that macOS writes
+    to FAT volumes. A filename found in several folders is taken from a locked `RO` folder, or
+    else from the first folder in path order, with a warning.
+    """
+    paths_by_name: dict[str, list[Path]] = {}
+    for path in sorted(raw_video_dir.rglob("*")):
+        relative_parts = path.relative_to(raw_video_dir).parts
+        if any(part.startswith(".") for part in relative_parts):
+            continue
+        if path.suffix.lower() not in EXPECTED_VIDEO_EXTENSIONS or not path.is_file():
+            continue
+        paths_by_name.setdefault(path.name, []).append(path)
+
+    video_paths = []
+    for name, paths in paths_by_name.items():
+        chosen_path = min(paths, key=lambda path: not is_locked_video(path, raw_video_dir))
+        if len(paths) > 1:
+            chosen_folder = chosen_path.parent.relative_to(raw_video_dir).as_posix()
+            LOGGER.warning(
+                f"Found '{name}' in {len(paths)} folders; using the one in '{chosen_folder}'"
+            )
+        video_paths.append(chosen_path)
+    return video_paths
+
+
+def is_locked_video(path: Path, raw_video_dir: Path) -> bool:
+    """Check whether a video is in a locked `RO` folder under the raw video directory."""
+    folder_names = path.parent.relative_to(raw_video_dir).parts
+    return any(name.lower() == LOCKED_VIDEO_DIR_NAME for name in folder_names)
+
+
 def collect_raw_video_segments(
     raw_video_dir: Path,
     ffmpeg_executable: str,
@@ -232,7 +279,7 @@ def collect_raw_video_segments(
     encoded_log: EncodedSegmentLog | None = None,
 ) -> list[RawVideoSegment]:
     """
-    Scan the raw video directory for files matching the input criteria.
+    Scan the raw video directory and its subdirectories for files matching the input criteria.
 
     Files recorded in `encoded_log` are left out.
 
@@ -242,19 +289,19 @@ def collect_raw_video_segments(
         The matching segments, sorted by start time. Empty if all of them are already encoded.
     """
     LOGGER.info(f"Collecting files from '{raw_video_dir}'")
-
-    # Skip hidden files, such as `._*` metadata files that macOS writes to FAT volumes.
-    video_paths = [
-        path
-        for path in raw_video_dir.iterdir()
-        if path.is_file()
-        and not path.name.startswith(".")
-        and path.suffix.lower() in EXPECTED_VIDEO_EXTENSIONS
-    ]
+    if not raw_video_dir.is_dir():
+        raise RuntimeError(f"Cannot find the raw video directory '{raw_video_dir}'")
+    video_paths = find_raw_video_paths(raw_video_dir)
     LOGGER.info(f"Found {len(video_paths)} files with supported extensions")
+
+    parking_paths = [path for path in video_paths if PARKING_VIDEO_STEM_PATTERN.match(path.stem)]
+    if parking_paths:
+        LOGGER.info(f"Skipping {len(parking_paths)} parking mode files")
 
     segments = []
     for path in video_paths:
+        if PARKING_VIDEO_STEM_PATTERN.match(path.stem):
+            continue
         segment = parse_raw_video_segment(path)
         if segment is None:
             LOGGER.warning(f"Cannot find an index in the name of '{path.name}'; skipping")

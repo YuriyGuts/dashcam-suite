@@ -106,6 +106,93 @@ def test_collect_raw_video_segments_skips_hidden_and_unsupported_files(
     assert [segment.path.name for segment in segments] == ["20260925111707_000271.MP4"]
 
 
+def test_collect_raw_video_segments_includes_locked_folders(raw_video_dir, make_raw_videos):
+    # GIVEN loop clips with a gap where one clip was locked into `Movie/RO`, and one in `DCIM/RO`
+    make_raw_videos("20260925110000_000001.MP4", "20260925110200_000003.MP4")
+    make_raw_videos("20260925110100_000002.MP4", folder="Movie/RO")
+    make_raw_videos("20260925110300_000004.MP4", folder="RO")
+
+    # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN the locked clips fill their places in the sequence
+    assert [segment.index for segment in segments] == [1, 2, 3, 4]
+
+
+def test_collect_raw_video_segments_includes_files_in_the_directory_itself(
+    raw_video_dir, make_raw_videos
+):
+    # GIVEN a clip directly in the raw video directory
+    make_raw_videos("20260925110000_000001.MP4", folder="")
+
+    # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN it is collected
+    assert [segment.index for segment in segments] == [1]
+
+
+def test_collect_raw_video_segments_skips_hidden_folders(raw_video_dir, make_raw_videos):
+    # GIVEN a clip, and a deleted one in the macOS trash folder of the card
+    make_raw_videos("20260925110000_000001.MP4")
+    make_raw_videos("20260925110100_000002.MP4", folder=".Trashes/501")
+
+    # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN the clip in the hidden folder is skipped
+    assert [segment.index for segment in segments] == [1]
+
+
+def test_collect_raw_video_segments_skips_parking_clips(raw_video_dir, make_raw_videos, caplog):
+    # GIVEN a loop clip and two parking mode clips
+    caplog.set_level(logging.INFO)
+    make_raw_videos(
+        "20260925110000_000001.MP4", "20260925230000_000002P.MP4", "20260925230100_000003p.mp4"
+    )
+
+    # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN only the loop clip is collected, with one summary line and no warnings
+    assert [segment.index for segment in segments] == [1]
+    assert "Skipping 2 parking mode files" in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_find_raw_video_paths_prefers_the_locked_copy(raw_video_dir, make_raw_videos, caplog):
+    # GIVEN the same clip in the loop folder and in its locked folder
+    make_raw_videos("20260925110000_000001.MP4")
+    (locked_path,) = make_raw_videos("20260925110000_000001.MP4", folder="Movie/RO")
+
+    # WHEN finding the raw videos
+    paths = encode.find_raw_video_paths(raw_video_dir)
+
+    # THEN the locked copy is used, with a warning
+    assert paths == [locked_path]
+    assert "using the one in 'Movie/RO'" in caplog.text
+
+
+def test_find_raw_video_paths_with_copies_outside_locked_folders(raw_video_dir, make_raw_videos):
+    # GIVEN the same clip in two folders, neither of them locked
+    (first_path,) = make_raw_videos("20260925110000_000001.MP4", folder="Backup")
+    make_raw_videos("20260925110000_000001.MP4")
+
+    # WHEN finding the raw videos
+    paths = encode.find_raw_video_paths(raw_video_dir)
+
+    # THEN the copy in the first folder in path order is used
+    assert paths == [first_path]
+
+
 def test_collect_raw_video_segments_with_index_range(raw_video_dir, make_raw_videos):
     # GIVEN segments 1 to 4
     make_raw_videos(
@@ -152,6 +239,18 @@ def test_collect_raw_video_segments_without_matches(raw_video_dir):
     with pytest.raises(RuntimeError, match="Could not find any files"):
         encode.collect_raw_video_segments(
             raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+        )
+
+
+def test_collect_raw_video_segments_without_directory(tmp_path):
+    # GIVEN a raw video directory that does not exist, e.g. an unmounted SD card
+    missing_dir = tmp_path / "DCIM"
+
+    # WHEN collecting segments
+    # THEN it fails with the path
+    with pytest.raises(RuntimeError, match="Cannot find the raw video directory"):
+        encode.collect_raw_video_segments(
+            missing_dir, ffmpeg_executable="ffmpeg", check_readability=False
         )
 
 

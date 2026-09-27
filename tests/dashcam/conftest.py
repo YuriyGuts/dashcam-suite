@@ -145,17 +145,20 @@ def config():
 
 @pytest.fixture
 def raw_video_dir(tmp_path):
-    raw_video_dir = tmp_path / "DCIM" / "Movie"
-    raw_video_dir.mkdir(parents=True)
+    raw_video_dir = tmp_path / "DCIM"
+    raw_video_dir.mkdir()
     return raw_video_dir
 
 
 @pytest.fixture
 def make_raw_videos(raw_video_dir):
-    def _make_raw_videos(*filenames):
+    """Create empty raw videos, by default in the loop recording folder `DCIM/Movie`."""
+
+    def _make_raw_videos(*filenames, folder="Movie"):
         paths = []
         for filename in filenames:
-            path = raw_video_dir / filename
+            path = raw_video_dir / folder / filename
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"")
             paths.append(path)
         return paths

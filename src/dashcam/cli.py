@@ -13,7 +13,7 @@ each trip as a separate video file in the default library directory:
 
 Encode all raw video files in the specified location, group them into trips
 where trips should be at least 8 hours apart, encode 3 trips in parallel:
-> dashcam encode trips --raw-video-dir "/media/me/DASHCAM/DCIM/Movie" \
+> dashcam encode trips --raw-video-dir "/media/me/DASHCAM/DCIM" \
     --min-trip-gap-hours 8 --job-count 3
 
 Encode raw video files labeled from #15 to #319 and save them as a single video file named
@@ -147,7 +147,8 @@ def add_raw_video_arguments(parser: argparse.ArgumentParser, config: Config) -> 
         "--raw-video-dir",
         metavar="PATH",
         help=(
-            f"Path to the raw video directory on the SD card (default: '{config.raw_video_dir}')."
+            "Path to the `DCIM` directory on the SD card, searched with its subdirectories "
+            f"(default: '{config.raw_video_dir}')."
         ),
         type=Path,
         required=False,

@@ -8,7 +8,7 @@ or at the path given by the `DASHCAM_CONFIG` environment variable.
 Example config file:
 
     library_dir = "~/Videos/Dashcam"
-    raw_video_dir = "/media/me/DASHCAM/DCIM/Movie"
+    raw_video_dir = "/media/me/DASHCAM/DCIM"
     hwaccel_options = "-hwaccel vulkan"
     video_codec_options = "-c:v libx265 -crf 28 -preset medium"
     encode_job_count = 2
@@ -51,7 +51,7 @@ POSITIVE_INT_SETTINGS = ("encode_job_count", "extract_job_count")
 class Config:
     """Settings that may differ between machines."""
 
-    # Path to the raw video directory on the SD card.
+    # Path to the `DCIM` directory on the SD card. Its subdirectories are searched too.
     raw_video_dir: str
 
     # Path to the library directory with the trip videos and the metadata directory.
@@ -120,20 +120,20 @@ def get_platform_defaults() -> Config:
 
     if sys.platform == "darwin":
         return Config(
-            raw_video_dir="/Volumes/DASHCAM/DCIM/Movie",
+            raw_video_dir="/Volumes/DASHCAM/DCIM",
             hwaccel_options="-hwaccel videotoolbox",
             **common_settings,
         )
 
     if sys.platform == "linux":
         return Config(
-            raw_video_dir=f"/media/{getpass.getuser()}/DASHCAM/DCIM/Movie",
+            raw_video_dir=f"/media/{getpass.getuser()}/DASHCAM/DCIM",
             hwaccel_options="-hwaccel vulkan",
             **common_settings,
         )
 
     return Config(
-        raw_video_dir="E:\\DCIM\\Movie",
+        raw_video_dir="E:\\DCIM",
         hwaccel_options="",
         **common_settings,
     )

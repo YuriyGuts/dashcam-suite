@@ -54,8 +54,9 @@ Here is a full config. The values are the defaults, except for `library_dir`, `r
 # or use single quotes ('D:\Videos\Dashcam').
 library_dir = "~/Videos/Dashcam"
 
-# The clip directory on the dashcam's SD card.
-raw_video_dir = "/media/me/DASHCAM/DCIM/Movie"
+# The DCIM folder on the dashcam's SD card.
+# Clips in its subfolders, such as locked clips in RO, are imported too.
+raw_video_dir = "/media/me/DASHCAM/DCIM"
 
 # The directory holding the track metadata.
 # When specifying a relative path like below, it is relative to `library_dir`.
@@ -237,7 +238,7 @@ The position, order and spacing of the values don't matter, and neither do other
 
 **The burnt-in overlay is the only GPS source.** GPS data that may be embedded in the original SD card files is ignored.
 
-**Raw clips are named `YYYYMMDDhhmmss_NNNNNN.MP4`.** That is, start time and index. For other names, the tool looks for a trailing number to use as the index and takes the start time from the file's modification time. Files without a number are skipped.
+**Raw clips are named `YYYYMMDDhhmmss_NNNNNN.MP4`.** That is, start time and index. For other names, the tool looks for a trailing number to use as the index and takes the start time from the file's modification time. Files without a number are skipped, and so are parking mode clips (`YYYYMMDDhhmmss_NNNNNNP.MP4`).
 
 **The camera clock is in one time zone**, set by `timezone`. Daylight saving time is handled. Trips abroad are recorded with your home time zone's offset.
 
