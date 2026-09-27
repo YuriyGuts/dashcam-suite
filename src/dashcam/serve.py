@@ -474,6 +474,16 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         fetch_site = self.headers.get("Sec-Fetch-Site")
         return fetch_site is not None and fetch_site not in ("same-origin", "none")
 
+    def is_link_from_another_site(self) -> bool:
+        """
+        Check whether the user followed a link from another site, which opens the URL in a tab
+        (`Sec-Fetch-Dest: document`). The other site cannot read the page, and cannot frame it.
+        """
+        return (
+            self.headers.get("Sec-Fetch-Mode") == "navigate"
+            and self.headers.get("Sec-Fetch-Dest") == "document"
+        )
+
     def handle_post(self) -> None:
         """Dispatch a POST request."""
         if not self.is_host_trusted():
@@ -537,7 +547,7 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         if not self.is_host_trusted():
             self.send_json_error(403, "Unexpected Host header", send_body)
             return
-        if self.is_cross_site():
+        if self.is_cross_site() and not self.is_link_from_another_site():
             self.send_json_error(403, "Cross-site requests are not allowed", send_body)
             return
         url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)

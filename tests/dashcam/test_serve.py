@@ -720,6 +720,39 @@ def test_server_accepts_requests_from_the_web_app_and_the_address_bar(
     assert status == 200
 
 
+@pytest.mark.parametrize("fetch_site", ["cross-site", "same-site"])
+def test_server_serves_the_web_app_for_a_link_from_another_site(server, fetch_site):
+    # GIVEN a running server
+
+    # WHEN the user follows a link to it on another site
+    headers = {
+        "Sec-Fetch-Site": fetch_site,
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+    }
+    status, response_headers, _ = fetch(f"{server}/", headers=headers)
+
+    # THEN the web app opens
+    assert status == 200
+    assert response_headers["Content-Type"].startswith("text/html")
+
+
+def test_server_rejects_a_frame_on_another_site(server):
+    # GIVEN a running server
+
+    # WHEN a page of another site embeds the web app in a frame
+    headers = {
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "iframe",
+    }
+    status, _, body = fetch(f"{server}/", headers=headers)
+
+    # THEN it is refused
+    assert status == 403
+    assert "Cross-site" in json.loads(body)["error"]
+
+
 @pytest.mark.parametrize("host_header", ["192.168.1.5:8765", "studio.local:8765"])
 def test_server_accepts_network_names_when_listening_on_the_network(
     library_dir, store, add_track, host_header
@@ -1174,6 +1207,30 @@ def test_server_rejects_cross_site_rename(rename_server, library_dir, add_trip_w
 
     # THEN it is refused and nothing is renamed
     assert exc_info.value.code == 403
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
+def test_server_rejects_rename_submitted_from_another_site(
+    rename_server, library_dir, add_trip_with_video
+):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN a form on another site submits the request, which opens the response in a tab
+    headers = {
+        "Sec-Fetch-Site": "cross-site",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+    }
+    status, body = post_rename(
+        rename_server,
+        {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"},
+        headers=headers,
+    )
+
+    # THEN it is refused and nothing is renamed
+    assert status == 403
+    assert "Cross-site" in body["error"]
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
 
 
