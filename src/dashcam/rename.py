@@ -24,6 +24,7 @@ import typing as t
 import unicodedata
 from pathlib import Path
 
+from dashcam import cleaning
 from dashcam import enrich
 from dashcam import metadata
 from dashcam import terminal
@@ -406,7 +407,7 @@ def is_rename_target(track: metadata.Track, include_all: bool) -> bool:
 def has_usable_street_list(track: metadata.Track) -> bool:
     """Check whether a track can be named: enriched and current, or without located samples."""
     has_located_samples = any(
-        sample.status in enrich.LOCATED_STATUSES for sample in track.clean_samples
+        sample.status in cleaning.LOCATED_STATUSES for sample in track.clean_samples
     )
     if track.extraction_status != metadata.EXTRACTION_OK or not has_located_samples:
         return True

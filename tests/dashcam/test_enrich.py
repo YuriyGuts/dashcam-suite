@@ -23,7 +23,7 @@ def make_driven_track(make_track, to_lat_lon):
         for index, (east_m, north_m) in enumerate(points_m):
             status = statuses[index] if statuses else cleaning.STATUS_OK
             lat, lon = to_lat_lon(east_m, north_m)
-            is_located = status in enrich.LOCATED_STATUSES
+            is_located = status in cleaning.LOCATED_STATUSES
             track.raw_samples.append(
                 cleaning.RawSample(
                     t=float(index), gps_text="", clock_text="", gps_score=1.0, clock_score=1.0

@@ -5,6 +5,13 @@ import math
 # Mean Earth radius in meters.
 EARTH_RADIUS_M = 6_371_000
 
+# Meters per degree of latitude (and of longitude at the equator).
+METERS_PER_DEGREE = EARTH_RADIUS_M * math.pi / 180
+
+# Largest possible absolute latitude and longitude, in degrees.
+MAX_ABS_LAT = 90
+MAX_ABS_LON = 180
+
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return the great-circle distance between two points in meters."""

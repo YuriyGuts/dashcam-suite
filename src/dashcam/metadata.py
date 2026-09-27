@@ -403,8 +403,7 @@ def load_track_text(text: str) -> Track:
 def compute_trip_stats(track: Track) -> dict[str, t.Any]:
     """Compute the trip summary shown in the visualizer."""
     samples = track.clean_samples
-    located_statuses = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
-    located = [sample.status in located_statuses for sample in samples]
+    located = [sample.status in cleaning.LOCATED_STATUSES for sample in samples]
     times = [sample.time for sample in samples if sample.time is not None]
 
     distance_m = 0.0
@@ -476,7 +475,6 @@ def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]
     list[list[list[float]]]
         Runs of `[lat, lon]` points. Runs with fewer than two points are left out.
     """
-    located_statuses = {cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED}
     runs = []
     current_run: list[list[float]] = []
     last_point: list[float] | None = None
@@ -488,7 +486,11 @@ def simplify_route(samples: list[cleaning.CleanSample]) -> list[list[list[float]
             runs.append(simplify_polyline(current_run, GEOMETRY_TOLERANCE_M))
 
     for sample in samples:
-        if sample.status not in located_statuses or sample.lat is None or sample.lon is None:
+        if (
+            sample.status not in cleaning.LOCATED_STATUSES
+            or sample.lat is None
+            or sample.lon is None
+        ):
             if current_run:
                 finish_run()
             current_run = []
@@ -519,9 +521,8 @@ def simplify_polyline(points: list[list[float]], tolerance_m: float) -> list[lis
         return points
     # Local flat coordinates in meters, accurate enough over the length of a trip.
     lon_scale = math.cos(math.radians(points[0][0]))
-    meters_per_degree = geo.EARTH_RADIUS_M * math.pi / 180
-    xs = [point[1] * lon_scale * meters_per_degree for point in points]
-    ys = [point[0] * meters_per_degree for point in points]
+    xs = [point[1] * lon_scale * geo.METERS_PER_DEGREE for point in points]
+    ys = [point[0] * geo.METERS_PER_DEGREE for point in points]
 
     is_kept = [False] * len(points)
     is_kept[0] = is_kept[-1] = True

@@ -70,12 +70,6 @@ LOCALITY_RADII_M = {"city": 5000.0, "town": 2500.0, "village": 1200.0, "hamlet":
 LOCALITY_POPULATION_RADIUS_FACTOR = 10.0
 MAX_LOCALITY_RADIUS_M = 25000.0
 
-# Meters per degree of latitude.
-METERS_PER_DEGREE = geo.EARTH_RADIUS_M * math.pi / 180
-
-# Sample statuses with a usable position.
-LOCATED_STATUSES = frozenset([cleaning.STATUS_OK, cleaning.STATUS_INTERPOLATED])
-
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
 
@@ -117,7 +111,7 @@ def compute_samples_digest(track: metadata.Track) -> str:
     """Return a digest of the located positions of a track, as stored in the track file."""
     digest = hashlib.sha256()
     for sample in track.clean_samples:
-        if sample.status not in LOCATED_STATUSES:
+        if sample.status not in cleaning.LOCATED_STATUSES:
             continue
         digest.update(f"{sample.t:.2f} {sample.lat:.6f} {sample.lon:.6f}\n".encode())
     return digest.hexdigest()[:16]
@@ -144,7 +138,11 @@ def split_into_runs(track: metadata.Track) -> list[list[LocatedSample]]:
     runs: list[list[LocatedSample]] = []
     current_run: list[LocatedSample] = []
     for sample in track.clean_samples:
-        if sample.status not in LOCATED_STATUSES or sample.lat is None or sample.lon is None:
+        if (
+            sample.status not in cleaning.LOCATED_STATUSES
+            or sample.lat is None
+            or sample.lon is None
+        ):
             if current_run:
                 runs.append(current_run)
                 current_run = []
@@ -166,8 +164,8 @@ def to_local_meters(
     origin_lat: float, origin_lon: float, lat: float, lon: float
 ) -> tuple[float, float]:
     """Project a point to meters east and north of an origin (accurate over short distances)."""
-    east_m = (lon - origin_lon) * METERS_PER_DEGREE * math.cos(math.radians(origin_lat))
-    north_m = (lat - origin_lat) * METERS_PER_DEGREE
+    east_m = (lon - origin_lon) * geo.METERS_PER_DEGREE * math.cos(math.radians(origin_lat))
+    north_m = (lat - origin_lat) * geo.METERS_PER_DEGREE
     return east_m, north_m
 
 
@@ -231,7 +229,7 @@ def find_candidates(
     database: osm.RoadDatabase, sample: LocatedSample, heading: tuple[float, float] | None
 ) -> list[Candidate]:
     """Find the streets near a sample, with the emission cost of each."""
-    lat_margin = SEARCH_RADIUS_M / METERS_PER_DEGREE
+    lat_margin = SEARCH_RADIUS_M / geo.METERS_PER_DEGREE
     lon_margin = lat_margin / max(0.01, math.cos(math.radians(sample.lat)))
     chunks = database.find_road_chunks(
         min_lat=sample.lat - lat_margin,
@@ -382,7 +380,7 @@ def get_locality_radius_m(locality: osm.Locality) -> float:
 
 def find_locality(database: osm.RoadDatabase, lat: float, lon: float) -> dict[str, t.Any] | None:
     """Find the locality a point is in, as the entry stored in a track."""
-    lat_margin = MAX_LOCALITY_RADIUS_M / METERS_PER_DEGREE
+    lat_margin = MAX_LOCALITY_RADIUS_M / geo.METERS_PER_DEGREE
     lon_margin = lat_margin / max(0.01, math.cos(math.radians(lat)))
     localities = database.find_localities(
         min_lat=lat - lat_margin,

@@ -38,6 +38,8 @@ import cv2
 import numpy as np
 import numpy.typing as npt
 
+from dashcam import geo
+
 # Frame width that all geometry below is measured in. The overlay scales with the frame width, so
 # strips of other videos are scaled to this width before reading.
 NOMINAL_FRAME_WIDTH = 2560
@@ -111,10 +113,6 @@ GPS_TEXT_PATTERN = re.compile(
     r"(?:(?P<lat_hemisphere>[NS])(?P<lat>\d{1,2}\.\d+))? ?"
     r"(?:(?P<lon_hemisphere>[EW])(?P<lon>\d{1,3}\.\d+))?$"
 )
-
-# Largest possible absolute latitude and longitude, in degrees.
-MAX_ABS_LAT = 90
-MAX_ABS_LON = 180
 
 GrayImage = npt.NDArray[np.uint8]
 
@@ -557,7 +555,7 @@ def parse_gps_text(gps_text: str) -> GpsReading | None:
         return None
     lat = float(match["lat"]) * (-1 if match["lat_hemisphere"] == "S" else 1)
     lon = float(match["lon"]) * (-1 if match["lon_hemisphere"] == "W" else 1)
-    if abs(lat) > MAX_ABS_LAT or abs(lon) > MAX_ABS_LON:
+    if abs(lat) > geo.MAX_ABS_LAT or abs(lon) > geo.MAX_ABS_LON:
         return None
     speed_kmh = int(match["speed"]) if match["speed"] is not None else None
     return GpsReading(speed_kmh=speed_kmh, lat=lat, lon=lon)

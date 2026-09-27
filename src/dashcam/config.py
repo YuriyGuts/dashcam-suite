@@ -28,6 +28,8 @@ from pathlib import Path
 
 import platformdirs
 
+from dashcam import geo
+
 # Environment variable that points to a custom config file.
 CONFIG_PATH_ENV_VAR = "DASHCAM_CONFIG"
 
@@ -43,10 +45,6 @@ TYPE_DESCRIPTIONS = {str: "a string", int: "an integer", float: "a number"}
 
 # Settings that must be at least 1.
 POSITIVE_INT_SETTINGS = ("encode_job_count", "extract_job_count")
-
-# Latitude and longitude limits of an allowed area.
-MAX_ABS_LAT = 90
-MAX_ABS_LON = 180
 
 
 @dataclasses.dataclass(frozen=True)
@@ -216,13 +214,13 @@ def validate_allowed_areas(allowed_areas: t.Any, config_path: Path) -> None:
             )
         min_lat, min_lon, max_lat, max_lon = area
         is_in_range = (
-            -MAX_ABS_LAT <= min_lat <= max_lat <= MAX_ABS_LAT
-            and -MAX_ABS_LON <= min_lon <= max_lon <= MAX_ABS_LON
+            -geo.MAX_ABS_LAT <= min_lat <= max_lat <= geo.MAX_ABS_LAT
+            and -geo.MAX_ABS_LON <= min_lon <= max_lon <= geo.MAX_ABS_LON
         )
         if not is_in_range:
             raise ValueError(
                 f"Allowed area {area} in '{config_path}' must have min <= max, "
-                f"latitudes within +-{MAX_ABS_LAT}, and longitudes within +-{MAX_ABS_LON}"
+                f"latitudes within +-{geo.MAX_ABS_LAT}, and longitudes within +-{geo.MAX_ABS_LON}"
             )
 
 

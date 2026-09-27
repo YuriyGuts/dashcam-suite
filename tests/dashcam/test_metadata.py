@@ -377,8 +377,7 @@ def test_simplify_route_drops_points_on_a_straight_line():
 )
 def test_simplify_polyline_keeps_points_beyond_tolerance(offset_m, is_kept):
     # GIVEN a straight 200 m road with its middle point off the line by `offset_m` to the east
-    meters_per_degree = geo.EARTH_RADIUS_M * math.pi / 180
-    offset_lon = offset_m / (meters_per_degree * math.cos(math.radians(49.8)))
+    offset_lon = offset_m / (geo.METERS_PER_DEGREE * math.cos(math.radians(49.8)))
     points = [[49.8, 24.0], [49.8009, 24.0 + offset_lon], [49.8018, 24.0]]
 
     # WHEN simplifying it with a 5 m tolerance
