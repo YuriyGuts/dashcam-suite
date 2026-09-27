@@ -3,6 +3,7 @@ import http.client
 import json
 import logging
 import os
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -419,7 +420,27 @@ def test_server_serves_web_app(server):
     # THEN the web app page is returned
     assert status == 200
     assert headers["Content-Type"] == "text/html; charset=utf-8"
-    assert b'<script src="app.js">' in body
+    assert b'<script type="module" src="js/main.js">' in body
+
+
+def test_server_serves_every_web_app_module(server):
+    # GIVEN the web app modules and the modules they import
+    module_paths = sorted((serve.WEB_DIR / "js").glob("*.js"))
+    imported_names = {
+        name
+        for path in module_paths
+        for name in re.findall(r'from "\./([\w-]+\.js)"', path.read_text(encoding="utf-8"))
+    }
+
+    # WHEN requesting each module
+    responses = [fetch(f"{server}/js/{path.name}") for path in module_paths]
+
+    # THEN all are served as JavaScript, and every imported module exists
+    assert [status for status, _, _ in responses] == [200] * len(module_paths)
+    assert {headers["Content-Type"] for _, headers, _ in responses} == {
+        "text/javascript; charset=utf-8"
+    }
+    assert imported_names <= {path.name for path in module_paths}
 
 
 def test_server_serves_vendored_leaflet(server):

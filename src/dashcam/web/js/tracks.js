@@ -1,0 +1,128 @@
+// Loading and caching full tracks and simplified routes, and positions along a track.
+
+import {MAX_INTERPOLATION_STEP_S} from "./constants.js";
+import {fetchJson, isLocated} from "./helpers.js";
+import {state} from "./state.js";
+
+// Prepared tracks by trip ID: promises while loading, and the loaded values for synchronous use.
+const trackPromises = new Map();
+export const loadedTracks = new Map();
+let geometryPromise = null;
+
+function prepareTrack(trip, data) {
+  const samples = data.samples || [];
+  const runs = [];
+  let run = [];
+  samples.forEach((sample, index) => {
+    if (isLocated(sample)) {
+      run.push(index);
+    } else if (run.length) {
+      runs.push(run);
+      run = [];
+    }
+  });
+  if (run.length) {
+    runs.push(run);
+  }
+  const gaps = [];
+  for (let runIndex = 1; runIndex < runs.length; runIndex++) {
+    gaps.push([runs[runIndex - 1].at(-1), runs[runIndex][0]]);
+  }
+  return {trip, samples, runs, gaps, locatedIndexes: runs.flat(), streets: data.streets || []};
+}
+
+export function loadTrack(tripId) {
+  if (!trackPromises.has(tripId)) {
+    const trip = state.tripsById.get(tripId);
+    const promise = fetchJson(trip.track_url).then((data) => {
+      const track = prepareTrack(trip, data);
+      loadedTracks.set(tripId, track);
+      return track;
+    });
+    promise.catch(() => trackPromises.delete(tripId));
+    trackPromises.set(tripId, promise);
+  }
+  return trackPromises.get(tripId);
+}
+
+export function loadGeometry() {
+  if (!geometryPromise) {
+    geometryPromise = fetchJson("/api/geometry").then((data) => data.trips);
+    geometryPromise.catch(() => {
+      geometryPromise = null;
+    });
+  }
+  return geometryPromise;
+}
+
+// After a rename: moves the cached track to the new trip ID, points every cached track at its
+// reloaded trip, and drops the cached routes, which are keyed by trip ID.
+export function moveCachedTracks(oldId, newId) {
+  for (const tracks of [trackPromises, loadedTracks]) {
+    if (tracks.has(oldId)) {
+      tracks.set(newId, tracks.get(oldId));
+      tracks.delete(oldId);
+    }
+  }
+  for (const [id, track] of loadedTracks) {
+    track.trip = state.tripsById.get(id) ?? track.trip;
+  }
+  geometryPromise = null;
+}
+
+export function sampleLatLng(sample) {
+  return [sample.lat, sample.lon];
+}
+
+export function nearestSampleIndex(track, sampleIndexes, latlng) {
+  const lonScale = Math.cos((latlng.lat * Math.PI) / 180);
+  let bestIndex = sampleIndexes[0];
+  let bestDistance = Infinity;
+  for (const index of sampleIndexes) {
+    const sample = track.samples[index];
+    const dLat = sample.lat - latlng.lat;
+    const dLon = (sample.lon - latlng.lng) * lonScale;
+    const distance = dLat * dLat + dLon * dLon;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+// Position at a video offset: the last sample at or before it, moved towards the next sample.
+export function positionAtVideoTime(track, seconds) {
+  const samples = track.samples;
+  if (!samples.length) {
+    return null;
+  }
+  let low = 0;
+  let high = samples.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (samples[middle].t <= seconds) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  const sample = samples[low];
+  if (!isLocated(sample)) {
+    return null;
+  }
+  const nextSample = samples[low + 1];
+  const canInterpolate =
+    nextSample &&
+    isLocated(nextSample) &&
+    seconds > sample.t &&
+    nextSample.t - sample.t <= MAX_INTERPOLATION_STEP_S;
+  if (!canInterpolate) {
+    return sampleLatLng(sample);
+  }
+  const fraction = (seconds - sample.t) / (nextSample.t - sample.t);
+  return [
+    sample.lat + (nextSample.lat - sample.lat) * fraction,
+    sample.lon + (nextSample.lon - sample.lon) * fraction,
+  ];
+}
