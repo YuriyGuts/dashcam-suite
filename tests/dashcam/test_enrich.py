@@ -473,6 +473,34 @@ def test_enrich_tracks_reports_unreadable_tracks(enrich_store, config, make_driv
     assert enrich_store.load_track("2026-09-25 Trip 11-17").enrichment is not None
 
 
+def test_enrich_tracks_continues_after_a_failing_track(
+    enrich_store, config, make_driven_track, monkeypatch, caplog
+):
+    # GIVEN two tracks, the first of which fails to enrich
+    enrich_store.save_track(
+        make_driven_track(drive((50, 0), (450, 0)), video_filename="2026-09-24 Trip 08-00.mp4")
+    )
+    enrich_store.save_track(
+        make_driven_track(drive((50, 0), (450, 0)), video_filename="2026-09-25 Trip 11-17.mp4")
+    )
+    original_enrich_track = enrich.enrich_track
+
+    def enrich_track_failing_once(track, database):
+        if track.video_filename.startswith("2026-09-24"):
+            raise ValueError("broken track")
+        original_enrich_track(track, database)
+
+    monkeypatch.setattr(enrich, "enrich_track", enrich_track_failing_once)
+
+    # WHEN enriching the tracks
+    failed_count = run_enrich_tracks(enrich_store, config)
+
+    # THEN the failure is reported and counted, and the other track is still enriched
+    assert failed_count == 1
+    assert "Cannot enrich '2026-09-24 Trip 08-00.json'" in caplog.text
+    assert enrich_store.load_track("2026-09-25 Trip 11-17").enrichment is not None
+
+
 def test_enrich_tracks_without_osm_data(tmp_path, config):
     with pytest.raises(RuntimeError, match="--update-osm"):
         enrich.enrich_tracks(

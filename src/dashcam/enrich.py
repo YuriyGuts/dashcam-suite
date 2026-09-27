@@ -491,8 +491,14 @@ def enrich_tracks(
                 continue
             if not force and is_enrichment_current(track, database.osm_timestamp):
                 continue
-            enrich_track(track, database)
-            store.save_track(track)
+            try:
+                enrich_track(track, database)
+                store.save_track(track)
+            except Exception:
+                # One broken track must not stop the others, but its traceback shows the bug.
+                LOGGER.exception(f"Cannot enrich '{track_file.path.name}'")
+                failed_count += 1
+                continue
             enriched_count += 1
             street_count_text = (
                 "1 street" if len(track.streets) == 1 else f"{len(track.streets)} streets"
