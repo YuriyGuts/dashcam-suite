@@ -265,6 +265,12 @@ uv run ty check
 
 `docs/SPEC.md` is the design document: file formats, cleaning rules, matching and what each command does. Keep it in sync when behavior changes.
 
+To let Claude Code test the web app in a browser, add the Playwright MCP server:
+
+```sh
+claude mcp add playwright -- npx @playwright/mcp@latest --browser firefox --output-dir .local/.playwright-mcp
+```
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
