@@ -271,6 +271,21 @@ def test_run_doctor_reports_videos_sharing_a_track(library_dir, store, add_trip,
     assert "'2026-09-25 Trip.mov', '2026-09-25 Trip.mp4' would share one track" in caplog.text
 
 
+def test_run_doctor_reports_time_without_offset(library_dir, store, add_trip, caplog):
+    # GIVEN a track with a hand-edited time without a UTC offset
+    add_trip("2026-09-25 Trip.mp4")
+    track_path = store.track_path("2026-09-25 Trip")
+    text = track_path.read_text(encoding="utf-8")
+    track_path.write_text(text.replace("11:17:01+03:00", "11:17:01", 1), encoding="utf-8")
+
+    # WHEN running the doctor
+    error_count = run_doctor(library_dir, store)
+
+    # THEN the track is reported as unreadable
+    assert error_count == 1
+    assert "'time' needs a UTC offset" in caplog.text
+
+
 def test_run_doctor_accepts_rebuilt_index_with_misnamed_track(library_dir, store, add_trip, caplog):
     # GIVEN a track and a copy of it under another name, and a rebuilt index
     add_trip("2026-09-25 Trip.mp4")

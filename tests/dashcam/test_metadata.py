@@ -207,6 +207,7 @@ def test_load_track_text_with_invalid_sample(make_track):
         ({"lat": "49.8"}, "must be numbers or null"),
         ({"lon": True}, "must be numbers or null"),
         ({"status": "good"}, "Unknown status 'good'"),
+        ({"time": "2026-09-25T11:17:01"}, "'time' needs a UTC offset"),
     ],
 )
 def test_load_track_text_with_hand_edited_sample(make_track, changes, message):

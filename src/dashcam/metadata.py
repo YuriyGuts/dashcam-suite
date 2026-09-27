@@ -293,9 +293,12 @@ def samples_from_dict(sample_dict: dict) -> tuple[cleaning.RawSample, cleaning.C
     if status in cleaning.LOCATED_STATUSES and (lat is None or lon is None):
         raise TrackFormatError(f"A sample with status {status!r} needs 'lat' and 'lon'")
     time_text = sample_dict.get("time")
+    sample_time = datetime.datetime.fromisoformat(time_text) if time_text else None
+    if sample_time is not None and sample_time.tzinfo is None:
+        raise TrackFormatError(f"'time' needs a UTC offset: {time_text!r}")
     clean_sample = cleaning.CleanSample(
         t=float(sample_dict["t"]),
-        time=datetime.datetime.fromisoformat(time_text) if time_text else None,
+        time=sample_time,
         lat=lat,
         lon=lon,
         kmh=sample_dict.get("kmh"),
