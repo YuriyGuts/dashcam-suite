@@ -225,6 +225,58 @@ def test_run_encode_command_trips_creates_library_dir(config, tmp_path, encode_c
     assert kwargs["check_readability"] is False
 
 
+def test_run_encode_command_dry_run_does_not_create_library_dir(config, tmp_path, encode_calls):
+    # GIVEN a library directory that does not exist
+    library_dir = tmp_path / "new" / "dir"
+    parsed_args = cli.parse_command_line_args(
+        ["encode", "trips", "--library-dir", str(library_dir), "--dry-run"], config
+    )
+
+    # WHEN running the command as a dry run
+    cli.run_encode_command(parsed_args, config)
+
+    # THEN nothing is created
+    assert not library_dir.exists()
+    assert encode_calls[0][1]["dry_run"] is True
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["serve", "--port", "70000"],
+        ["serve", "--port", "-1"],
+        ["extract", "--job-count", "0"],
+        ["import", "--extract-job-count", "-2"],
+        ["encode", "trips", "--min-trip-gap-hours", "0"],
+    ],
+)
+def test_parse_command_line_args_rejects_out_of_range_numbers(config, args, capsys):
+    # WHEN parsing a number out of its range
+    # THEN argparse exits with a usage error that explains the range
+    with pytest.raises(SystemExit) as exc_info:
+        cli.parse_command_line_args(args, config)
+    assert exc_info.value.code == 2
+    assert "must be" in capsys.readouterr().err
+
+
+def test_main_exits_quietly_on_ctrl_c(monkeypatch, config, caplog):
+    # GIVEN a command interrupted with Ctrl+C
+    def interrupted_encode(parsed_args, config):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("dashcam.cli.load_config", lambda: config)
+    monkeypatch.setattr("dashcam.cli.run_encode_command", interrupted_encode)
+    monkeypatch.setattr("sys.argv", ["dashcam", "encode", "trips"])
+
+    # WHEN running the tool
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    # THEN it reports the interruption and exits with the conventional code
+    assert exc_info.value.code == cli.INTERRUPTED_EXIT_CODE
+    assert "Interrupted" in caplog.text
+
+
 def test_run_encode_command_range(config, tmp_path, encode_calls):
     # GIVEN `encode range` arguments
     parsed_args = cli.parse_command_line_args(

@@ -1,3 +1,6 @@
+import signal
+import threading
+
 import pytest
 
 from dashcam import system
@@ -95,3 +98,26 @@ def test_prevent_os_sleep_on_unsupported_platform(monkeypatch, started_processes
 
     # THEN no process is started
     assert started_processes == []
+
+
+def test_worker_pool_workers_ignore_ctrl_c():
+    # GIVEN a worker pool
+    with system.worker_pool(1) as process_pool:
+        # WHEN asking a worker how it handles Ctrl+C
+        handler = process_pool.apply(signal.getsignal, (signal.SIGINT,))
+
+    # THEN it ignores it, so that only this process reacts
+    assert handler == signal.SIG_IGN
+
+
+def test_worker_pool_stops_log_forwarding_when_the_body_fails():
+    # GIVEN a worker pool whose body fails
+    threads_before = set(threading.enumerate())
+
+    # WHEN the error leaves the pool
+    with pytest.raises(ValueError, match="failed"):
+        with system.worker_pool(1):
+            raise ValueError("failed")
+
+    # THEN the log forwarding thread has ended
+    assert set(threading.enumerate()) - threads_before == set()

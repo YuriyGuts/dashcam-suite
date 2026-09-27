@@ -65,17 +65,47 @@ LOGGER = logging.getLogger(__name__)
 # Commands that work without a library directory when the metadata directory is known.
 METADATA_ONLY_COMMANDS = {"enrich", "forget"}
 
+# Exit code of a process stopped by Ctrl+C, as shells report it.
+INTERRUPTED_EXIT_CODE = 130
+
+# The largest TCP port number.
+MAX_PORT = 65535
+
+
+def parse_positive_int(text: str) -> int:
+    """Parse an option value that must be an integer of at least 1."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
+def parse_positive_float(text: str) -> float:
+    """Parse an option value that must be a positive number."""
+    value = float(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"must be positive, not {text}")
+    return value
+
+
+def parse_port(text: str) -> int:
+    """Parse a TCP port number, where 0 picks a free port."""
+    value = int(text)
+    if not 0 <= value <= MAX_PORT:
+        raise argparse.ArgumentTypeError(f"must be between 0 and {MAX_PORT}, not {value}")
+    return value
+
 
 def add_trip_grouping_arguments(parser: argparse.ArgumentParser, config: Config) -> None:
     """Add the options that group raw videos into trips."""
     parser.add_argument(
         "--min-trip-gap-hours",
-        metavar="TG",
+        metavar="HOURS",
         help=(
             "The minimum time difference (in hours) between consecutive files "
-            "for them to be considered separate trips."
+            f"for them to be considered separate trips (default: {config.min_trip_gap_hours:g})."
         ),
-        type=float,
+        type=parse_positive_float,
         required=False,
         default=config.min_trip_gap_hours,
     )
@@ -90,12 +120,12 @@ def add_job_count_argument(
     """Add an option that sets how many jobs run in parallel."""
     parser.add_argument(
         option_name,
-        metavar="JC",
+        metavar="N",
         help=(
             f"The maximum number of {what} in parallel. "
-            "Adjust this number to change system resource utilization."
+            f"Adjust this number to change system resource utilization (default: {default})."
         ),
-        type=int,
+        type=parse_positive_int,
         required=False,
         default=default,
     )
@@ -397,7 +427,7 @@ def parse_command_line_args(args: list[str], config: Config) -> argparse.Namespa
         "--port",
         metavar="PORT",
         help=f"Port to listen on (default: {serve.DEFAULT_PORT}).",
-        type=int,
+        type=parse_port,
         default=serve.DEFAULT_PORT,
     )
     serve_parser.add_argument(
@@ -529,7 +559,8 @@ def run_config_command(config_path: Path) -> None:
 def run_encode_command(parsed_args: argparse.Namespace, config: Config) -> int:
     """Entry point for the `encode` command."""
     check_readability = not parsed_args.skip_raw_video_validation
-    parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
+    if not parsed_args.dry_run:
+        parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
 
     if parsed_args.encode_mode == "trips":
         return encode.encode_trips(
@@ -579,7 +610,8 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
 
 def run_import_command(parsed_args: argparse.Namespace, config: Config) -> int:
     """Entry point for the `import` command."""
-    parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
+    if not parsed_args.dry_run:
+        parsed_args.library_dir.mkdir(parents=True, exist_ok=True)
     return importer.import_trips(
         raw_video_dir=parsed_args.raw_video_dir,
         library_dir=parsed_args.library_dir,
@@ -659,6 +691,9 @@ def main() -> None:
     except (OSError, RuntimeError) as exc:
         LOGGER.error(exc)
         sys.exit(1)
+    except KeyboardInterrupt:
+        LOGGER.warning("Interrupted")
+        sys.exit(INTERRUPTED_EXIT_CODE)
 
     sys.exit(1 if failed_count else 0)
 
