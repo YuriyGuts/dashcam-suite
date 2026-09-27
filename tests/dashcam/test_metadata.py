@@ -131,6 +131,31 @@ def test_load_track_text_with_invalid_json():
         metadata.load_track_text(text)
 
 
+def test_load_track_file_with_byte_order_mark(tmp_path, make_track):
+    # GIVEN a track file saved with a UTF-8 byte order mark
+    track = make_track(video_filename="2026-09-25 Вулиця.mp4")
+    path = tmp_path / "track.json"
+    path.write_bytes(b"\xef\xbb\xbf" + metadata.dump_track(track).encode("utf-8"))
+
+    # WHEN loading it
+    loaded_track = metadata.load_track_file(path)
+
+    # THEN it loads like any other track
+    assert loaded_track.video_filename == "2026-09-25 Вулиця.mp4"
+
+
+def test_load_track_file_with_other_encoding(tmp_path, make_track):
+    # GIVEN a track file saved in a legacy Cyrillic encoding
+    track = make_track(video_filename="2026-09-25 Вулиця.mp4")
+    path = tmp_path / "track.json"
+    path.write_bytes(metadata.dump_track(track).encode("cp1251"))
+
+    # WHEN loading it
+    # THEN it is reported as an invalid track
+    with pytest.raises(metadata.TrackFormatError, match="Not UTF-8"):
+        metadata.load_track_file(path)
+
+
 def test_load_track_text_with_missing_field(make_track):
     # GIVEN a track without a fingerprint
     data = json.loads(metadata.dump_track(make_track()))

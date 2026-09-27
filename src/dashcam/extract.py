@@ -564,7 +564,7 @@ def reclean_tracks(metadata_dir: Path, config: Config) -> int:
     failed_count = 0
     for path in store.list_track_paths():
         try:
-            track = metadata.load_track_text(path.read_text(encoding="utf-8"))
+            track = metadata.load_track_file(path)
         except (OSError, metadata.TrackFormatError) as exc:
             LOGGER.error(f"Cannot reclean '{path.name}': {exc}")
             failed_count += 1

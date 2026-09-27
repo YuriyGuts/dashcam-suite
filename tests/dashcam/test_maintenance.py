@@ -87,6 +87,18 @@ def test_run_doctor_reports_unreadable_track(library_dir, store, caplog):
     assert "line 2" in caplog.text
 
 
+def test_run_doctor_reports_track_in_other_encoding(library_dir, store, caplog):
+    # GIVEN a track file that is not UTF-8 text
+    store.track_path("2026-09-25 Trip").write_bytes('{"video_filename": "Вулиця"}'.encode("cp1251"))
+
+    # WHEN running the doctor
+    error_count = run_doctor(library_dir, store)
+
+    # THEN the track is reported as unreadable
+    assert error_count == 1
+    assert "Not UTF-8" in caplog.text
+
+
 def test_run_doctor_does_not_suggest_extracting_video_with_unreadable_track(
     library_dir, store, caplog
 ):

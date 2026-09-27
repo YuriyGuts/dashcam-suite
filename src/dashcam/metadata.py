@@ -419,6 +419,23 @@ def load_track_text(text: str) -> Track:
         raise TrackFormatError(str(exc)) from exc
 
 
+def load_track_file(path: Path) -> Track:
+    """
+    Read and parse a track file. A byte order mark, as some Windows editors write, is accepted.
+
+    Raises
+    ------
+    TrackFormatError
+        If the file is not UTF-8 text or not a valid track.
+    """
+    data = path.read_bytes()
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise TrackFormatError(f"Not UTF-8 text at byte {exc.start}") from exc
+    return load_track_text(text)
+
+
 def compute_trip_stats(track: Track) -> dict[str, t.Any]:
     """Compute the trip summary shown in the visualizer."""
     samples = track.clean_samples
@@ -647,7 +664,7 @@ class MetadataStore:
         progress_logger = terminal.ItemProgressLogger(LOGGER, "Loading tracks", len(paths))
         for loaded_count, path in enumerate(paths, start=1):
             try:
-                track = load_track_text(path.read_text(encoding="utf-8"))
+                track = load_track_file(path)
             except (OSError, TrackFormatError) as exc:
                 yield TrackFile(path=path, track=None, error=str(exc))
             else:
@@ -669,7 +686,7 @@ class MetadataStore:
 
     def load_track(self, stem: str) -> Track:
         """Load the track of a video stem."""
-        return load_track_text(self.track_path(stem).read_text(encoding="utf-8"))
+        return load_track_file(self.track_path(stem))
 
     def save_track(self, track: Track) -> Path:
         """Write a track atomically, so an interruption never leaves a truncated file."""
