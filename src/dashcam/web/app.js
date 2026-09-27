@@ -62,6 +62,14 @@ const MAX_INTERPOLATION_STEP_S = 3;
 const GOOD_COVERAGE = 0.95;
 const PARTIAL_COVERAGE = 0.7;
 
+// A draw of at least this many trips shows its status on the map at once. Smaller draws show it
+// only if they take longer than the delay (milliseconds).
+const LARGE_DRAW_TRIP_COUNT = 30;
+const MAP_STATUS_DELAY_MS = 200;
+
+// The rename suggestion shows that it is loading only after this delay (milliseconds).
+const SUGGESTION_LOADING_DELAY_MS = 300;
+
 // Longest trip video filename, including the extension (see `dashcam rename`).
 const MAX_FILENAME_LENGTH = 140;
 
@@ -342,6 +350,11 @@ function writeStoredJson(key, value) {
   } catch {
     // Storage may be unavailable (private windows, blocked site data). The value is a nicety.
   }
+}
+
+// Resolves once the browser had a chance to paint, e.g. a status shown before a long draw.
+function nextPaint() {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 }
 
 /* URL hash state. */
@@ -821,10 +834,27 @@ function drawTrack(layer, track) {
   }
 }
 
+// Shows what the map is busy with, at once for large draws and after a delay for small ones.
+// Resolves when the status is painted, so that the draw that follows does not hide it.
+async function showDrawStatus(tripCount) {
+  const text = `Drawing ${tripCount} ${tripCount === 1 ? "route" : "routes"}...`;
+  if (tripCount >= LARGE_DRAW_TRIP_COUNT) {
+    showMapStatus(text);
+    await nextPaint();
+  } else {
+    showMapStatus(text, {delayMs: MAP_STATUS_DELAY_MS});
+  }
+}
+
 async function drawRoutes(generation) {
   const tripIds = state.selectedIds.filter((id) => hasGps(state.tripsById.get(id)));
   // The focused trip is drawn last, on top of the others.
   tripIds.sort((a, b) => (a === state.focusedId) - (b === state.focusedId));
+  if (!tripIds.length) {
+    hideMapStatus();
+  } else {
+    await showDrawStatus(tripIds.length);
+  }
   const results = await Promise.allSettled(tripIds.map(loadTrack));
   if (generation !== drawGeneration) {
     return;
@@ -840,9 +870,14 @@ async function drawRoutes(generation) {
   routesLayer.remove();
   routesLayer = layer.addTo(map);
   updatePlaybackMarker();
+  hideMapStatus();
 }
 
 async function drawCoverage(generation) {
+  await showDrawStatus(filteredTrips().filter(hasGps).length);
+  if (generation !== drawGeneration) {
+    return;
+  }
   const geometry = await loadGeometry();
   if (generation !== drawGeneration) {
     return;
@@ -917,6 +952,7 @@ async function drawCoverage(generation) {
       gradient: HEAT_GRADIENT,
     }).addTo(map);
   }
+  hideMapStatus();
 }
 
 function updateCoverageDots() {
@@ -937,7 +973,10 @@ function renderMap() {
     routesLayer.remove();
     playbackMarker.remove();
     speedLegend.remove();
-    drawCoverage(generation).catch((error) => console.error("Cannot load the coverage:", error));
+    drawCoverage(generation).catch((error) => {
+      console.error("Cannot load the coverage:", error);
+      hideMapStatus();
+    });
     return;
   }
   coverageLayer.remove();
@@ -978,6 +1017,8 @@ const dom = {
   noGpsTrips: document.getElementById("no-gps-trips"),
   tripDetail: document.getElementById("trip-detail"),
   mapArea: document.getElementById("map-area"),
+  mapStatus: document.getElementById("map-status"),
+  mapStatusText: document.getElementById("map-status-text"),
   videoPanel: document.getElementById("video-panel"),
   videoHeader: document.querySelector("#video-panel .video-header"),
   videoTitle: document.getElementById("video-title"),
@@ -985,6 +1026,26 @@ const dom = {
   videoContainer: document.getElementById("video-container"),
   videoMessage: document.getElementById("video-message"),
 };
+
+let mapStatusTimer = null;
+
+function showMapStatus(text, {delayMs = 0} = {}) {
+  clearTimeout(mapStatusTimer);
+  const show = () => {
+    dom.mapStatusText.textContent = text;
+    dom.mapStatus.hidden = false;
+  };
+  if (delayMs) {
+    mapStatusTimer = setTimeout(show, delayMs);
+  } else {
+    show();
+  }
+}
+
+function hideMapStatus() {
+  clearTimeout(mapStatusTimer);
+  dom.mapStatus.hidden = true;
+}
 
 function renderLibrarySummary() {
   const tripCountText = `${state.trips.length} ${state.trips.length === 1 ? "trip" : "trips"}`;
@@ -1292,8 +1353,12 @@ function updateRenameHints(trip) {
   let hint;
   if (renameEdit.error) {
     hint = el("p", {className: "rename-error", role: "alert"}, renameEdit.error);
+  } else if (renameEdit.suggestionError) {
+    hint = el("p", {}, renameEdit.suggestionError);
   } else if (renameEdit.suggestion === null) {
-    hint = el("p", {}, renameEdit.suggestionError ?? "Loading the suggested name...");
+    hint = renameEdit.isSuggestionSlow
+      ? el("p", {}, el("span", {className: "spinner", "aria-hidden": "true"}), "Loading the suggested name...")
+      : null;
   } else if (renameEdit.suggestion === renameEdit.draft.trim()) {
     hint = el("p", {}, "This is the suggested name.");
   } else {
@@ -1308,16 +1373,28 @@ function updateRenameHints(trip) {
       ),
     );
   }
-  renameEdit.hint.replaceChildren(hint);
+  renameEdit.hint.replaceChildren(...withoutEmpty([hint]));
 }
 
 function startRename(tripId) {
   const trip = state.tripsById.get(tripId);
-  renameEdit = {tripId, draft: trip.name, suggestion: null, suggestionError: null, error: null, isSaving: false};
+  renameEdit = {
+    tripId,
+    draft: trip.name,
+    suggestion: null,
+    suggestionError: null,
+    isSuggestionSlow: false,
+    error: null,
+    isSaving: false,
+  };
   renderDetail();
   renameEdit.input.focus();
   renameEdit.input.select();
   const edit = renameEdit;
+  const slowTimer = setTimeout(() => {
+    edit.isSuggestionSlow = true;
+    if (renameEdit === edit) updateRenameHints(trip);
+  }, SUGGESTION_LOADING_DELAY_MS);
   fetchJson(`/api/suggestion?id=${encodeURIComponent(tripId)}`)
     .then((data) => {
       edit.suggestion = nameFromFilename(trip, data.filename);
@@ -1326,6 +1403,7 @@ function startRename(tripId) {
       edit.suggestionError = `No suggestion: ${error.message}`;
     })
     .finally(() => {
+      clearTimeout(slowTimer);
       if (renameEdit === edit) updateRenameHints(trip);
     });
 }
@@ -1995,9 +2073,13 @@ async function start() {
     index = await fetchJson("/api/trips");
   } catch (error) {
     map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
+    hideMapStatus();
+    dom.tripList.replaceChildren();
     dom.summary.replaceChildren(el("p", {}, `Cannot load the trips: ${error.message}`));
     return;
   }
+  document.body.classList.remove("is-loading");
+  hideMapStatus();
   applyIndex(index);
   readHash();
   syncColorSlots();

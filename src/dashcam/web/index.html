@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="is-loading">
   <aside id="sidebar">
     <header class="sidebar-header">
       <h1>Dashcam trips</h1>
@@ -24,7 +24,7 @@
         <button type="button" data-color="trip">By trip</button>
         <button type="button" data-color="speed">By speed</button>
       </div>
-      <label class="switch-label" id="heat-control">
+      <label class="switch-label" id="heat-control" hidden>
         <input type="checkbox" class="switch" id="heat-toggle">
         Heatmap
       </label>
@@ -37,7 +37,7 @@
           <input type="search" id="filter-name" placeholder="Search trips" autocomplete="off" aria-label="Search trips">
         </label>
         <div id="date-filter">
-          <div id="date-slider" class="range-slider">
+          <div id="date-slider" class="range-slider" hidden>
             <div class="range-track">
               <div class="range-ticks"></div>
               <div class="range-fill"></div>
@@ -64,7 +64,9 @@
         </label>
       </section>
 
-      <section id="summary" class="section" aria-live="polite"></section>
+      <section id="summary" class="section" aria-live="polite">
+        <div class="summary-title">Loading trips...</div>
+      </section>
 
       <div class="list-header">
         <span class="list-title">Trips</span>
@@ -76,7 +78,14 @@
           </button>
         </div>
       </div>
-      <ul id="trip-list"></ul>
+      <ul id="trip-list">
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+        <li class="trip trip-skeleton" aria-hidden="true"><span></span><span></span></li>
+      </ul>
       <details id="no-gps-trips" hidden>
         <summary></summary>
         <ul></ul>
@@ -88,6 +97,10 @@
 
   <main id="map-area">
     <div id="map"></div>
+    <div id="map-status" role="status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="map-status-text">Loading trips...</span>
+    </div>
     <section id="video-panel" hidden aria-label="Trip video">
       <header class="video-header" title="Drag to move">
         <svg class="icon icon-small drag-handle" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/></svg>
