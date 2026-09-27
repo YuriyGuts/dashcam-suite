@@ -20,7 +20,6 @@ Usage:
 
 import datetime
 import logging
-import math
 import sys
 import time
 from pathlib import Path
@@ -28,8 +27,10 @@ from pathlib import Path
 import cv2
 
 from dashcam import cleaning
+from dashcam import geo
 from dashcam import overlay
 from dashcam.config import load_config
+from dashcam.extract import SAMPLE_FPS
 from dashcam.video import iter_overlay_strips
 from dashcam.video import probe_video
 
@@ -38,9 +39,6 @@ SAMPLE_VIDEO_DIR = Path(__file__).parents[1] / ".local" / "video"
 
 # Where to save the strips of flagged readings.
 REVIEW_DIR = Path(__file__).parents[1] / ".local" / ".scratch" / "ocr-review"
-
-# Frames per second to sample.
-SAMPLE_FPS = 2
 
 # Largest plausible change of latitude or longitude between neighboring frames (degrees).
 MAX_COORDINATE_STEP = 0.01
@@ -54,7 +52,8 @@ MAX_SPEED_MISMATCH_KMH = 25
 # How many speed mismatches to print per video.
 MAX_REPORTED_MISMATCHES = 15
 
-EARTH_RADIUS_M = 6_371_000
+# Reference point for camera clock times, which have no time zone.
+CLOCK_EPOCH = datetime.datetime(1970, 1, 1)
 
 # pylint: disable=logging-fstring-interpolation
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)8s | %(message)s")
@@ -66,10 +65,13 @@ def clock_offset(offset_s: float, reading: overlay.OverlayReading) -> float | No
     clock = cleaning.parse_clock_text(reading.clock_text)
     if clock is None:
         return None
-    return clock.timestamp() - offset_s
+    # Not `timestamp()`, which would apply the DST changes of this machine's time zone.
+    return (clock - CLOCK_EPOCH).total_seconds() - offset_s
 
 
-def is_isolated_outlier(previous_value, value, next_value, tolerance) -> bool:
+def is_isolated_outlier(
+    previous_value: float | None, value: float | None, next_value: float | None, tolerance: float
+) -> bool:
     """Check whether a value disagrees with both neighbors while they agree with each other."""
     if previous_value is None or value is None or next_value is None:
         return False
@@ -129,15 +131,6 @@ def find_flagged_readings(
     return flagged
 
 
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Return the great-circle distance between two points in meters."""
-    lat1_rad, lat2_rad = math.radians(lat1), math.radians(lat2)
-    dlat = lat2_rad - lat1_rad
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
-    return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(a))
-
-
 def find_speed_mismatches(
     readings: list[tuple[float, overlay.OverlayReading]],
 ) -> list[tuple[float, float, int]]:
@@ -173,7 +166,8 @@ def find_speed_mismatches(
         if gps_value.speed_kmh is None or next_gps_value.speed_kmh is None:
             continue
         implied_kmh = (
-            haversine_m(gps_value.lat, gps_value.lon, next_gps_value.lat, next_gps_value.lon) * 3.6
+            geo.haversine_m(gps_value.lat, gps_value.lon, next_gps_value.lat, next_gps_value.lon)
+            * 3.6
         )
         displayed_kmh = (gps_value.speed_kmh + next_gps_value.speed_kmh) / 2
         if abs(implied_kmh - displayed_kmh) > MAX_SPEED_MISMATCH_KMH:
@@ -187,7 +181,8 @@ def evaluate_video(path: Path) -> None:
     video_info = probe_video(path, config.ffprobe_executable)
     templates = overlay.load_glyph_templates()
 
-    strips = []
+    # Strips are kept as PNG, a third of their raw size, to save the flagged ones afterwards.
+    encoded_strips = []
     readings: list[tuple[float, overlay.OverlayReading]] = []
     started_at = time.monotonic()
     for offset_s, strip in iter_overlay_strips(
@@ -197,10 +192,10 @@ def evaluate_video(path: Path) -> None:
         ffmpeg_executable=config.ffmpeg_executable,
         hwaccel_options=config.hwaccel_options,
     ):
-        strips.append(strip)
+        encoded_strips.append(cv2.imencode(".png", strip)[1].tobytes())
         readings.append((offset_s, overlay.read_overlay(strip, templates)))
     elapsed_s = time.monotonic() - started_at
-    LOGGER.info(f"{path.name}: {len(strips)} frames in {elapsed_s:.0f} s")
+    LOGGER.info(f"{path.name}: {len(readings)} frames in {elapsed_s:.0f} s")
 
     flagged = find_flagged_readings(readings)
     unreliable = [
@@ -228,8 +223,8 @@ def evaluate_video(path: Path) -> None:
             f"    {offset_s:7.1f}s {reason:<22} {reading.raw!r} "
             f"(scores {reading.gps_min_score:.2f}/{reading.clock_min_score:.2f})"
         )
-        review_path = REVIEW_DIR / f"{path.stem[:10]}_{offset_s:07.1f}.png"
-        cv2.imwrite(str(review_path), strips[index])
+        review_path = REVIEW_DIR / f"{path.stem}_{offset_s:07.1f}.png"
+        review_path.write_bytes(encoded_strips[index])
 
 
 def main() -> None:

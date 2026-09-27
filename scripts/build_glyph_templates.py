@@ -31,7 +31,6 @@ LABELS_PATH = FIXTURE_DIR / "labels.json"
 
 # Position of the labeled texts in the fixture strips: the GPS text starts at the left margin,
 # and the clock text ends at the right margin.
-FIXTURE_TEXT_TOP = 18
 FIXTURE_GPS_TEXT_LEFT = 18
 FIXTURE_CLOCK_TEXT_RIGHT = 2542
 
@@ -56,7 +55,7 @@ def cut_padded_cell(strip: npt.NDArray[np.uint8], x: int) -> FloatImage:
     ).astype(np.float32)
     padded_height = overlay.CELL_HEIGHT + 2 * MAX_ALIGNMENT_SHIFT
     padded_width = overlay.CELL_WIDTH + 2 * MAX_ALIGNMENT_SHIFT
-    return padded_strip[FIXTURE_TEXT_TOP : FIXTURE_TEXT_TOP + padded_height, x : x + padded_width]
+    return padded_strip[overlay.TEXT_TOP : overlay.TEXT_TOP + padded_height, x : x + padded_width]
 
 
 def collect_labeled_cells() -> dict[str, list[tuple[str, FloatImage]]]:
