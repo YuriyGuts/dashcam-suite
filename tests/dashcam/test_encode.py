@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import datetime
 import logging
@@ -819,6 +820,46 @@ def test_encode_trips_with_nothing_new(
     assert failed_count == 0
     assert "Nothing to encode" in caplog.text
     assert fake_ffmpeg.calls == []
+
+
+class InterruptedPool:
+    """Runs the first job in the test process, then stops like Ctrl+C before its result."""
+
+    def imap_unordered(self, func, items):
+        func(items[0])
+        raise KeyboardInterrupt
+        yield
+
+
+@contextlib.contextmanager
+def interrupted_worker_pool(process_count):
+    yield InterruptedPool()
+
+
+def test_encode_trips_logs_outputs_saved_before_an_interruption(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    no_os_sleep_prevention,
+    monkeypatch,
+):
+    # GIVEN two trips, and Ctrl+C after the first one is saved but before its result arrives
+    make_raw_videos("20260925111707_000001.MP4", "20260925180000_000002.MP4")
+    monkeypatch.setattr("dashcam.encode.worker_pool", interrupted_worker_pool)
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+    metadata_dir = tmp_path / "metadata"
+
+    # WHEN encoding trips
+    with pytest.raises(KeyboardInterrupt):
+        run_encode_trips(config, raw_video_dir, library_dir, metadata_dir)
+
+    # THEN the raw video of the saved trip is logged, so it is not encoded again after a rename
+    encoded_log = encode.EncodedSegmentLog.load(metadata_dir)
+    assert list(encoded_log.sizes) == ["20260925111707_000001.MP4"]
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
 
 
 @pytest.mark.parametrize(

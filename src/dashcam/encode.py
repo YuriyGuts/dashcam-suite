@@ -538,6 +538,31 @@ def run_encode_job_with_outcome(
     return job_def, run_encode_job(job_def)
 
 
+def log_unreported_outputs(
+    job_defs: list[EncodeJobDefinition],
+    logged_output_paths: set[Path],
+    encoded_log: EncodedSegmentLog,
+) -> None:
+    """
+    Record the raw videos of the jobs that saved their output but whose result never arrived,
+    e.g. because of Ctrl+C. An output only appears under its name when it is complete, and none
+    existed when the jobs were planned.
+    """
+    unreported_job_defs = [
+        job_def
+        for job_def in job_defs
+        if job_def.output_path not in logged_output_paths and job_def.output_path.exists()
+    ]
+    if not unreported_job_defs:
+        return
+    for job_def in unreported_job_defs:
+        encoded_log.add(job_def.raw_segments)
+    try:
+        encoded_log.save()
+    except OSError as exc:
+        LOGGER.error(f"Cannot record the encoded raw videos: {exc}")
+
+
 def run_encode_jobs(
     job_defs: list[EncodeJobDefinition],
     job_count: int,
@@ -558,16 +583,22 @@ def run_encode_jobs(
     process_count = min(job_count, len(job_defs))
     LOGGER.info(f"Encoding {len(job_defs)} videos with {process_count} parallel jobs")
     failed_count = 0
-    with prevent_os_sleep():
-        with worker_pool(process_count) as process_pool:
-            for done_count, (job_def, is_encoded) in enumerate(
-                process_pool.imap_unordered(run_encode_job_with_outcome, job_defs), start=1
-            ):
-                LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
-                if is_encoded:
-                    encoded_log.add(job_def.raw_segments)
-                    encoded_log.save()
-                failed_count += not is_encoded
+    logged_output_paths = set()
+    try:
+        with prevent_os_sleep():
+            with worker_pool(process_count) as process_pool:
+                for done_count, (job_def, is_encoded) in enumerate(
+                    process_pool.imap_unordered(run_encode_job_with_outcome, job_defs), start=1
+                ):
+                    LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
+                    if is_encoded:
+                        encoded_log.add(job_def.raw_segments)
+                        encoded_log.save()
+                        logged_output_paths.add(job_def.output_path)
+                    failed_count += not is_encoded
+    except BaseException:
+        log_unreported_outputs(job_defs, logged_output_paths, encoded_log)
+        raise
 
     summary = f"Encoded {len(job_defs) - failed_count} videos, {failed_count} failed"
     if failed_count:
