@@ -18,8 +18,7 @@ def test_get_platform_defaults_on_macos(platform):
     # WHEN getting the defaults
     defaults = config_module.get_platform_defaults()
 
-    # THEN VideoToolbox is used and the SD card is expected under /Volumes
-    assert defaults.hwaccel_options == "-hwaccel videotoolbox"
+    # THEN the SD card is expected under /Volumes
     assert defaults.raw_video_dir.startswith("/Volumes/")
 
 
@@ -30,20 +29,33 @@ def test_get_platform_defaults_on_linux(platform):
     # WHEN getting the defaults
     defaults = config_module.get_platform_defaults()
 
-    # THEN Vulkan is used and the SD card is expected under /media
-    assert defaults.hwaccel_options == "-hwaccel vulkan"
+    # THEN the SD card is expected under /media
     assert defaults.raw_video_dir.startswith("/media/")
 
 
 def test_get_platform_defaults_on_other_platforms(platform):
-    # GIVEN an unsupported platform
+    # GIVEN Windows
     platform("win32")
 
     # WHEN getting the defaults
     defaults = config_module.get_platform_defaults()
 
-    # THEN no hardware acceleration is used
-    assert defaults.hwaccel_options == ""
+    # THEN the SD card is expected on a drive
+    assert defaults.raw_video_dir == "E:\\DCIM"
+
+
+def test_get_platform_defaults_without_hardware_acceleration(platform):
+    # GIVEN each supported platform
+    hwaccel_options_by_platform = {}
+    for platform_name in ("darwin", "linux", "win32"):
+        platform(platform_name)
+
+        # WHEN getting the defaults
+        defaults = config_module.get_platform_defaults()
+        hwaccel_options_by_platform[platform_name] = defaults.hwaccel_options
+
+    # THEN hardware acceleration is off everywhere, so that ffmpeg works without a GPU
+    assert hwaccel_options_by_platform == {"darwin": "", "linux": "", "win32": ""}
 
 
 def test_load_config_without_file(tmp_path):

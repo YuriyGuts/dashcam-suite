@@ -27,7 +27,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Supported: Linux, macOS, and Windows. Code stays portable (`pathlib`, commands as argument lists, no `shell=True`).
 - Python project managed by `uv` with a local `.venv`. External requirement: `ffmpeg` and `ffprobe` (paths configurable).
 - `src/` layout, pytest, ruff (isort with one import per line), type annotations, `ty` type checking.
-- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone, allowed GPS areas. `dashcam config` prints the config file path and the effective settings.
+- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (off by default), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone, allowed GPS areas. `dashcam config` prints the config file path and the effective settings.
 - Directories:
   - `library_dir` and `raw_video_dir` in the config expand `~` and must be absolute. A relative `metadata_dir` in the config is relative to the library directory.
   - Paths given as options are ordinary shell paths, relative to the current directory.

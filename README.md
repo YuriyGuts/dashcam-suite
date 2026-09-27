@@ -46,7 +46,7 @@ Set the `DASHCAM_CONFIG` environment variable to use a different file.
 
 `dashcam config` prints the effective settings.
 
-Here is a full config. The values are the defaults, except for `library_dir`, `raw_video_dir` and `hwaccel_options`, which depend on your machine:
+Here is a full config. The values are the defaults, except for `library_dir` and `raw_video_dir`, which depend on your machine:
 
 ```toml
 # Where the merged, encoded trip videos will go.
@@ -88,8 +88,10 @@ extract_job_count = 10
 ffmpeg_executable = "ffmpeg"
 ffprobe_executable = "ffprobe"
 
-# Hardware decoding options (on macOS: "-hwaccel videotoolbox"). Set to "" to disable.
-hwaccel_options = "-hwaccel vulkan"
+# Hardware decoding options. Off by default. Depending on your system, try:
+# "-hwaccel vulkan" on Linux, "-hwaccel videotoolbox" on macOS,
+# or "-hwaccel d3d12va" on Windows.
+hwaccel_options = ""
 
 # Video encoder settings. Keep `open-gop=0` so seeking stays fast in Firefox.
 video_codec_options = "-c:v libx265 -crf 30 -preset fast -x265-params open-gop=0"

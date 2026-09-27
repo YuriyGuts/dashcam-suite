@@ -62,7 +62,8 @@ class Config:
     ffmpeg_executable: str
     ffprobe_executable: str
 
-    # Hardware acceleration options for decoding. Leave blank ("") for none.
+    # Hardware acceleration options for decoding, e.g. `-hwaccel vulkan` on Linux,
+    # `-hwaccel videotoolbox` on macOS, or `-hwaccel d3d12va` on Windows. Blank ("") for none.
     hwaccel_options: str
 
     # Codec/quality settings for the encoded trip videos.
@@ -102,6 +103,7 @@ def get_platform_defaults() -> Config:
     common_settings: dict[str, t.Any] = {
         "ffmpeg_executable": "ffmpeg",
         "ffprobe_executable": "ffprobe",
+        "hwaccel_options": "",
         # Closed GOPs make every keyframe an IDR frame. Firefox only seeks efficiently to IDR
         # frames: with x265's default open GOPs, it decodes from the start of the video on every
         # seek, which takes up to a minute in a long trip.
@@ -121,20 +123,17 @@ def get_platform_defaults() -> Config:
     if sys.platform == "darwin":
         return Config(
             raw_video_dir="/Volumes/DASHCAM/DCIM",
-            hwaccel_options="-hwaccel videotoolbox",
             **common_settings,
         )
 
     if sys.platform == "linux":
         return Config(
             raw_video_dir=f"/media/{getpass.getuser()}/DASHCAM/DCIM",
-            hwaccel_options="-hwaccel vulkan",
             **common_settings,
         )
 
     return Config(
         raw_video_dir="E:\\DCIM",
-        hwaccel_options="",
         **common_settings,
     )
 

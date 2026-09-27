@@ -837,7 +837,7 @@ def test_extract_video_with_sample_video(config, tmp_path):
         video_path=SAMPLE_VIDEO_PATH,
         fingerprint="sample",
         metadata_dir=tmp_path,
-        config=dataclasses.replace(config, hwaccel_options=""),
+        config=config,
         make_preview=False,
     )
 

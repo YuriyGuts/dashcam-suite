@@ -134,7 +134,6 @@ def config():
         get_platform_defaults(),
         ffmpeg_executable="ffmpeg",
         ffprobe_executable="ffprobe",
-        hwaccel_options="-hwaccel videotoolbox",
         video_codec_options="-c:v libx265 -crf 30 -preset fast",
         audio_codec_options="-c:a aac -b:a 128k",
         encode_job_count=2,

@@ -310,7 +310,8 @@ def test_format_ffmpeg_concat_list_escapes_single_quotes(tmp_path):
 
 
 def test_build_ffmpeg_command(config, tmp_path):
-    # GIVEN a concat list and a partial output path
+    # GIVEN a config with hardware acceleration, a concat list, and a partial output path
+    config = dataclasses.replace(config, hwaccel_options="-hwaccel videotoolbox")
     concat_list_path = tmp_path / "list.txt"
     partial_output_path = tmp_path / "2026-09-25 Trip 11-17.mp4.partial"
 
@@ -332,8 +333,7 @@ def test_build_ffmpeg_command(config, tmp_path):
 
 
 def test_build_ffmpeg_command_without_hwaccel(config, tmp_path):
-    # GIVEN a config without hardware acceleration
-    config = dataclasses.replace(config, hwaccel_options="")
+    # GIVEN the default config, without hardware acceleration
 
     # WHEN building the ffmpeg command
     cmd = encode.build_ffmpeg_command(tmp_path / "list.txt", tmp_path / "out.partial", config)
