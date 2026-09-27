@@ -25,6 +25,25 @@ export function el(tag, attributes = {}, ...children) {
   return element;
 }
 
+// Rendering replaces the controls of the trip list and the detail panel. A focused control
+// marked with `data-focus-key` passes the keyboard focus to the new control with the same key,
+// or else to the one named by `data-focus-fallback` (e.g. from a trip in the list to the back
+// button of its detail).
+export function keepingFocus(render) {
+  const focused = document.activeElement?.closest("[data-focus-key]");
+  render();
+  if (!focused || focused.isConnected) {
+    return;
+  }
+  for (const key of withoutEmpty([focused.dataset.focusKey, focused.dataset.focusFallback])) {
+    const target = document.querySelector(`[data-focus-key="${CSS.escape(key)}"]`);
+    if (target && !target.disabled && !target.closest("[hidden]")) {
+      target.focus();
+      return;
+    }
+  }
+}
+
 export function icon(name, className = "icon") {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");

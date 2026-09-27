@@ -2,7 +2,7 @@
 
 import {ARROW, DASH, DOT} from "./constants.js";
 import {dom} from "./elements.js";
-import {coverageBadge, el, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, isoDateToDay, presetStartDate, tripColor, withoutEmpty} from "./helpers.js";
+import {coverageBadge, el, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, isoDateToDay, keepingFocus, presetStartDate, tripColor, withoutEmpty} from "./helpers.js";
 import {aggregateStats, drawnSelection, filteredTrips, state} from "./state.js";
 import {map, renderMap, showHiddenTrips} from "./map.js";
 import {renderDetail} from "./detail.js";
@@ -158,6 +158,7 @@ function renderTripRow(trip) {
     type: "checkbox",
     checked: isSelected,
     "aria-label": `Draw ${trip.name}`,
+    "data-focus-key": `select:${trip.id}`,
     onchange: (event) => setTripSelected(trip.id, event.target.checked),
   });
   // A checked box takes the color of the trip on the map, so the list doubles as the legend.
@@ -173,7 +174,7 @@ function renderTripRow(trip) {
   const isHidden = state.mapMode === "coverage" && state.hiddenIds.has(trip.id);
   const body = el(
     "button",
-    {type: "button", className: "trip-body", onclick: () => focusTrip(trip.id)},
+    {type: "button", className: "trip-body", "data-focus-key": `open:${trip.id}`, "data-focus-fallback": "back", onclick: () => focusTrip(trip.id)},
     el(
       "span",
       {className: "trip-title-row"},
@@ -185,7 +186,7 @@ function renderTripRow(trip) {
   const showButton = isHidden
     ? el(
         "button",
-        {type: "button", className: "icon-button trip-show", "aria-label": `Show ${trip.name} on the map`, title: "Hidden from the map. Click to show", onclick: () => showHiddenTrips([trip.id])},
+        {type: "button", className: "icon-button trip-show", "data-focus-key": `show:${trip.id}`, "data-focus-fallback": `open:${trip.id}`, "aria-label": `Show ${trip.name} on the map`, title: "Hidden from the map. Click to show", onclick: () => showHiddenTrips([trip.id])},
         icon("eyeOff", "icon icon-small"),
       )
     : null;
@@ -243,12 +244,14 @@ export function formatLocalities(trip) {
 }
 
 export function renderSidebar() {
-  const visibleTrips = filteredTrips();
-  renderLibrarySummary();
-  renderControls();
-  renderSummary(visibleTrips);
-  renderTripList(visibleTrips);
-  renderDetail();
+  keepingFocus(() => {
+    const visibleTrips = filteredTrips();
+    renderLibrarySummary();
+    renderControls();
+    renderSummary(visibleTrips);
+    renderTripList(visibleTrips);
+    renderDetail();
+  });
 }
 
 export function renderAll() {

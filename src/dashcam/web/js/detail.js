@@ -2,7 +2,7 @@
 
 import {DASH, DOT, MAX_FILENAME_LENGTH, STATUS_LABELS, SUGGESTION_LOADING_DELAY_MS} from "./constants.js";
 import {dom} from "./elements.js";
-import {canPlayVideo, coverageBadge, el, fetchJson, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, postJson, withoutEmpty} from "./helpers.js";
+import {canPlayVideo, coverageBadge, el, fetchJson, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, keepingFocus, postJson, withoutEmpty} from "./helpers.js";
 import {applyIndex, colorSlots, state, syncColorSlots, writeHash} from "./state.js";
 import {loadTrack, moveCachedTracks} from "./tracks.js";
 import {fitToTrips} from "./map.js";
@@ -43,7 +43,7 @@ function renderTripName(trip) {
     el("h2", {}, trip.name),
     el(
       "button",
-      {type: "button", className: "icon-button", "aria-label": "Rename trip", title: "Rename trip", onclick: () => startRename(trip.id)},
+      {type: "button", className: "icon-button", "aria-label": "Rename trip", title: "Rename trip", "data-focus-key": "rename", onclick: () => startRename(trip.id)},
       icon("pencil", "icon icon-small"),
     ),
   );
@@ -65,6 +65,8 @@ function renderRenameForm(trip) {
     spellcheck: false,
     autocomplete: "off",
     "aria-label": "Trip name",
+    "data-focus-key": "rename-input",
+    "data-focus-fallback": "rename",
     "aria-invalid": renameEdit.error ? "true" : false,
     disabled: renameEdit.isSaving,
   });
@@ -105,8 +107,8 @@ function renderRenameForm(trip) {
     el(
       "div",
       {className: "rename-actions"},
-      el("button", {type: "submit", className: "button button-primary", disabled: renameEdit.isSaving}, renameEdit.isSaving ? "Saving..." : "Save"),
-      el("button", {type: "button", className: "button", disabled: renameEdit.isSaving, onclick: cancelRename}, "Cancel"),
+      el("button", {type: "submit", className: "button button-primary", disabled: renameEdit.isSaving, "data-focus-key": "rename-save", "data-focus-fallback": "rename"}, renameEdit.isSaving ? "Saving..." : "Save"),
+      el("button", {type: "button", className: "button", disabled: renameEdit.isSaving, "data-focus-key": "rename-cancel", "data-focus-fallback": "rename", onclick: cancelRename}, "Cancel"),
     ),
   );
   updateRenameHints(trip);
@@ -240,6 +242,10 @@ async function saveRename() {
     );
     return;
   }
+  // The disabled form lost the focus while saving.
+  if (document.activeElement === document.body) {
+    dom.tripDetail.querySelector("[data-focus-key=rename]")?.focus();
+  }
   if (playback) openVideo(newId, playback);
 }
 
@@ -263,6 +269,10 @@ async function reloadTrips({oldId, newId}) {
 }
 
 export function renderDetail() {
+  keepingFocus(renderDetailPanel);
+}
+
+function renderDetailPanel() {
   const trip = state.focusedId ? state.tripsById.get(state.focusedId) : null;
   dom.tripBrowser.hidden = trip !== null;
   dom.tripDetail.hidden = trip === null;
@@ -300,6 +310,7 @@ export function renderDetail() {
       type: "button",
       className: "button button-primary",
       disabled: !canPlay,
+      "data-focus-key": "video",
       onclick: () => (isPlaying ? closeVideo() : openVideo(trip.id)),
     },
     isPlaying ? null : icon("play", "icon icon-small"),
@@ -307,7 +318,7 @@ export function renderDetail() {
   );
   const zoomButton = el(
     "button",
-    {type: "button", className: "button", disabled: !trip.bbox, onclick: () => fitToTrips([trip])},
+    {type: "button", className: "button", disabled: !trip.bbox, "data-focus-key": "zoom", onclick: () => fitToTrips([trip])},
     icon("frame", "icon icon-small"),
     "Zoom to trip",
   );
@@ -329,7 +340,7 @@ export function renderDetail() {
       {className: "detail-header"},
       el(
         "button",
-        {type: "button", className: "round-button", "aria-label": "All trips", title: "All trips", onclick: () => focusTrip(null)},
+        {type: "button", className: "round-button", "aria-label": "All trips", title: "All trips", "data-focus-key": "back", "data-focus-fallback": `open:${trip.id}`, onclick: () => focusTrip(null)},
         icon("arrowLeft", "icon icon-small"),
       ),
       el(
