@@ -339,18 +339,18 @@ def check_videos(
     return findings
 
 
-def check_files(store: metadata.MetadataStore, library_dir: Path) -> list[Finding]:
-    """Check the index, previews, and leftover temporary files."""
+def check_files(
+    store: metadata.MetadataStore, library_dir: Path, tracks_by_stem: dict[str, metadata.Track]
+) -> list[Finding]:
+    """Check the index against the tracks, and look for orphaned previews and leftover files."""
     findings = []
 
-    expected_index = store.build_index()
+    expected_trips = store.build_index_entries(tracks_by_stem)
     try:
         current_index = json.loads(store.index_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         current_index = None
-    is_index_current = (
-        current_index is not None and current_index.get("trips") == expected_index["trips"]
-    )
+    is_index_current = current_index is not None and current_index.get("trips") == expected_trips
     if not is_index_current:
 
         def rebuild_index() -> None:
@@ -436,8 +436,10 @@ def run_doctor(
 
     fixed_findings = apply_fixes_of(findings) if apply_fixes else []
 
-    # File checks run last, so that the index reflects any renames made above.
-    file_findings = check_files(store, library_dir)
+    # File checks run last. After fixes, the tracks are read again, so that the index is checked
+    # against the renamed tracks.
+    tracks_by_stem = store.load_tracks_by_stem() if fixed_findings else scan.tracks_by_stem
+    file_findings = check_files(store, library_dir, tracks_by_stem)
     if apply_fixes:
         fixed_findings += apply_fixes_of(file_findings)
 

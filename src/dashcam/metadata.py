@@ -748,16 +748,14 @@ class MetadataStore:
                 undo_step()
             raise
 
-    def build_index(self) -> dict[str, t.Any]:
-        """
-        Summarize all tracks. Unreadable tracks are skipped.
-
-        Returns
-        -------
-        dict[str, t.Any]
-            The index, ready to be written as JSON.
-        """
-        return self.build_index_and_geometry()[0]
+    def build_index_entries(self, tracks_by_stem: dict[str, Track]) -> list[dict[str, t.Any]]:
+        """Summarize loaded tracks (keyed by file stem) in the order of a full rebuild."""
+        return [
+            build_index_entry(track, has_preview=self.preview_path(track.stem).exists())
+            for _, track in sorted(
+                tracks_by_stem.items(), key=lambda item: item[0] + TRACK_EXTENSION
+            )
+        ]
 
     def build_index_and_geometry(self) -> tuple[dict[str, t.Any], dict[str, t.Any]]:
         """Summarize all tracks and simplify their routes, reading each track once."""

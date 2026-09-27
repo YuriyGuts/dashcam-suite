@@ -418,3 +418,25 @@ def test_format_duration():
 )
 def test_get_coverage_style(coverage_percent, expected_style):
     assert maintenance.get_coverage_style(coverage_percent) == expected_style
+
+
+def test_run_doctor_reads_each_track_once_without_fixes(library_dir, store, add_trip, monkeypatch):
+    # GIVEN a healthy library
+    add_trip("2026-09-25 Trip.mp4")
+    store.rebuild_index()
+    loaded_paths = []
+    original_iter_track_files = metadata.MetadataStore.iter_track_files
+
+    def recording_iter_track_files(self):
+        for track_file in original_iter_track_files(self):
+            loaded_paths.append(track_file.path)
+            yield track_file
+
+    monkeypatch.setattr(metadata.MetadataStore, "iter_track_files", recording_iter_track_files)
+
+    # WHEN running the doctor
+    error_count = run_doctor(library_dir, store)
+
+    # THEN the track is read only once, and the index is found current
+    assert error_count == 0
+    assert loaded_paths == [store.track_path("2026-09-25 Trip")]
