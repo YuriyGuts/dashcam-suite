@@ -76,6 +76,9 @@ PARTIAL_FILE_PREFIX = ".tmp-"
 PARTIAL_FILE_SUFFIX = ".partial"
 PARTIAL_FILE_GLOB = f"{PARTIAL_FILE_PREFIX}*{PARTIAL_FILE_SUFFIX}"
 
+# Extensions of trip videos.
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi")
+
 # Characters that are not allowed in filenames on common file systems.
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 FORBIDDEN_FILENAME_CHARS_TEXT = '/ \\ : * ? " < > |'
@@ -97,6 +100,21 @@ def get_max_video_filename_bytes(extension: str) -> int:
     """Return the longest video filename whose track and preview filenames fit the limit."""
     longest_extension_length = max(len(TRACK_EXTENSION), len(PREVIEW_EXTENSION), len(extension))
     return MAX_FILENAME_BYTES - longest_extension_length + len(extension)
+
+
+def find_videos(library_dir: Path) -> list[Path]:
+    """List the trip videos in the library directory, sorted by name."""
+    LOGGER.info(f"Scanning '{library_dir}' for videos")
+    return sorted(
+        (
+            path
+            for path in library_dir.iterdir()
+            if path.is_file()
+            and not path.name.startswith(".")
+            and path.suffix.lower() in VIDEO_EXTENSIONS
+        ),
+        key=lambda path: path.name,
+    )
 
 
 def rename_without_overwrite(source_path: Path, target_path: Path) -> None:
@@ -615,6 +633,19 @@ class MetadataStore:
             else:
                 yield TrackFile(path=path, track=track, error=None)
             progress_logger.update(loaded_count)
+
+    def load_tracks_by_stem(self) -> dict[str, Track]:
+        """Load all readable tracks by file stem. Unreadable ones are reported and skipped."""
+        tracks = {}
+        for track_file in self.iter_track_files():
+            if track_file.track is None:
+                LOGGER.warning(
+                    f"Skipping unreadable track '{track_file.path.name}': {track_file.error} "
+                    f"(see `dashcam doctor`)"
+                )
+                continue
+            tracks[track_file.path.stem] = track_file.track
+        return tracks
 
     def load_track(self, stem: str) -> Track:
         """Load the track of a video stem."""

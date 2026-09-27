@@ -70,53 +70,29 @@ def make_reading(gps_text, clock_text, gps_score=0.95, clock_score=0.95):
     )
 
 
-def test_find_videos_with_include_and_exclude(library_dir, make_video_file):
-    # GIVEN trip videos, an old-camera video, a hidden file, and a non-video file
-    for name in (
-        "2026-09-25 Trip.mp4",
-        "2026-09-26 Trip.MOV",
-        "2019-01-01 Old Camera.mp4",
-        "._2026-09-25 Trip.mp4",
-        "notes.txt",
-    ):
-        make_video_file(name)
+def test_filter_videos_with_include_and_exclude(tmp_path):
+    # GIVEN trip videos from two years
+    video_paths = [
+        tmp_path / name
+        for name in ("2026-09-25 Trip.mp4", "2026-09-26 Trip.MOV", "2019-01-01 Old Camera.mp4")
+    ]
 
-    # WHEN finding videos from 2026 only
-    video_paths = extract.find_videos(library_dir, include=["2026-*"], exclude=["*.MOV"])
+    # WHEN keeping the videos from 2026 only, without MOV files
+    kept_paths = extract.filter_videos(video_paths, include=["2026-*"], exclude=["*.MOV"])
 
-    # THEN only the matching trip video is found
-    assert [path.name for path in video_paths] == ["2026-09-25 Trip.mp4"]
+    # THEN only the matching trip video is kept
+    assert [path.name for path in kept_paths] == ["2026-09-25 Trip.mp4"]
 
 
-def test_find_videos_announces_the_scan(library_dir, monkeypatch, caplog):
-    # GIVEN a library directory that is slow to list
-    caplog.set_level(logging.INFO)
-    messages_before_listing = []
-    original_iterdir = Path.iterdir
-
-    def recording_iterdir(path):
-        messages_before_listing.extend(record.getMessage() for record in caplog.records)
-        return original_iterdir(path)
-
-    monkeypatch.setattr(Path, "iterdir", recording_iterdir)
-
-    # WHEN finding videos
-    extract.find_videos(library_dir, include=[], exclude=[])
-
-    # THEN the scan is logged before the directory is listed
-    assert messages_before_listing == [f"Scanning '{library_dir}' for videos"]
-
-
-def test_find_videos_without_patterns(library_dir, make_video_file):
+def test_filter_videos_without_patterns(tmp_path):
     # GIVEN two videos
-    make_video_file("b.mp4")
-    make_video_file("a.mov")
+    video_paths = [tmp_path / "a.mov", tmp_path / "b.mp4"]
 
-    # WHEN finding videos without patterns
-    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
+    # WHEN filtering them without patterns
+    kept_paths = extract.filter_videos(video_paths, include=[], exclude=[])
 
-    # THEN all videos are found, sorted by name
-    assert [path.name for path in video_paths] == ["a.mov", "b.mp4"]
+    # THEN all are kept
+    assert kept_paths == video_paths
 
 
 def test_collapse_readings_keeps_one_sample_per_clock_tick():

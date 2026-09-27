@@ -35,9 +35,6 @@ from dashcam.config import Config
 from dashcam.system import prevent_os_sleep
 from dashcam.system import worker_pool
 
-# Extensions of trip videos.
-VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi")
-
 # Frames per second read from each video. The overlay changes once per second, so two samples
 # per second see every value at least once.
 SAMPLE_FPS = 2
@@ -90,19 +87,6 @@ class ExtractJobResult:
     error: str | None = None
     status_counts: dict[str, int] = dataclasses.field(default_factory=dict)
     elapsed_s: float = 0.0
-
-
-def find_videos(library_dir: Path, include: list[str], exclude: list[str]) -> list[Path]:
-    """List trip videos in the directory whose names match the include and exclude patterns."""
-    LOGGER.info(f"Scanning '{library_dir}' for videos")
-    video_paths = [
-        path
-        for path in sorted(library_dir.iterdir())
-        if path.is_file()
-        and not path.name.startswith(".")
-        and path.suffix.lower() in VIDEO_EXTENSIONS
-    ]
-    return filter_videos(video_paths, include, exclude)
 
 
 def filter_videos(video_paths: list[Path], include: list[str], exclude: list[str]) -> list[Path]:
@@ -359,20 +343,6 @@ def run_extract_job(job_def: ExtractJobDefinition) -> ExtractJobResult:
     )
 
 
-def load_tracks_by_stem(store: metadata.MetadataStore) -> dict[str, metadata.Track]:
-    """Load all readable tracks. Unreadable ones are reported and skipped."""
-    tracks = {}
-    for track_file in store.iter_track_files():
-        if track_file.track is None:
-            LOGGER.warning(
-                f"Skipping unreadable track '{track_file.path.name}': {track_file.error} "
-                f"(see `dashcam doctor`)"
-            )
-            continue
-        tracks[track_file.path.stem] = track_file.track
-    return tracks
-
-
 @dataclasses.dataclass(frozen=True)
 class PlannedExtraction:
     """A video to extract, with its fingerprint and the previous track of the same content."""
@@ -400,7 +370,7 @@ def plan_extraction(
     list[PlannedExtraction]
         The videos to extract.
     """
-    tracks_by_stem = load_tracks_by_stem(store)
+    tracks_by_stem = store.load_tracks_by_stem()
     present_stems = library_stems if library_stems is not None else {p.stem for p in video_paths}
     stems_by_fingerprint = {track.fingerprint: stem for stem, track in tracks_by_stem.items()}
 
@@ -496,7 +466,7 @@ def extract_videos(
     """
     store = metadata.MetadataStore(metadata_dir)
     store.ensure_dirs()
-    library_video_paths = find_videos(library_dir, include=[], exclude=[])
+    library_video_paths = metadata.find_videos(library_dir)
     video_paths = filter_videos(library_video_paths, include, exclude)
     if only:
         only_names = {Path(name).name for name in only}

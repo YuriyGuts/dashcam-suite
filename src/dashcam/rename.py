@@ -25,7 +25,6 @@ import unicodedata
 from pathlib import Path
 
 from dashcam import enrich
-from dashcam import extract
 from dashcam import metadata
 from dashcam import terminal
 from dashcam.config import Config
@@ -421,7 +420,7 @@ def find_taken_stems(video_paths: list[Path], track_stems: t.Iterable[str]) -> s
 
 def find_taken_stems_in_library(library_dir: Path, store: metadata.MetadataStore) -> set[str]:
     """Return the names used by videos and tracks, from the file names only."""
-    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
+    video_paths = metadata.find_videos(library_dir)
     track_stems = [path.stem for path in store.list_track_paths()]
     return find_taken_stems(video_paths, track_stems)
 
@@ -515,8 +514,8 @@ def plan_renames(
 
     Trips without a dated name, without a track, or with an outdated street list are skipped.
     """
-    tracks_by_stem = extract.load_tracks_by_stem(store)
-    video_paths = extract.find_videos(library_dir, include=[], exclude=[])
+    tracks_by_stem = store.load_tracks_by_stem()
+    video_paths = metadata.find_videos(library_dir)
     taken_stems = find_taken_stems(video_paths, tracks_by_stem)
 
     candidates = []

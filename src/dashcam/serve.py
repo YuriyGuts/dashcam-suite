@@ -42,7 +42,6 @@ import urllib.parse
 from pathlib import Path
 from pathlib import PurePath
 
-from dashcam import extract
 from dashcam import metadata
 from dashcam import rename
 from dashcam import terminal
@@ -283,7 +282,7 @@ class VisualizerApp:
 
     def video_path(self, video_filename: str) -> Path | None:
         """Return the path of a trip video in the library directory, if the name is acceptable."""
-        if Path(video_filename).suffix.lower() not in extract.VIDEO_EXTENSIONS:
+        if Path(video_filename).suffix.lower() not in metadata.VIDEO_EXTENSIONS:
             return None
         return safe_join(self.library_dir, video_filename)
 
@@ -367,7 +366,7 @@ class VisualizerApp:
         track_stems = {path.stem for path in self.store.list_track_paths()}
         video_stems = set()
         if self.library_dir.is_dir():
-            video_paths = extract.find_videos(self.library_dir, include=[], exclude=[])
+            video_paths = metadata.find_videos(self.library_dir)
             video_stems = {path.stem for path in video_paths}
         else:
             LOGGER.warning(f"Library directory not found: '{self.library_dir}'")

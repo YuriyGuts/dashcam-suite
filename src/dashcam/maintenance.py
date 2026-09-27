@@ -8,7 +8,6 @@ from pathlib import Path
 
 from dashcam import cleaning
 from dashcam import enrich
-from dashcam import extract
 from dashcam import metadata
 from dashcam import osm
 from dashcam import terminal
@@ -65,9 +64,7 @@ def scan_library(library_dir: Path, store: metadata.MetadataStore) -> LibrarySca
         else:
             tracks_by_stem[track_file.path.stem] = track_file.track
 
-    video_paths = (
-        extract.find_videos(library_dir, include=[], exclude=[]) if library_dir.is_dir() else []
-    )
+    video_paths = metadata.find_videos(library_dir) if library_dir.is_dir() else []
     return LibraryScan(
         tracks_by_stem=tracks_by_stem,
         unreadable_tracks=unreadable_tracks,
@@ -152,7 +149,7 @@ def print_status(library_dir: Path, metadata_dir: Path) -> None:
 def resolve_stem(name: str) -> str:
     """Accept a video filename, a track filename, or a stem, and return the stem."""
     path = Path(name)
-    if path.suffix.lower() in (*extract.VIDEO_EXTENSIONS, ".json"):
+    if path.suffix.lower() in (*metadata.VIDEO_EXTENSIONS, ".json"):
         return path.stem
     return path.name
 

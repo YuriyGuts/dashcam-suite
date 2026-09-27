@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import math
+from pathlib import Path
 
 import pytest
 
@@ -702,3 +703,35 @@ def test_longest_allowed_video_filename_fits_everywhere(make_track, store):
     names = [store.track_path(track.stem).name, store.preview_path(track.stem).name]
     names += [path.name for path in moved_paths] + [moved_paths[0].parent.name]
     assert max(len(name.encode("utf-8")) for name in names) <= metadata.MAX_FILENAME_BYTES
+
+
+def test_find_videos_lists_trip_videos_by_name(tmp_path):
+    # GIVEN trip videos, a hidden file, a non-video file, and a directory
+    for name in ("b.mp4", "A.MOV", "c.avi", "._b.mp4", "notes.txt"):
+        (tmp_path / name).write_bytes(b"video")
+    (tmp_path / "d.mp4").mkdir()
+
+    # WHEN finding videos
+    video_paths = metadata.find_videos(tmp_path)
+
+    # THEN only the videos are found, sorted by their exact names
+    assert [path.name for path in video_paths] == ["A.MOV", "b.mp4", "c.avi"]
+
+
+def test_find_videos_announces_the_scan(tmp_path, monkeypatch, caplog):
+    # GIVEN a library directory that is slow to list
+    caplog.set_level(logging.INFO)
+    messages_before_listing = []
+    original_iterdir = Path.iterdir
+
+    def recording_iterdir(path):
+        messages_before_listing.extend(record.getMessage() for record in caplog.records)
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", recording_iterdir)
+
+    # WHEN finding videos
+    metadata.find_videos(tmp_path)
+
+    # THEN the scan is logged before the directory is listed
+    assert messages_before_listing == [f"Scanning '{tmp_path}' for videos"]
