@@ -111,6 +111,145 @@ def test_clean_track_uses_winter_time_offset(settings):
     assert samples[0].time.utcoffset() == datetime.timedelta(hours=2)
 
 
+# Local times around the daylight saving time changes of 2026 in Kyiv. On March 29, clocks
+# skip from 03:00 to 04:00. On October 25, they go back from 04:00 to 03:00.
+BEFORE_SPRING_FORWARD = datetime.datetime(2026, 3, 29, 2, 59, 50)
+AFTER_SPRING_FORWARD = datetime.datetime(2026, 3, 29, 4, 0, 0)
+BEFORE_FALL_BACK = datetime.datetime(2026, 10, 25, 3, 59, 50)
+AFTER_FALL_BACK = datetime.datetime(2026, 10, 25, 3, 0, 0)
+
+KYIV_SUMMER_OFFSET = datetime.timedelta(hours=3)
+KYIV_WINTER_OFFSET = datetime.timedelta(hours=2)
+
+
+def make_drive_with_clock_change(clock_before_change, clock_after_change, count_before, count):
+    """A steady drive whose camera clock switches to another time after `count_before` seconds."""
+    return [
+        make_sample(
+            t=index,
+            clock=(
+                clock_before_change + datetime.timedelta(seconds=index)
+                if index < count_before
+                else clock_after_change + datetime.timedelta(seconds=index - count_before)
+            ),
+            lat=49.8 + index * LAT_STEP_30M,
+            lon=24.0,
+            kmh=108,
+        )
+        for index in range(count)
+    ]
+
+
+def utc_steps_s(samples):
+    return [
+        following.time.timestamp() - previous.time.timestamp()
+        for previous, following in zip(samples, samples[1:], strict=False)
+    ]
+
+
+@pytest.mark.parametrize(
+    "clock_before_change, clock_after_change, offset_before_change, offset_after_change",
+    [
+        pytest.param(
+            BEFORE_FALL_BACK,
+            AFTER_FALL_BACK,
+            KYIV_SUMMER_OFFSET,
+            KYIV_WINTER_OFFSET,
+            id="fall_back",
+        ),
+        pytest.param(
+            BEFORE_SPRING_FORWARD,
+            AFTER_SPRING_FORWARD,
+            KYIV_WINTER_OFFSET,
+            KYIV_SUMMER_OFFSET,
+            id="spring_forward",
+        ),
+    ],
+)
+def test_clean_track_through_daylight_saving_time_change(
+    settings, clock_before_change, clock_after_change, offset_before_change, offset_after_change
+):
+    # GIVEN a drive during which the camera clock follows a daylight saving time change
+    dst_settings = dataclasses.replace(settings, trip_date=clock_before_change.date())
+    raw_samples = make_drive_with_clock_change(
+        clock_before_change, clock_after_change, count_before=10, count=20
+    )
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, dst_settings)
+
+    # THEN every sample is good, one second apart, and has the offset in effect at the time
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 20
+    assert utc_steps_s(samples) == [1.0] * 19
+    assert samples[9].time is not None and samples[10].time is not None
+    assert samples[9].time.utcoffset() == offset_before_change
+    assert samples[10].time.utcoffset() == offset_after_change
+    assert samples[10].time.replace(tzinfo=None) == clock_after_change
+
+
+@pytest.mark.parametrize(
+    "clock_before_change, clock_after_change",
+    [
+        pytest.param(BEFORE_FALL_BACK, AFTER_FALL_BACK, id="fall_back"),
+        pytest.param(BEFORE_SPRING_FORWARD, AFTER_SPRING_FORWARD, id="spring_forward"),
+    ],
+)
+def test_clean_track_interpolates_across_daylight_saving_time_change(
+    settings, clock_before_change, clock_after_change
+):
+    # GIVEN a drive whose fix is lost at a daylight saving time change and comes back soon
+    dst_settings = dataclasses.replace(settings, trip_date=clock_before_change.date())
+    raw_samples = make_drive_with_clock_change(
+        clock_before_change, clock_after_change, count_before=10, count=30
+    )
+    for index in range(10, 20):
+        raw_samples[index] = dataclasses.replace(raw_samples[index], gps_text="", gps_score=0.1)
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, dst_settings)
+
+    # THEN the gap is short enough to interpolate, and the times follow the video offsets
+    assert statuses_of(samples[10:20]) == [cleaning.STATUS_INTERPOLATED] * 10
+    assert samples[15].lat == pytest.approx(49.8 + 15 * LAT_STEP_30M)
+    assert utc_steps_s(samples) == [1.0] * 29
+
+
+def test_clean_track_derives_times_into_repeated_hour_without_readable_clock(settings):
+    # GIVEN a drive whose clock becomes unreadable just before it goes back one hour
+    dst_settings = dataclasses.replace(settings, trip_date=BEFORE_FALL_BACK.date())
+    raw_samples = make_drive_with_clock_change(
+        BEFORE_FALL_BACK, AFTER_FALL_BACK, count_before=10, count=30
+    )
+    for index in range(10, 20):
+        raw_samples[index] = dataclasses.replace(
+            raw_samples[index], gps_text="", gps_score=0.1, clock_score=0.1
+        )
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, dst_settings)
+
+    # THEN the readable clock after the gap is taken as the repeated hour, and the times in the
+    # gap follow the video offsets
+    assert samples[20].time is not None
+    assert samples[20].time.utcoffset() == KYIV_WINTER_OFFSET
+    assert utc_steps_s(samples) == [1.0] * 29
+
+
+def test_clean_track_with_clock_in_skipped_hour(settings):
+    # GIVEN a camera clock that shows a time skipped by the daylight saving time change
+    skipped_clock = datetime.datetime(2026, 3, 29, 3, 30, 0)
+    dst_settings = dataclasses.replace(settings, trip_date=skipped_clock.date())
+    raw_samples = make_drive(0, skipped_clock, 49.8, count=3)
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, dst_settings)
+
+    # THEN the time is read with the offset from before the change and shown as a real time
+    assert samples[0].time is not None
+    assert samples[0].time == datetime.datetime(2026, 3, 29, 1, 30, 0, tzinfo=datetime.UTC)
+    assert samples[0].time.replace(tzinfo=None) == datetime.datetime(2026, 3, 29, 4, 30, 0)
+
+
 def test_clean_track_with_no_fix_at_start(settings):
     # GIVEN 10 seconds without a fix, then a drive
     raw_samples = make_no_fix(0, TRIP_START, 10) + make_drive(

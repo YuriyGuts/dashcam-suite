@@ -23,6 +23,8 @@ the video again. The steps are:
    video offset, anchored to the nearest good fix. Forward jumps of the camera clock (up to
    `MAX_MERGE_GAP_HOURS`) mark gaps between merged segments and are added to derived times.
    Derived times that cross samples without a trustworthy clock are flagged as estimated.
+   Clock arithmetic is done in UTC, so daylight saving time changes are not mistaken for gaps
+   (see `resolve_clock_instants`).
 6. Fill gaps of at most `MAX_INTERPOLATION_GAP_S` between good fixes by linear interpolation.
 
 Manual overrides from the track are applied on top: bad ranges are excluded before step 2,
@@ -170,8 +172,14 @@ class ParsedSample:
     t: float
     gps: overlay.GpsReading | None
     clock: datetime.datetime | None
-    is_clock_trusted: bool
     initial_status: str
+
+    # The moment the camera clock shows, in UTC. None if the clock is unreadable or implausible.
+    instant: datetime.datetime | None
+
+    @property
+    def is_clock_trusted(self) -> bool:
+        return self.instant is not None
 
 
 def split_year_last_date(clock_text: str) -> tuple[int, int] | None:
@@ -253,16 +261,20 @@ def parse_samples(
         raw_sample.clock_text for raw_sample in raw_samples if raw_sample.is_clock_text_reliable
     ]
     is_day_first = infer_day_first(reliable_clock_texts, settings.trip_date)
+    clocks = [
+        parse_clock_text(raw_sample.clock_text, is_day_first)
+        if raw_sample.is_clock_text_reliable
+        else None
+        for raw_sample in raw_samples
+    ]
+    trusted_clocks = [clock if is_clock_plausible(clock, settings) else None for clock in clocks]
+    instants = resolve_clock_instants(trusted_clocks, zoneinfo.ZoneInfo(settings.timezone))
 
     parsed_samples = []
-    for raw_sample in raw_samples:
+    for raw_sample, clock, instant in zip(raw_samples, clocks, instants, strict=True):
         gps = None
         if raw_sample.is_gps_text_reliable:
             gps = overlay.parse_gps_text(raw_sample.gps_text)
-
-        clock = None
-        if raw_sample.is_clock_text_reliable:
-            clock = parse_clock_text(raw_sample.clock_text, is_day_first)
 
         if not raw_sample.gps_text:
             initial_status = STATUS_NO_FIX
@@ -278,8 +290,8 @@ def parse_samples(
                 t=raw_sample.t,
                 gps=gps,
                 clock=clock,
-                is_clock_trusted=is_clock_plausible(clock, settings),
                 initial_status=initial_status,
+                instant=instant,
             )
         )
     return parsed_samples
@@ -293,6 +305,38 @@ def is_clock_plausible(clock: datetime.datetime | None, settings: CleaningSettin
         return True
     date_diff_days = abs((clock.date() - settings.trip_date).days)
     return date_diff_days <= MAX_CLOCK_DATE_DIFF_DAYS
+
+
+def resolve_clock_instants(
+    clocks: list[datetime.datetime | None], timezone: zoneinfo.ZoneInfo
+) -> list[datetime.datetime | None]:
+    """
+    Convert the camera clock readings, which show local time, to UTC.
+
+    When daylight saving time ends, the clock steps back and repeats an hour. A reading in that
+    hour is taken as the second occurrence once the clock has stepped back within it. A reading
+    in the hour skipped when daylight saving time starts gets the offset from before the change.
+    """
+    instants: list[datetime.datetime | None] = []
+    previous_clock = None
+    is_repeating_hour = False
+    for clock in clocks:
+        if clock is None:
+            instants.append(None)
+            continue
+        local_time = clock.replace(tzinfo=timezone)
+        has_two_offsets = local_time.utcoffset() != local_time.replace(fold=1).utcoffset()
+        has_stepped_back = (
+            previous_clock is not None and (previous_clock - clock).total_seconds() > CLOCK_JITTER_S
+        )
+        if not has_two_offsets:
+            is_repeating_hour = False
+        elif has_stepped_back:
+            is_repeating_hour = True
+        previous_clock = clock
+        fold = int(has_two_offsets and is_repeating_hour)
+        instants.append(local_time.replace(fold=fold).astimezone(datetime.UTC))
+    return instants
 
 
 def split_into_segments(parsed_samples: list[ParsedSample]) -> list[list[int]]:
@@ -414,13 +458,8 @@ def is_reachable(from_sample: ParsedSample, to_sample: ParsedSample) -> bool:
     """
     assert from_sample.gps is not None and to_sample.gps is not None
     duration_s = max(1.0, to_sample.t - from_sample.t)
-    if (
-        from_sample.is_clock_trusted
-        and to_sample.is_clock_trusted
-        and from_sample.clock is not None
-        and to_sample.clock is not None
-    ):
-        clock_duration_s = (to_sample.clock - from_sample.clock).total_seconds()
+    if from_sample.instant is not None and to_sample.instant is not None:
+        clock_duration_s = (to_sample.instant - from_sample.instant).total_seconds()
         max_merge_gap_s = MAX_MERGE_GAP_HOURS * 3600
         if duration_s - CLOCK_JITTER_S <= clock_duration_s <= duration_s + max_merge_gap_s:
             duration_s = max(duration_s, clock_duration_s)
@@ -513,10 +552,9 @@ def compute_clock_jumps(parsed_samples: list[ParsedSample]) -> list[float]:
     for index in range(1, len(parsed_samples)):
         previous = parsed_samples[index - 1]
         current = parsed_samples[index]
-        if not (previous.is_clock_trusted and current.is_clock_trusted):
+        if previous.instant is None or current.instant is None:
             continue
-        assert previous.clock is not None and current.clock is not None
-        jump_s = (current.clock - previous.clock).total_seconds() - (current.t - previous.t)
+        jump_s = (current.instant - previous.instant).total_seconds() - (current.t - previous.t)
         if CLOCK_JITTER_S < jump_s <= max_merge_gap_s:
             jumps[index] = jump_s
     return jumps
@@ -554,7 +592,7 @@ def assign_times(
 
     def derive_time(anchor_index: int, index: int) -> tuple[datetime.datetime, bool]:
         anchor = parsed_samples[anchor_index]
-        assert anchor.clock is not None
+        assert anchor.instant is not None
         # Merge gaps on the steps between the anchor and the sample, and the number of samples
         # on the way (excluding the anchor) whose missing or untrusted clock could hide a gap.
         if index > anchor_index:
@@ -567,21 +605,21 @@ def assign_times(
             untrusted_count = cumulative_untrusted[anchor_index] - cumulative_untrusted[index]
         # The camera clock has one-second resolution, so derived times are rounded to it.
         offset_s = round(parsed_samples[index].t - anchor.t + gap_s)
-        derived_time = anchor.clock + datetime.timedelta(seconds=offset_s)
-        return derived_time, untrusted_count > 0
+        derived_time = anchor.instant + datetime.timedelta(seconds=offset_s)
+        return derived_time.astimezone(timezone), untrusted_count > 0
 
     times: list[tuple[datetime.datetime | None, bool]] = []
     anchor_position = 0
     for index, sample in enumerate(parsed_samples):
         if statuses[index] == STATUS_OK and sample.is_clock_trusted:
-            assert sample.clock is not None
-            times.append((sample.clock.replace(tzinfo=timezone), False))
+            assert sample.instant is not None
+            times.append((sample.instant.astimezone(timezone), False))
             continue
 
         if not anchor_indexes:
             # No good fix at all: fall back to the camera clock, which may be off.
-            if sample.is_clock_trusted and sample.clock is not None:
-                times.append((sample.clock.replace(tzinfo=timezone), True))
+            if sample.instant is not None:
+                times.append((sample.instant.astimezone(timezone), True))
             else:
                 times.append((None, True))
             continue
@@ -601,7 +639,7 @@ def assign_times(
         ]
         # Prefer a derivation that crosses only trusted clocks, then the nearest anchor.
         is_estimated, _, derived_time = min(derived, key=lambda item: (item[0], item[1]))
-        times.append((derived_time.replace(tzinfo=timezone), is_estimated))
+        times.append((derived_time, is_estimated))
 
     return times
 
@@ -617,8 +655,10 @@ def interpolate_short_gaps(samples: list[CleanSample]) -> None:
         assert previous.lat is not None and previous.lon is not None
         assert following.lat is not None and following.lon is not None
 
+        # The times share one `ZoneInfo`, so subtracting them directly would ignore a change
+        # of the offset between them.
         if previous.time is not None and following.time is not None:
-            gap_s = (following.time - previous.time).total_seconds()
+            gap_s = following.time.timestamp() - previous.time.timestamp()
         else:
             gap_s = following.t - previous.t
         if gap_s > MAX_INTERPOLATION_GAP_S or gap_s <= 0:
@@ -627,7 +667,7 @@ def interpolate_short_gaps(samples: list[CleanSample]) -> None:
         for index in range(previous_index + 1, next_index):
             sample = samples[index]
             if sample.time is not None and previous.time is not None:
-                elapsed_s = (sample.time - previous.time).total_seconds()
+                elapsed_s = sample.time.timestamp() - previous.time.timestamp()
             else:
                 elapsed_s = sample.t - previous.t
             fraction = min(1.0, max(0.0, elapsed_s / gap_s))

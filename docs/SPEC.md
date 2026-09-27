@@ -74,6 +74,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
   - Manual overrides from the track are applied last (see Track Format).
   - Sample statuses: `ok`, `interpolated`, `no_fix`, `spoofed`, `unreadable`.
   - Times are stored as ISO-8601 with the offset of the configured `timezone`.
+  - The camera clock is read as local time. In the hour repeated when daylight saving time ends, a reading counts as the second occurrence once the clock has stepped back within the video. A recording that starts in that hour after the change is read as the first occurrence.
 - Incremental and resumable: only videos without a track, or whose content changed, are processed. Each track is written when its video is done.
 - `--only` re-extracts the named videos and keeps their manual overrides.
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
