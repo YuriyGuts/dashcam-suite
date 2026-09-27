@@ -3,6 +3,7 @@ import dataclasses
 import datetime
 import math
 import subprocess
+import sys
 
 import osmium
 import osmium.io
@@ -195,6 +196,35 @@ class FakeFfmpeg:
             raise subprocess.CalledProcessError(
                 self.encode_return_code, cmd, stderr=self.encode_stderr
             )
+
+
+@pytest.fixture
+def endless_progress_cmd():
+    """
+    Make a command that reports ffmpeg progress until it is killed.
+
+    Like ffmpeg, it ignores `SIGPIPE` and write errors, so it keeps running when its reader goes
+    away. If a path is given, the program first writes its process ID there.
+    """
+    code = """
+import os, signal, sys, time
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+if len(sys.argv) > 1:
+    with open(sys.argv[1], "w") as fp:
+        fp.write(str(os.getpid()))
+while True:
+    try:
+        print("progress=continue", flush=True)
+    except OSError:
+        pass
+    time.sleep(0.05)
+"""
+
+    def _endless_progress_cmd(pid_path=None):
+        return [sys.executable, "-c", code, *([str(pid_path)] if pid_path else [])]
+
+    return _endless_progress_cmd
 
 
 @pytest.fixture

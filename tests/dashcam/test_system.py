@@ -1,11 +1,36 @@
+import os
 import signal
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 
 from dashcam import system
+from dashcam import video
+
+
+def follow_progress(cmd):
+    """Follow the progress of a program, as a worker follows ffmpeg."""
+    for _ in video.iter_ffmpeg_progress(cmd):
+        pass
+
+
+def wait_for(condition, timeout_s=10):
+    deadline = time.monotonic() + timeout_s
+    while not condition():
+        if time.monotonic() > deadline:
+            raise TimeoutError("The condition was not met in time")
+        time.sleep(0.05)
+
+
+def is_process_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 class FakeProcess:
@@ -108,11 +133,38 @@ def test_worker_pool_workers_exit_quietly_on_ctrl_c():
         # WHEN asking a worker how it handles Ctrl+C
         handler = process_pool.apply(signal.getsignal, (signal.SIGINT,))
 
-    # THEN it exits without a traceback
-    assert handler is system.exit_on_interrupt
+    # THEN it exits without a traceback, with the exit code shells report for Ctrl+C
+    assert handler is system.exit_on_signal
     with pytest.raises(SystemExit) as exc_info:
-        system.exit_on_interrupt(signal.SIGINT, None)
-    assert exc_info.value.code == system.INTERRUPTED_EXIT_CODE
+        system.exit_on_signal(signal.SIGINT, None)
+    assert exc_info.value.code == 130
+
+
+def test_worker_pool_workers_exit_quietly_when_terminated():
+    # GIVEN a worker pool
+    with system.worker_pool(1) as process_pool:
+        # WHEN asking a worker how it handles termination
+        handler = process_pool.apply(signal.getsignal, (signal.SIGTERM,))
+
+    # THEN it exits by unwinding, so that its cleanup runs
+    assert handler is system.exit_on_signal
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot catch process termination")
+def test_worker_pool_failure_stops_programs_started_by_workers(tmp_path, endless_progress_cmd):
+    # GIVEN a worker that follows the progress of a program that never ends
+    pid_path = tmp_path / "pid.txt"
+    with pytest.raises(ValueError, match="failed"):
+        with system.worker_pool(1) as process_pool:
+            process_pool.apply_async(follow_progress, (endless_progress_cmd(pid_path),))
+            wait_for(lambda: pid_path.exists() and pid_path.read_text())
+
+            # WHEN the pool fails and terminates its workers
+            raise ValueError("failed")
+
+    # THEN the program is stopped too
+    program_pid = int(pid_path.read_text())
+    wait_for(lambda: not is_process_running(program_pid))
 
 
 def test_worker_pool_programs_started_by_workers_stop_on_ctrl_c():

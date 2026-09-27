@@ -403,6 +403,33 @@ def test_run_encode_job_keeps_an_output_that_appeared_meanwhile(
     assert "Cannot save '2026-09-25 Trip 11-17.mp4'" in caplog.text
 
 
+def test_run_encode_job_reports_unexpected_error(
+    config, tmp_path, fake_ffmpeg, monkeypatch, caplog
+):
+    # GIVEN an encoding job that fails with an unexpected error after writing a partial output
+    output_path = tmp_path / "2026-09-25 Trip 11-17.mp4"
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=output_path,
+        config=config,
+    )
+
+    def failing_ffmpeg(cmd, output_name, total_duration_s):
+        Path(cmd[-1]).write_bytes(b"partial video")
+        raise ValueError("unexpected")
+
+    monkeypatch.setattr(encode, "run_ffmpeg_with_progress", failing_ffmpeg)
+
+    # WHEN running it
+    is_encoded = encode.run_encode_job(job_def)
+
+    # THEN the job fails without raising, with the traceback logged and no files left behind
+    assert not is_encoded
+    assert "Encoding failed for '2026-09-25 Trip 11-17.mp4' with an unexpected error" in caplog.text
+    assert "ValueError: unexpected" in caplog.text
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_run_encode_job_logs_ffmpeg_errors(config, tmp_path, fake_ffmpeg, caplog):
     # GIVEN an encoding job for which ffmpeg fails with error output
     fake_ffmpeg.encode_return_code = 1

@@ -157,8 +157,8 @@ def iter_ffmpeg_progress(cmd: list[str]) -> t.Generator[FfmpegProgress]:
                         speed = parse_speed(value)
                     elif key == "progress":
                         yield FfmpegProgress(output_time_s=output_time_s, speed=speed)
-            except GeneratorExit:
-                # The caller stopped reading early.
+            except BaseException:
+                # The caller stopped reading early, or the worker is being stopped.
                 proc.kill()
                 raise
             proc.wait()
@@ -281,8 +281,8 @@ def iter_overlay_strips(
                     strip = strip_pixels.reshape(STRIP_HEIGHT, NOMINAL_FRAME_WIDTH)
                     yield start_s + frame_index / sample_fps, strip
                     frame_index += 1
-            except GeneratorExit:
-                # The caller stopped reading early.
+            except BaseException:
+                # The caller stopped reading early, or the worker is being stopped.
                 proc.kill()
                 raise
             proc.wait()

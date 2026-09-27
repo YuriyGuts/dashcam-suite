@@ -14,6 +14,7 @@ Each track is written as soon as its video is done, so an interrupted run resume
 stopped.
 """
 
+import contextlib
 import dataclasses
 import datetime
 import fnmatch
@@ -22,6 +23,7 @@ import os
 import shlex
 import subprocess
 import time
+import traceback
 from pathlib import Path
 
 import cv2
@@ -202,15 +204,17 @@ def read_all_frames(
     progress_logger = terminal.ProgressLogger(
         LOGGER, video_path.name, video_info.duration_s, "read", PROGRESS_INTERVAL_S
     )
-    for offset_s, strip in video.iter_overlay_strips(
+    strips = video.iter_overlay_strips(
         video_path,
         width=video_info.width,
         sample_fps=SAMPLE_FPS,
         ffmpeg_executable=config.ffmpeg_executable,
         hwaccel_options=config.hwaccel_options,
-    ):
-        readings.append((offset_s, overlay.read_overlay(strip)))
-        progress_logger.update(offset_s)
+    )
+    with contextlib.closing(strips):
+        for offset_s, strip in strips:
+            readings.append((offset_s, overlay.read_overlay(strip)))
+            progress_logger.update(offset_s)
     return readings
 
 
@@ -236,8 +240,9 @@ def make_preview(
         LOGGER, f"{video_path.name} (preview)", duration_s, "encoded", PROGRESS_INTERVAL_S
     )
     try:
-        for progress in video.iter_ffmpeg_progress(cmd):
-            progress_logger.update(progress.output_time_s, progress.speed)
+        with contextlib.closing(video.iter_ffmpeg_progress(cmd)) as progress_reports:
+            for progress in progress_reports:
+                progress_logger.update(progress.output_time_s, progress.speed)
         # Replaces an older preview, which a plain rename refuses to do on Windows.
         os.replace(partial_path, preview_path)
     except subprocess.CalledProcessError as exc:
@@ -333,6 +338,12 @@ def run_extract_job(job_def: ExtractJobDefinition | PreviewJobDefinition) -> str
     except (OSError, RuntimeError, subprocess.CalledProcessError, metadata.TrackFormatError) as exc:
         LOGGER.error(f"Extraction failed for '{video_filename}': {exc}")
         return str(exc)
+    except Exception as exc:
+        LOGGER.error(
+            f"Extraction failed for '{video_filename}' with an unexpected error\n"
+            f"{traceback.format_exc()}"
+        )
+        return repr(exc)
     return None
 
 

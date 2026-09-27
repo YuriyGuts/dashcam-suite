@@ -376,6 +376,51 @@ def test_iter_ffmpeg_progress_raises_with_error_tail():
     assert exc_info.value.stderr == "Unknown encoder"
 
 
+@pytest.fixture
+def started_processes(monkeypatch):
+    """Record the processes started by the video module."""
+    processes = []
+
+    class RecordingPopen(subprocess.Popen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            processes.append(self)
+
+    monkeypatch.setattr(video.subprocess, "Popen", RecordingPopen)
+    return processes
+
+
+def test_iter_ffmpeg_progress_stops_the_program_when_the_worker_stops(
+    started_processes, endless_progress_cmd
+):
+    # GIVEN a program that reports progress until it is killed
+    reports = video.iter_ffmpeg_progress(endless_progress_cmd())
+    next(reports)
+
+    # WHEN the worker is stopped while waiting for the next report
+    with pytest.raises(SystemExit):
+        reports.throw(SystemExit(143))
+
+    # THEN the program is killed
+    (process,) = started_processes
+    assert process.returncode not in (None, 0)
+
+
+@requires_ffmpeg
+def test_iter_overlay_strips_stops_ffmpeg_when_the_worker_stops(synthetic_video, started_processes):
+    # GIVEN a strip iterator that has read the first strip
+    strips = video.iter_overlay_strips(synthetic_video, 2560, 2, "ffmpeg", "")
+    next(strips)
+
+    # WHEN the worker is stopped while waiting for the next strip
+    with pytest.raises(SystemExit):
+        strips.throw(SystemExit(143))
+
+    # THEN ffmpeg is killed
+    (process,) = started_processes
+    assert process.returncode not in (None, 0)
+
+
 @pytest.mark.parametrize(
     ("os_name", "options", "expected"),
     [

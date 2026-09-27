@@ -928,6 +928,29 @@ def test_run_extract_job_reports_unreadable_track_of_preview_job(config, library
     assert "Invalid JSON" in error
 
 
+def test_run_extract_job_reports_unexpected_error(monkeypatch, config, library_dir, store, caplog):
+    # GIVEN an extraction job that fails with an unexpected error
+    def failing_extract_video(job_def):
+        raise IndexError("list index out of range")
+
+    monkeypatch.setattr(extract, "extract_video", failing_extract_video)
+    job_def = extract.ExtractJobDefinition(
+        video_path=library_dir / "2026-09-25 Trip.mp4",
+        fingerprint="1:abc",
+        metadata_dir=store.root,
+        config=config,
+        make_preview=False,
+    )
+
+    # WHEN running it
+    error = extract.run_extract_job(job_def)
+
+    # THEN the error is returned instead of raised, and logged with its traceback
+    assert error == "IndexError('list index out of range')"
+    assert "Extraction failed for '2026-09-25 Trip.mp4' with an unexpected error" in caplog.text
+    assert "Traceback" in caplog.text
+
+
 def test_make_preview_removes_partial_output_when_interrupted(config, tmp_path, monkeypatch):
     # GIVEN a preview whose encoding is interrupted while ffmpeg writes the partial output
     preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"

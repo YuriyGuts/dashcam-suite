@@ -22,24 +22,30 @@ FAILED_POOL_LOG_TIMEOUT_S = 5
 LOGGER = logging.getLogger(__name__)
 
 
-# Exit code of a worker stopped by Ctrl+C, as shells report it.
-INTERRUPTED_EXIT_CODE = 130
+# Exit code of a worker stopped by a signal, as shells report it (e.g. 130 for Ctrl+C).
+SIGNAL_EXIT_CODE_BASE = 128
 
 
-def exit_on_interrupt(signal_number: int, frame: types.FrameType | None) -> None:
-    """Stop a worker process quietly on Ctrl+C, without a `KeyboardInterrupt` traceback."""
-    raise SystemExit(INTERRUPTED_EXIT_CODE)
+def exit_on_signal(signal_number: int, frame: types.FrameType | None) -> None:
+    """
+    Stop a worker process quietly on Ctrl+C or termination, without a traceback.
+
+    Unwinding runs the cleanup of the job, which stops its ffmpeg process.
+    """
+    raise SystemExit(SIGNAL_EXIT_CODE_BASE + signal_number)
 
 
 def initialize_worker(log_queue: multiprocessing.queues.SimpleQueue) -> None:
     """
-    Prepare a worker process: send its log records to the parent, and exit quietly on Ctrl+C.
+    Prepare a worker process: send its log records to the parent, and exit quietly on Ctrl+C or
+    when the pool terminates its workers after a failure.
 
     Ctrl+C reaches every process of the terminal, and the parent reports the interruption. The
     handler is a Python function rather than `SIG_IGN`, because programs that the worker starts
     (e.g. ffmpeg) inherit an ignored signal, but get the default handling back for a handler.
     """
-    signal.signal(signal.SIGINT, exit_on_interrupt)
+    signal.signal(signal.SIGINT, exit_on_signal)
+    signal.signal(signal.SIGTERM, exit_on_signal)
     terminal.configure_worker_logging(log_queue)
 
 

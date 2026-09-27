@@ -49,6 +49,7 @@ skips them, so raw videos left on the SD card are not encoded again after their 
 renamed. The "range" mode encodes the selected videos regardless.
 """
 
+import contextlib
 import dataclasses
 import datetime
 import json
@@ -57,6 +58,7 @@ import re
 import shlex
 import subprocess
 import tempfile
+import traceback
 from pathlib import Path
 
 from dashcam import metadata
@@ -416,8 +418,9 @@ def run_ffmpeg_with_progress(
     progress_logger = terminal.ProgressLogger(
         LOGGER, output_name, total_duration_s, "encoded", PROGRESS_INTERVAL_S
     )
-    for progress in video.iter_ffmpeg_progress(cmd):
-        progress_logger.update(progress.output_time_s, progress.speed)
+    with contextlib.closing(video.iter_ffmpeg_progress(cmd)) as progress_reports:
+        for progress in progress_reports:
+            progress_logger.update(progress.output_time_s, progress.speed)
 
 
 def run_encode_job(job_def: EncodeJobDefinition) -> bool:
@@ -459,6 +462,12 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
         return False
     except OSError as exc:
         LOGGER.error(f"Cannot save '{output_path.name}': {exc}")
+        return False
+    except Exception:
+        LOGGER.error(
+            f"Encoding failed for '{output_path.name}' with an unexpected error\n"
+            f"{traceback.format_exc()}"
+        )
         return False
     finally:
         concat_list_path.unlink(missing_ok=True)
