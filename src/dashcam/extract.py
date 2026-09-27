@@ -94,18 +94,24 @@ class ExtractJobResult:
 def find_videos(library_dir: Path, include: list[str], exclude: list[str]) -> list[Path]:
     """List trip videos in the directory whose names match the include and exclude patterns."""
     LOGGER.info(f"Scanning '{library_dir}' for videos")
-    video_paths = []
-    for path in sorted(library_dir.iterdir()):
-        if not path.is_file() or path.name.startswith("."):
-            continue
-        if path.suffix.lower() not in VIDEO_EXTENSIONS:
-            continue
-        if include and not any(fnmatch.fnmatch(path.name, pattern) for pattern in include):
-            continue
-        if any(fnmatch.fnmatch(path.name, pattern) for pattern in exclude):
-            continue
-        video_paths.append(path)
-    return video_paths
+    video_paths = [
+        path
+        for path in sorted(library_dir.iterdir())
+        if path.is_file()
+        and not path.name.startswith(".")
+        and path.suffix.lower() in VIDEO_EXTENSIONS
+    ]
+    return filter_videos(video_paths, include, exclude)
+
+
+def filter_videos(video_paths: list[Path], include: list[str], exclude: list[str]) -> list[Path]:
+    """Keep the videos whose names match the include and exclude patterns."""
+    return [
+        path
+        for path in video_paths
+        if (not include or any(fnmatch.fnmatch(path.name, pattern) for pattern in include))
+        and not any(fnmatch.fnmatch(path.name, pattern) for pattern in exclude)
+    ]
 
 
 def skip_too_long_names(video_paths: list[Path]) -> list[Path]:
@@ -378,12 +384,14 @@ def plan_extraction(
     video_paths: list[Path],
     store: metadata.MetadataStore,
     force: bool,
+    library_stems: set[str] | None = None,
 ) -> list[PlannedExtraction]:
     """
     Reconcile videos with existing tracks and decide which videos to extract.
 
     Renamed videos get their tracks renamed. Changed videos get their old tracks moved to the
-    trash.
+    trash. A track is only taken over by a video with the same content if its own video is not
+    among `library_stems`, the stems of all videos in the library (by default, of `video_paths`).
 
     Returns
     -------
@@ -391,7 +399,7 @@ def plan_extraction(
         The videos to extract.
     """
     tracks_by_stem = load_tracks_by_stem(store)
-    present_stems = {path.stem for path in video_paths}
+    present_stems = library_stems if library_stems is not None else {p.stem for p in video_paths}
     stems_by_fingerprint = {track.fingerprint: stem for stem, track in tracks_by_stem.items()}
 
     to_extract = []
@@ -486,7 +494,8 @@ def extract_videos(
     """
     store = metadata.MetadataStore(metadata_dir)
     store.ensure_dirs()
-    video_paths = find_videos(library_dir, include, exclude)
+    library_video_paths = find_videos(library_dir, include=[], exclude=[])
+    video_paths = filter_videos(library_video_paths, include, exclude)
     if only:
         only_names = {Path(name).name for name in only}
         video_paths = [path for path in video_paths if path.name in only_names]
@@ -499,7 +508,8 @@ def extract_videos(
     video_paths = skip_too_long_names(video_paths)
     skipped_count = found_count - len(video_paths)
 
-    to_extract = plan_extraction(video_paths, store, force)
+    library_stems = {path.stem for path in library_video_paths}
+    to_extract = plan_extraction(video_paths, store, force, library_stems)
     job_defs = [
         make_extract_job(planned, metadata_dir, config, make_previews) for planned in to_extract
     ]

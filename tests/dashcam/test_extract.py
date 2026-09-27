@@ -372,6 +372,57 @@ def test_plan_extraction_with_duplicate_video(store, make_video_file, save_track
     assert not store.track_path(copy_path.stem).exists()
 
 
+def test_plan_extraction_of_copy_alone_leaves_the_original_track(
+    store, make_video_file, save_track_for
+):
+    # GIVEN a video with a track and a copy of it under another name
+    original_path = make_video_file("2026-09-25 Trip.mp4")
+    save_track_for(original_path)
+    copy_path = make_video_file("2026-09-25 Trip copy.mp4")
+
+    # WHEN planning only the copy, with the original still in the library
+    planned = extract.plan_extraction(
+        [copy_path], store, force=True, library_stems={original_path.stem, copy_path.stem}
+    )
+
+    # THEN the copy is skipped as a duplicate and the original keeps its track
+    assert planned == []
+    assert store.track_path(original_path.stem).exists()
+    assert not store.track_path(copy_path.stem).exists()
+
+
+def test_extract_videos_with_only_a_copy_leaves_the_original_track(
+    config,
+    library_dir,
+    store,
+    make_video_file,
+    save_track_for,
+    fake_extract_video,
+    serial_extract_pool,
+):
+    # GIVEN a video with a track and a copy of it under another name
+    original_path = make_video_file("2026-09-25 Trip.mp4")
+    save_track_for(original_path)
+    make_video_file("2026-09-25 Trip copy.mp4")
+
+    # WHEN extracting only the copy
+    extract.extract_videos(
+        library_dir,
+        store.root,
+        config,
+        include=[],
+        exclude=[],
+        only=["2026-09-25 Trip copy.mp4"],
+        force=False,
+        make_previews=False,
+        job_count=2,
+    )
+
+    # THEN nothing is extracted and the original keeps its track
+    assert fake_extract_video == []
+    assert [path.stem for path in store.list_track_paths()] == [original_path.stem]
+
+
 def test_plan_extraction_with_force_keeps_overrides(store, make_video_file, save_track_for):
     # GIVEN an up-to-date track with manual overrides
     video_path = make_video_file("2026-09-25 Trip.mp4")
