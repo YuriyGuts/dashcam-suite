@@ -12,6 +12,7 @@ dependencies = [
     "osmium>=4.3.1",
     "platformdirs>=4",
     "rich>=15.0.0",
+    "tzdata>=2025.2 ; sys_platform == 'win32'",
 ]
 
 [project.scripts]

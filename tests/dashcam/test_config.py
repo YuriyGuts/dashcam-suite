@@ -103,11 +103,13 @@ def test_get_config_path_default(monkeypatch):
     # THEN it is inside the user config directory
     assert config_path.name == "config.toml"
     assert config_path.parent.name == "dashcam"
+    assert config_path.parent.parent.name != "dashcam"
 
 
 def test_load_config_expands_home_in_paths(monkeypatch, tmp_path):
     # GIVEN a config file with paths under the home directory
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         'library_dir = "~/Videos"\nraw_video_dir = "~/SD"\nmetadata_dir = "~/meta"\n'

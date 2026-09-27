@@ -1,4 +1,5 @@
 import dataclasses
+import json
 from pathlib import Path
 
 import pytest
@@ -624,10 +625,10 @@ def test_main_runs_config_without_file(monkeypatch, config, tmp_path, capsys):
     assert "from the config file" not in output
 
 
-def test_main_runs_config_with_file(monkeypatch, config, tmp_path, capsys):
+def test_main_runs_config_with_file(monkeypatch, config, library_dir, tmp_path, capsys):
     # GIVEN a config file overriding the library directory
     config_path = tmp_path / "config.toml"
-    config_path.write_text('library_dir = "/srv/dashcam"\n')
+    config_path.write_text(f'library_dir = "{library_dir.as_posix()}"\n')
     monkeypatch.setenv("DASHCAM_CONFIG", str(config_path))
 
     # WHEN running `dashcam config`
@@ -637,6 +638,6 @@ def test_main_runs_config_with_file(monkeypatch, config, tmp_path, capsys):
     output_lines = capsys.readouterr().out.splitlines()
     library_dir_line = next(line for line in output_lines if "library_dir" in line)
     job_count_line = next(line for line in output_lines if "encode_job_count" in line)
-    assert '"/srv/dashcam"' in library_dir_line
+    assert json.dumps(str(library_dir)) in library_dir_line
     assert "from the config file" in library_dir_line
     assert "from the config file" not in job_count_line
