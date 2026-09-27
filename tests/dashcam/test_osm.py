@@ -1,4 +1,5 @@
 import _thread
+import http.client
 import io
 import logging
 import sqlite3
@@ -256,6 +257,22 @@ def test_download_file_with_truncated_response(tmp_path, monkeypatch):
     # WHEN downloading a file
     # THEN the download fails
     with pytest.raises(RuntimeError, match="stopped after 0 of 5 MB"):
+        osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
+
+
+def test_download_file_with_broken_chunked_response(tmp_path, monkeypatch):
+    # GIVEN a server whose chunked response ends early
+    class BrokenChunkedResponse(FakeResponse):
+        def read(self, size=-1, /):
+            raise http.client.IncompleteRead(b"x" * 1000, 4000)
+
+    response = BrokenChunkedResponse(b"")
+    response.headers = {}
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, context, timeout: response)
+
+    # WHEN downloading a file
+    # THEN the download fails with an error that the CLI reports like other network errors
+    with pytest.raises(OSError, match="Invalid response from the server: IncompleteRead"):
         osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
 
 

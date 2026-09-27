@@ -20,6 +20,7 @@ degrees, the precision of OSM itself.
 import array
 import dataclasses
 import datetime
+import http.client
 import logging
 import os
 import shutil
@@ -429,6 +430,12 @@ class Download:
         """Download the file, keeping any error for the thread that waits for it."""
         try:
             self.transfer()
+        except http.client.HTTPException as exc:
+            # E.g. `IncompleteRead` when a chunked response ends early. It is not an `OSError`,
+            # so it is converted to be reported like other network errors.
+            error = OSError(f"Invalid response from the server: {exc!r}")
+            error.__cause__ = exc
+            self.error = error
         except BaseException as exc:
             self.error = exc
 
