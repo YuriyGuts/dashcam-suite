@@ -212,6 +212,31 @@ def test_probe_overlay_without_camera_clock(fake_strips, config):
     assert not has_overlay
 
 
+def test_probe_overlay_without_camera_clock_and_with_missing_frames(fake_strips, config):
+    # GIVEN a video without a readable clock whose second half cannot be decoded
+    strip = overlay.read_strip_image(OVERLAY_FIXTURE_DIR / "2026-09-23_60s.png") * 0 + 90
+    fake_strips["frames"] = [(offset_s / 2, strip) for offset_s in range(10)]
+    video_info = video.VideoInfo(width=2560, height=1440, duration_s=10)
+
+    # WHEN probing it
+    # THEN it fails instead of reporting no overlay
+    with pytest.raises(RuntimeError, match="no frame at 5 of 10 probe points"):
+        extract.probe_overlay(Path("glitch.mp4"), video_info, config)
+
+
+def test_probe_overlay_with_camera_clock_and_missing_frames(fake_strips, config):
+    # GIVEN a video whose first half shows the camera clock and whose second half cannot be decoded
+    strip = overlay.read_strip_image(OVERLAY_FIXTURE_DIR / "2026-09-23_60s.png")
+    fake_strips["frames"] = [(offset_s / 2, strip) for offset_s in range(10)]
+    video_info = video.VideoInfo(width=2560, height=1440, duration_s=10)
+
+    # WHEN probing it
+    has_overlay = extract.probe_overlay(Path("trip.mp4"), video_info, config)
+
+    # THEN the overlay is found
+    assert has_overlay
+
+
 def test_plan_extraction_with_new_video(store, make_video_file):
     # GIVEN a video without a track
     video_path = make_video_file("2026-09-25 Trip.mp4")

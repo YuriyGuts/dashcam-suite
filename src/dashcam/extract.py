@@ -156,7 +156,15 @@ def collapse_readings(
 
 
 def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config) -> bool:
-    """Check a few frames spread over the video for a readable camera clock."""
+    """
+    Check a few frames spread over the video for a readable camera clock.
+
+    Raises
+    ------
+    RuntimeError
+        If no clock was found but some frames could not be decoded, so the video may still have
+        the overlay.
+    """
     if video_info.width < overlay.MIN_FRAME_WIDTH:
         LOGGER.warning(
             f"{video_path.name}: the video is {video_info.width} pixels wide, but the overlay "
@@ -166,6 +174,7 @@ def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config)
 
     layout = overlay.get_nominal_layout()
     clock_count = 0
+    missing_frame_count = 0
     for frame_number in range(PROBE_FRAME_COUNT):
         start_s = video_info.duration_s * (frame_number + 0.5) / PROBE_FRAME_COUNT
         strips = video.iter_overlay_strips(
@@ -177,12 +186,22 @@ def probe_overlay(video_path: Path, video_info: video.VideoInfo, config: Config)
             start_s=start_s,
             duration_s=1 / SAMPLE_FPS,
         )
-        for _, strip in strips:
-            if overlay.read_overlay(strip, layout).is_right_text_reliable:
-                clock_count += 1
-            break
+        first_frame = next(strips, None)
+        strips.close()
+        if first_frame is None:
+            missing_frame_count += 1
+            continue
+        _, strip = first_frame
+        if overlay.read_overlay(strip, layout).is_right_text_reliable:
+            clock_count += 1
         if clock_count >= PROBE_MIN_CLOCK_COUNT:
             return True
+
+    if missing_frame_count > 0:
+        raise RuntimeError(
+            f"ffmpeg returned no frame at {missing_frame_count} of {PROBE_FRAME_COUNT} probe "
+            f"points, so the overlay could not be checked"
+        )
     return False
 
 
