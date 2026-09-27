@@ -47,6 +47,7 @@ def test_dump_track_round_trip_with_street_data(make_track):
     track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",
+        osm_source="test",
         samples_digest="0123456789abcdef",
         enriched_at="2026-09-26T20:00:00+03:00",
     )

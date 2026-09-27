@@ -322,6 +322,7 @@ def make_named_track(make_track):
         track.enrichment = metadata.Enrichment(
             enricher_version=enrich.ENRICHER_VERSION,
             osm_timestamp="2026-09-25T20:24:36Z",
+            osm_source="test",
             samples_digest=enrich.compute_samples_digest(track),
             enriched_at="2026-09-26T20:00:00+03:00",
         )

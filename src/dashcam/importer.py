@@ -68,7 +68,7 @@ def import_trips(
         job_count=extract_job_count,
     )
 
-    if osm.read_database_timestamp(metadata_dir) is None:
+    if osm.read_database_version(metadata_dir) is None:
         LOGGER.warning(
             "No OSM data: skipping street matching and renaming "
             "(run `dashcam enrich --update-osm`, then `dashcam rename --suggest`)"

@@ -87,7 +87,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Map matching: a hidden Markov model over the `ok` and `interpolated` samples. Candidates are streets (same `name` and `ref`) within 50 m. The cost grows with the distance to the road and the angle to the direction of travel; switching streets has a fixed cost, so GPS noise does not flicker between streets. Runs are split at gaps and position jumps.
 - Street list: stretches in travel order, with off-road and sub-50 m stretches dropped and consecutive repeats merged.
 - Localities: the place with the smallest distance relative to its radius (by place type, growing with population); none if the point is outside all radii.
-- Incremental: a track is re-enriched when it has no street list, its located samples changed, the OSM data changed, or the enricher version increased. `--force` re-enriches all tracks. `extract --reclean` and `--only` keep the street list; `enrich` and `doctor` detect whether it is outdated.
+- Incremental: a track is re-enriched when it has no street list, its located samples changed, the OSM data changed (its timestamp or its source: the extract URL or file name), or the enricher version increased. `--force` re-enriches all tracks. `extract --reclean` and `--only` keep the street list; `enrich` and `doctor` detect whether it is outdated.
 
 ### `dashcam rename [-d DIR] [--metadata-dir PATH] [--suggest] [--all] [--yes]`
 
@@ -189,7 +189,7 @@ One JSON file. Header pretty-printed, one sample per line.
     {"name": "вулиця Хрещатик", "name_en": "Khreshchatyk Street", "highway": "secondary", "distance_m": 401, "start_t": 117.0, "end_t": 173.0}
   ],
   "localities": {"start": {"name": "Київ", "name_en": "Kyiv", "place": "city"}, "end": null},
-  "enrichment": {"enricher_version": 1, "osm_timestamp": "2026-09-25T20:24:36Z", "samples_digest": "3f0c...", "enriched_at": "2026-09-26T20:40:11+03:00"},
+  "enrichment": {"enricher_version": 1, "osm_timestamp": "2026-09-25T20:24:36Z", "osm_source": "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf", "samples_digest": "3f0c...", "enriched_at": "2026-09-26T20:40:11+03:00"},
   "samples": [
     {"t": 0.0, "time": "2026-09-25T10:22:28+03:00", "lat": 50.447312, "lon": 30.52259, "kmh": 28, "status": "ok", "raw": "28 KM/H N50.447312 E30.522590 | 2026/09/25 10:22:28", "scores": [0.97, 0.99]}
   ]

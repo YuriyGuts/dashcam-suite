@@ -307,7 +307,7 @@ def has_usable_street_list(track: metadata.Track) -> bool:
     )
     if track.extraction_status != metadata.EXTRACTION_OK or not has_located_samples:
         return True
-    return enrich.is_enrichment_current(track, osm_timestamp=None)
+    return enrich.is_enrichment_current(track, osm_data=None)
 
 
 def find_taken_stems(video_paths: list[Path], track_stems: t.Iterable[str]) -> set[str]:

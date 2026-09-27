@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 import json
 import logging
@@ -302,7 +303,7 @@ def test_split_into_runs_breaks_at_position_jumps(make_driven_track):
 def test_is_enrichment_current_without_enrichment(make_driven_track):
     track = make_driven_track(drive((0, 0), (100, 0)))
 
-    assert not enrich.is_enrichment_current(track, osm_timestamp=None)
+    assert not enrich.is_enrichment_current(track, osm_data=None)
 
 
 def test_is_enrichment_current_after_enrichment(make_driven_track, road_database):
@@ -311,8 +312,8 @@ def test_is_enrichment_current_after_enrichment(make_driven_track, road_database
     enrich.enrich_track(track, road_database)
 
     # WHEN checking it against the same OSM data, and without OSM data
-    is_current = enrich.is_enrichment_current(track, road_database.osm_timestamp)
-    is_current_without_osm = enrich.is_enrichment_current(track, osm_timestamp=None)
+    is_current = enrich.is_enrichment_current(track, road_database.data_version)
+    is_current_without_osm = enrich.is_enrichment_current(track, osm_data=None)
 
     # THEN it is current
     assert is_current
@@ -326,7 +327,7 @@ def test_is_enrichment_current_with_changed_samples(make_driven_track, road_data
     track.clean_samples[3].status = cleaning.STATUS_SPOOFED
 
     # WHEN checking it
-    is_current = enrich.is_enrichment_current(track, road_database.osm_timestamp)
+    is_current = enrich.is_enrichment_current(track, road_database.data_version)
 
     # THEN it is outdated
     assert not is_current
@@ -336,11 +337,43 @@ def test_is_enrichment_current_with_newer_osm_data(make_driven_track, road_datab
     # GIVEN an enriched track
     track = make_driven_track(drive((0, 0), (100, 0)))
     enrich.enrich_track(track, road_database)
+    newer_data = dataclasses.replace(road_database.data_version, timestamp="2026-10-01T00:00:00Z")
 
-    # WHEN checking it against other OSM data
-    is_current = enrich.is_enrichment_current(track, "2026-10-01T00:00:00Z")
+    # WHEN checking it against newer OSM data from the same source
+    is_current = enrich.is_enrichment_current(track, newer_data)
 
     # THEN it is outdated
+    assert not is_current
+
+
+def test_is_enrichment_current_with_osm_data_of_another_region(make_driven_track, road_database):
+    # GIVEN an enriched track
+    track = make_driven_track(drive((0, 0), (100, 0)))
+    enrich.enrich_track(track, road_database)
+    other_region_data = dataclasses.replace(
+        road_database.data_version,
+        source="https://download.geofabrik.de/europe/poland-latest.osm.pbf",
+    )
+
+    # WHEN checking it against another extract with the same timestamp
+    is_current = enrich.is_enrichment_current(track, other_region_data)
+
+    # THEN it is outdated
+    assert not is_current
+
+
+def test_is_enrichment_current_without_recorded_osm_source(make_driven_track, road_database):
+    # GIVEN a track whose street list does not record its OSM source
+    track = make_driven_track(drive((0, 0), (100, 0)))
+    enrich.enrich_track(track, road_database)
+    data = json.loads(metadata.dump_track(track))
+    del data["enrichment"]["osm_source"]
+    track = metadata.load_track_text(json.dumps(data))
+
+    # WHEN checking it against the current OSM data
+    is_current = enrich.is_enrichment_current(track, road_database.data_version)
+
+    # THEN it is outdated, so it is enriched again once
     assert not is_current
 
 
@@ -353,7 +386,7 @@ def test_is_enrichment_current_with_older_enricher_version(
     monkeypatch.setattr(enrich, "ENRICHER_VERSION", enrich.ENRICHER_VERSION + 1)
 
     # WHEN checking it
-    is_current = enrich.is_enrichment_current(track, road_database.osm_timestamp)
+    is_current = enrich.is_enrichment_current(track, road_database.data_version)
 
     # THEN it is outdated
     assert not is_current
@@ -368,7 +401,7 @@ def test_compute_samples_digest_survives_save_and_load(make_driven_track, road_d
     reloaded_track = metadata.load_track_text(metadata.dump_track(track))
 
     # THEN its street list is still current
-    assert enrich.is_enrichment_current(reloaded_track, road_database.osm_timestamp)
+    assert enrich.is_enrichment_current(reloaded_track, road_database.data_version)
 
 
 @pytest.fixture

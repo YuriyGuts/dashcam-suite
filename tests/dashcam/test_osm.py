@@ -82,8 +82,8 @@ def test_build_database_keeps_named_drivable_roads(road_database):
     )
 
 
-def test_build_database_records_osm_timestamp(road_database, osm_timestamp):
-    assert road_database.osm_timestamp == osm_timestamp
+def test_build_database_records_osm_data_version(road_database, osm_timestamp):
+    assert road_database.data_version == osm.OsmDataVersion(timestamp=osm_timestamp, source="test")
     assert road_database.format_version == osm.DATABASE_FORMAT_VERSION
 
 
@@ -210,8 +210,10 @@ def test_update_osm_data_with_local_file_keeps_it(tmp_path, osm_pbf_path, caplog
     # WHEN building the OSM data from it
     osm.update_osm_data(metadata_dir, extract_url="unused", pbf_path=osm_pbf_path)
 
-    # THEN the database is built and the local file is kept
-    assert osm.open_database(metadata_dir) is not None
+    # THEN the database is built with the file name as its source, and the local file is kept
+    data_version = osm.read_database_version(metadata_dir)
+    assert data_version is not None
+    assert data_version.source == "synthetic.osm.pbf"
     assert osm_pbf_path.exists()
 
 
@@ -317,7 +319,9 @@ def test_update_osm_data_downloads_and_deletes_extract(
     assert list(download_path.parent.iterdir()) == []
     database = osm.open_database(metadata_dir)
     assert database is not None
-    assert database.osm_timestamp == osm_timestamp
+    assert database.data_version == osm.OsmDataVersion(
+        timestamp=osm_timestamp, source="https://example.org/ukraine.osm.pbf"
+    )
     database.close()
     assert sorted(path.name for path in (metadata_dir / "osm").iterdir()) == [osm.DATABASE_FILENAME]
 

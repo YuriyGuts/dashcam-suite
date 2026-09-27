@@ -422,6 +422,7 @@ def test_make_extract_job_keeps_previous_track_data(tmp_path, config, make_track
     previous_track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",
+        osm_source="test",
         samples_digest="abc",
         enriched_at="2026-09-26T20:00:00+03:00",
     )
@@ -804,6 +805,7 @@ def test_reclean_tracks_keeps_street_data(config, store, make_track):
     track.enrichment = metadata.Enrichment(
         enricher_version=1,
         osm_timestamp="2026-09-25T20:24:36Z",
+        osm_source="test",
         samples_digest="0123456789abcdef",
         enriched_at="2026-09-26T20:00:00+03:00",
     )

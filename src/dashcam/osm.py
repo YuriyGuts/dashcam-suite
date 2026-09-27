@@ -541,6 +541,19 @@ def update_osm_data(metadata_dir: Path, extract_url: str, pbf_path: Path | None 
     LOGGER.info(f"OSM data: '{database_path}' ({size_mb:.0f} MB)", extra=terminal.SUCCESS)
 
 
+@dataclasses.dataclass(frozen=True)
+class OsmDataVersion:
+    """
+    Which OSM data a road database was built from.
+
+    The source (the extract URL or the file name) tells regions apart: Geofabrik extracts of
+    the same day share their timestamp.
+    """
+
+    timestamp: str
+    source: str
+
+
 class RoadDatabase:
     """Read access to a road database."""
 
@@ -566,7 +579,9 @@ class RoadDatabase:
                 f"(run `dashcam enrich --update-osm`)"
             ) from exc
         self.format_version = int(meta.get("format_version", 0))
-        self.osm_timestamp = meta.get("osm_timestamp", "")
+        self.data_version = OsmDataVersion(
+            timestamp=meta.get("osm_timestamp", ""), source=meta.get("source", "")
+        )
 
     def close(self) -> None:
         self.connection.close()
@@ -632,12 +647,12 @@ def open_database(metadata_dir: Path) -> RoadDatabase | None:
     return database
 
 
-def read_database_timestamp(metadata_dir: Path) -> str | None:
-    """Return the timestamp of the OSM data, or None if there is no usable OSM data."""
+def read_database_version(metadata_dir: Path) -> OsmDataVersion | None:
+    """Return the version of the OSM data, or None if there is no usable OSM data."""
     database = open_database(metadata_dir)
     if database is None:
         return None
     try:
-        return database.osm_timestamp
+        return database.data_version
     finally:
         database.close()

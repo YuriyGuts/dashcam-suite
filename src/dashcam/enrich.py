@@ -117,11 +117,11 @@ def compute_samples_digest(track: metadata.Track) -> str:
     return digest.hexdigest()[:16]
 
 
-def is_enrichment_current(track: metadata.Track, osm_timestamp: str | None) -> bool:
+def is_enrichment_current(track: metadata.Track, osm_data: osm.OsmDataVersion | None) -> bool:
     """
     Check whether the street list of a track matches its samples and the OSM data.
 
-    Pass None as `osm_timestamp` to skip the OSM data check.
+    Pass None as `osm_data` to skip the OSM data check.
     """
     enrichment = track.enrichment
     if enrichment is None:
@@ -129,7 +129,11 @@ def is_enrichment_current(track: metadata.Track, osm_timestamp: str | None) -> b
     return (
         enrichment.enricher_version >= ENRICHER_VERSION
         and enrichment.samples_digest == compute_samples_digest(track)
-        and (osm_timestamp is None or enrichment.osm_timestamp == osm_timestamp)
+        and (
+            osm_data is None
+            or (enrichment.osm_timestamp, enrichment.osm_source)
+            == (osm_data.timestamp, osm_data.source)
+        )
     )
 
 
@@ -427,7 +431,8 @@ def enrich_track(track: metadata.Track, database: osm.RoadDatabase) -> None:
 
     track.enrichment = metadata.Enrichment(
         enricher_version=ENRICHER_VERSION,
-        osm_timestamp=database.osm_timestamp,
+        osm_timestamp=database.data_version.timestamp,
+        osm_source=database.data_version.source,
         samples_digest=compute_samples_digest(track),
         enriched_at=datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     )
@@ -487,7 +492,7 @@ def enrich_tracks(
                 continue
             if track.extraction_status != metadata.EXTRACTION_OK:
                 continue
-            if not force and is_enrichment_current(track, database.osm_timestamp):
+            if not force and is_enrichment_current(track, database.data_version):
                 continue
             try:
                 enrich_track(track, database)

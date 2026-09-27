@@ -182,6 +182,7 @@ class Enrichment:
 
     enricher_version: int
     osm_timestamp: str
+    osm_source: str
     samples_digest: str
     enriched_at: str
 
@@ -353,6 +354,7 @@ def parse_enrichment(value: t.Any) -> Enrichment | None:
     return Enrichment(
         enricher_version=int(value["enricher_version"]),
         osm_timestamp=str(value["osm_timestamp"]),
+        osm_source=str(value.get("osm_source", "")),
         samples_digest=str(value["samples_digest"]),
         enriched_at=str(value["enriched_at"]),
     )

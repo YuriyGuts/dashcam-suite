@@ -186,7 +186,7 @@ def forget_trips(names: list[str], metadata_dir: Path) -> int:
 def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Finding]:
     """Check track contents: format, names, versions, street lists, and suspicious results."""
     findings = []
-    osm_timestamp = osm.read_database_timestamp(store.root)
+    osm_data = osm.read_database_version(store.root)
     for stem, error in sorted(scan.unreadable_tracks.items()):
         findings.append(Finding(SEVERITY_ERROR, f"Track '{stem}.json' is unreadable: {error}"))
 
@@ -223,8 +223,8 @@ def check_tracks(scan: LibraryScan, store: metadata.MetadataStore) -> list[Findi
         is_extracted = track.extraction_status == metadata.EXTRACTION_OK
         has_outdated_streets = (
             is_extracted
-            and osm_timestamp is not None
-            and not enrich.is_enrichment_current(track, osm_timestamp)
+            and osm_data is not None
+            and not enrich.is_enrichment_current(track, osm_data)
         )
         if has_outdated_streets:
             reason = "no street list" if track.enrichment is None else "an outdated street list"

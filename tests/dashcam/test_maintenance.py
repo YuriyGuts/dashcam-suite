@@ -368,6 +368,22 @@ def test_run_doctor_reports_street_list_from_older_osm_data(
     assert "has an outdated street list (run `dashcam enrich`)" in caplog.text
 
 
+def test_run_doctor_reports_street_list_from_another_osm_region(
+    library_dir, store, add_trip, osm_metadata_dir, road_database, caplog
+):
+    # GIVEN a track enriched against another region's extract from the same day
+    _, track = add_trip("2026-09-25 Trip.mp4")
+    enrich.enrich_track(track, road_database)
+    track.enrichment = dataclasses.replace(track.enrichment, osm_source="poland-latest.osm.pbf")
+    store.save_track(track)
+
+    # WHEN running the doctor
+    run_doctor(library_dir, store)
+
+    # THEN enriching is suggested
+    assert "has an outdated street list (run `dashcam enrich`)" in caplog.text
+
+
 def test_run_doctor_accepts_current_street_list(
     library_dir, store, add_trip, osm_metadata_dir, road_database, caplog
 ):
