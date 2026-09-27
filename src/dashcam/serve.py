@@ -238,16 +238,14 @@ def is_index_stale(store: metadata.MetadataStore) -> bool:
     track_paths = store.list_track_paths()
     if {path.stem for path in track_paths} != indexed_stems:
         return True
-    for path in track_paths:
+    preview_paths = list(store.previews_dir.glob("*.mp4")) if store.previews_dir.is_dir() else []
+    for path in [*track_paths, *preview_paths]:
         try:
             if path.stat().st_mtime_ns > index_mtime_ns:
                 return True
         except OSError:
+            # Removed since it was listed, e.g. by `forget` or a rename in another tab.
             return True
-    if store.previews_dir.is_dir():
-        for path in store.previews_dir.glob("*.mp4"):
-            if path.stat().st_mtime_ns > index_mtime_ns:
-                return True
     return False
 
 

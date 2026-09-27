@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -233,6 +234,19 @@ def test_is_index_stale_after_new_preview(store, add_track):
 
     # WHEN checking the index
     # THEN it is stale, because the index records `has_preview`
+    assert serve.is_index_stale(store)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symbolic links need privileges on Windows")
+def test_is_index_stale_after_preview_removed_while_checking(store, add_track):
+    # GIVEN a current index, and a preview that is listed but gone when it is checked
+    add_track()
+    store.rebuild_index()
+    store.previews_dir.mkdir()
+    store.preview_path("2026-09-25 Gone").symlink_to(store.previews_dir / "missing.mp4")
+
+    # WHEN checking the index
+    # THEN it is stale instead of failing
     assert serve.is_index_stale(store)
 
 
