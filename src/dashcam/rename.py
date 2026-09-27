@@ -493,9 +493,11 @@ def print_plans(plans: list[RenamePlan]) -> None:
         terminal.print_line(f"     {terminal.ARROW} ", (plan.new_filename, "bold"))
 
 
-def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
+def edit_filename(
+    plan: RenamePlan, ask: t.Callable[[str], str], taken_stems: set[str]
+) -> str | None:
     """
-    Ask the user for the new name of one video.
+    Ask the user for the new name of one video that is not in `taken_stems` (in lowercase).
 
     Returns
     -------
@@ -508,21 +510,30 @@ def edit_filename(plan: RenamePlan, ask: t.Callable[[str], str]) -> str | None:
     terminal.print_line(("  suggested: ", "dim"), (plan.new_filename, "bold"))
     while True:
         answer = ask("  Enter to accept, '-' to skip, or type a new name: ").strip()
-        if not answer:
-            return plan.new_filename
         if answer == "-":
             return None
-        if not answer.lower().endswith(extension.lower()):
-            answer += extension
-        problem = validate_filename(answer, extension)
+        if not answer:
+            new_filename = plan.new_filename
+            problem = None
+        else:
+            has_extension = answer.lower().endswith(extension.lower())
+            new_filename = answer if has_extension else answer + extension
+            problem = validate_filename(new_filename, extension)
+        if problem is None and Path(new_filename).stem.lower() in taken_stems:
+            problem = "it is already taken by another video or track, or by an earlier name"
         if problem is None:
-            return answer
+            return new_filename
         terminal.print_line((f"  {terminal.WARNING_SYMBOL} Invalid name: ", "yellow"), problem)
 
 
-def confirm_plans(plans: list[RenamePlan], ask: t.Callable[[str], str]) -> list[RenamePlan]:
+def confirm_plans(
+    plans: list[RenamePlan], ask: t.Callable[[str], str], taken_stems: set[str]
+) -> list[RenamePlan]:
     """
     Ask whether to apply all suggestions, none, or decide for each video.
+
+    Names typed for a video must not be in `taken_stems` (the names of the videos and tracks in
+    the library, in lowercase), nor be given to another video in the same batch.
 
     The end of input (e.g. no terminal) counts as "no".
 
@@ -532,14 +543,14 @@ def confirm_plans(plans: list[RenamePlan], ask: t.Callable[[str], str]) -> list[
         The renames to apply.
     """
     try:
-        return ask_for_confirmed_plans(plans, ask)
+        return ask_for_confirmed_plans(plans, ask, taken_stems)
     except EOFError:
         terminal.print_line()
         return []
 
 
 def ask_for_confirmed_plans(
-    plans: list[RenamePlan], ask: t.Callable[[str], str]
+    plans: list[RenamePlan], ask: t.Callable[[str], str], taken_stems: set[str]
 ) -> list[RenamePlan]:
     """Ask the questions of `confirm_plans`."""
     while True:
@@ -553,11 +564,14 @@ def ask_for_confirmed_plans(
         if answer in ("e", "edit"):
             break
 
+    chosen_stems = set(taken_stems)
     confirmed_plans = []
     for plan in plans:
-        new_filename = edit_filename(plan, ask)
+        own_stem = plan.video_path.stem.lower()
+        new_filename = edit_filename(plan, ask, chosen_stems - {own_stem})
         if new_filename is not None and new_filename != plan.video_path.name:
             confirmed_plans.append(RenamePlan(plan.video_path, new_filename))
+            chosen_stems.add(Path(new_filename).stem.lower())
     return confirmed_plans
 
 
@@ -590,7 +604,8 @@ def rename_trips(
     if assume_yes:
         confirmed_plans = plans
     elif interactive:
-        confirmed_plans = confirm_plans(plans, ask)
+        taken_stems = find_taken_stems_in_library(library_dir, store)
+        confirmed_plans = confirm_plans(plans, ask, taken_stems)
     else:
         LOGGER.info("Run with `--suggest` to rename interactively, or `--yes` to apply")
         return 0

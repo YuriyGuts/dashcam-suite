@@ -452,11 +452,11 @@ def two_plans(tmp_path):
 
 
 def test_confirm_plans_with_yes(two_plans):
-    assert rename.confirm_plans(two_plans, ScriptedAnswers("y")) == two_plans
+    assert rename.confirm_plans(two_plans, ScriptedAnswers("y"), set()) == two_plans
 
 
 def test_confirm_plans_with_no(two_plans):
-    assert rename.confirm_plans(two_plans, ScriptedAnswers("n")) == []
+    assert rename.confirm_plans(two_plans, ScriptedAnswers("n"), set()) == []
 
 
 def test_confirm_plans_repeats_unknown_answer(two_plans):
@@ -464,7 +464,7 @@ def test_confirm_plans_repeats_unknown_answer(two_plans):
     answers = ScriptedAnswers("maybe", "yes")
 
     # WHEN confirming
-    confirmed_plans = rename.confirm_plans(two_plans, answers)
+    confirmed_plans = rename.confirm_plans(two_plans, answers, set())
 
     # THEN the question is asked again
     assert confirmed_plans == two_plans
@@ -476,7 +476,7 @@ def test_confirm_plans_with_edit(two_plans, capsys):
     answers = ScriptedAnswers("e", "No Date", "2026-09-25 Morning Drive", "-")
 
     # WHEN confirming
-    confirmed_plans = rename.confirm_plans(two_plans, answers)
+    confirmed_plans = rename.confirm_plans(two_plans, answers, set())
 
     # THEN the invalid name is explained and only the custom name is applied
     assert "start with the date" in capsys.readouterr().out
@@ -491,7 +491,7 @@ def test_confirm_plans_at_end_of_input(two_plans):
         raise EOFError
 
     # WHEN confirming
-    confirmed_plans = rename.confirm_plans(two_plans, no_input)
+    confirmed_plans = rename.confirm_plans(two_plans, no_input, set())
 
     # THEN nothing is renamed
     assert confirmed_plans == []
@@ -500,7 +500,46 @@ def test_confirm_plans_at_end_of_input(two_plans):
 def test_confirm_plans_with_edit_accepting_suggestion(two_plans):
     answers = ScriptedAnswers("e", "", "")
 
-    assert rename.confirm_plans(two_plans, answers) == two_plans
+    assert rename.confirm_plans(two_plans, answers, set()) == two_plans
+
+
+def test_confirm_plans_with_edit_to_a_taken_name(two_plans, capsys):
+    # GIVEN a name of another video in the library, and then a free name
+    answers = ScriptedAnswers("e", "2026-09-24 Existing", "2026-09-25 Free", "-")
+
+    # WHEN confirming
+    confirmed_plans = rename.confirm_plans(two_plans, answers, {"2026-09-24 existing"})
+
+    # THEN the taken name is refused and the free name is applied
+    assert "already taken" in capsys.readouterr().out
+    assert [plan.new_filename for plan in confirmed_plans] == ["2026-09-25 Free.mp4"]
+
+
+def test_confirm_plans_with_edit_to_a_name_chosen_earlier(two_plans, capsys):
+    # GIVEN the second suggestion typed for the first trip, then the second suggestion accepted
+    answers = ScriptedAnswers("e", "2026-09-25 B (Car)", "", "2026-09-25 C")
+
+    # WHEN confirming
+    confirmed_plans = rename.confirm_plans(two_plans, answers, set())
+
+    # THEN the second trip cannot take the name again and gets the one typed after
+    assert "already taken" in capsys.readouterr().out
+    assert [plan.new_filename for plan in confirmed_plans] == [
+        "2026-09-25 B (Car).mp4",
+        "2026-09-25 C.mp4",
+    ]
+
+
+def test_confirm_plans_with_edit_keeping_the_own_name(two_plans):
+    # GIVEN the current name typed for the first trip, and a skip for the second
+    answers = ScriptedAnswers("e", "2026-09-25 Trip 09-00", "-")
+
+    # WHEN confirming, with the current names of both trips taken
+    taken_stems = {"2026-09-25 trip 09-00", "2026-09-25 trip 18-00"}
+    confirmed_plans = rename.confirm_plans(two_plans, answers, taken_stems)
+
+    # THEN the own name is accepted, so nothing is renamed
+    assert confirmed_plans == []
 
 
 def run_rename_trips(library, config, interactive=False, assume_yes=False, ask=None):
@@ -553,6 +592,24 @@ def test_rename_trips_interactive_declined(library, add_named_trip, config):
     run_rename_trips(library, config, interactive=True, ask=ScriptedAnswers("n"))
 
     # THEN nothing is renamed
+    assert video_path.exists()
+
+
+def test_rename_trips_interactive_refuses_name_of_another_video(
+    library, add_named_trip, config, capsys
+):
+    # GIVEN a trip to rename, and another video in the library
+    library_dir, _ = library
+    video_path, _ = add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
+    (library_dir / "2026-09-24 Other.mp4").write_bytes(b"video")
+
+    # WHEN typing the name of the other video, and then skipping
+    answers = ScriptedAnswers("e", "2026-09-24 other", "-")
+    failed_count = run_rename_trips(library, config, interactive=True, ask=answers)
+
+    # THEN the name is refused before anything is renamed
+    assert failed_count == 0
+    assert "already taken" in capsys.readouterr().out
     assert video_path.exists()
 
 
