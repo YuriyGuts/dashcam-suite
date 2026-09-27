@@ -83,8 +83,9 @@ VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi")
 FORBIDDEN_FILENAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 FORBIDDEN_FILENAME_CHARS_TEXT = '/ \\ : * ? " < > |'
 
-# Characters that would make a name span several path components.
-PATH_SEPARATOR_CHARS = re.compile(r"[/\\\x00]")
+# Characters that would make a name span several path components, or on Windows, start from
+# another drive (`C:name`).
+PATH_SEPARATOR_CHARS = re.compile(r"[/\\:\x00]")
 
 
 class TrackFormatError(ValueError):

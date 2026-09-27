@@ -621,7 +621,9 @@ def test_suggest_trip_filename_without_track(library):
         rename.suggest_trip_filename(library_dir, store, "2026-09-25 Missing", "Car")
 
 
-@pytest.mark.parametrize("trip_id", ["../2026-09-25 Trip 11-17", "a/b", "a\\b", ".hidden", ""])
+@pytest.mark.parametrize(
+    "trip_id", ["../2026-09-25 Trip 11-17", "a/b", "a\\b", ".hidden", "", "C:2026-09-25 Trip 11-17"]
+)
 def test_suggest_trip_filename_with_invalid_trip_name(library, add_named_trip, trip_id):
     # GIVEN a trip, and a name that is not a single file name
     library_dir, store = library
