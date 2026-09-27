@@ -620,6 +620,36 @@ def test_server_rejects_foreign_host(server, add_track):
     assert "Host" in json.loads(body)["error"]
 
 
+@pytest.mark.parametrize("fetch_site", ["cross-site", "same-site"])
+def test_server_rejects_requests_from_other_sites(server, library_dir, fetch_site):
+    # GIVEN a trip video
+    (library_dir / "2026-09-25 Trip 11-17.mp4").write_bytes(bytes(100))
+
+    # WHEN a page of another site (or another port on this machine) loads it in a `<video>`
+    status, _, body = fetch(
+        f"{server}/videos/2026-09-25%20Trip%2011-17.mp4", headers={"Sec-Fetch-Site": fetch_site}
+    )
+
+    # THEN it is refused, so the page cannot tell whether the video exists
+    assert status == 403
+    assert "Cross-site" in json.loads(body)["error"]
+
+
+@pytest.mark.parametrize("fetch_site", ["same-origin", "none", None])
+def test_server_accepts_requests_from_the_web_app_and_the_address_bar(
+    server, library_dir, fetch_site
+):
+    # GIVEN a trip video
+    (library_dir / "2026-09-25 Trip 11-17.mp4").write_bytes(bytes(100))
+
+    # WHEN the web app, the address bar, or a client without the header requests it
+    headers = {"Sec-Fetch-Site": fetch_site} if fetch_site else {}
+    status, _, _ = fetch(f"{server}/videos/2026-09-25%20Trip%2011-17.mp4", headers=headers)
+
+    # THEN it is served
+    assert status == 200
+
+
 @pytest.mark.parametrize("host_header", ["192.168.1.5:8765", "studio.local:8765"])
 def test_server_accepts_network_names_when_listening_on_the_network(
     library_dir, store, add_track, host_header
@@ -1056,6 +1086,24 @@ def test_server_rejects_cross_origin_rename(rename_server, library_dir, add_trip
 
     # THEN it is refused and nothing is renamed
     assert status == 403
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
+def test_server_rejects_cross_site_rename(rename_server, library_dir, add_trip_with_video):
+    # GIVEN a trip
+    add_trip_with_video()
+
+    # WHEN a page on another port of this machine sends the request without an `Origin`
+    request_headers = {"Content-Type": "application/json", "Sec-Fetch-Site": "same-site"}
+    body = json.dumps({"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"})
+    request = urllib.request.Request(
+        f"{rename_server}/api/rename", data=body.encode(), headers=request_headers, method="POST"
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(request)
+
+    # THEN it is refused and nothing is renamed
+    assert exc_info.value.code == 403
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
 
 

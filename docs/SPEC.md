@@ -140,7 +140,7 @@ Runs `encode trips` → `extract` → `enrich` → `rename --suggest`. Accepts t
 
 Local HTTP server for the static web app, the metadata directory, and the videos in the library directory.
 
-Every request must address the server by a loopback host name. When it listens on another address, IP addresses, `*.local` names and the machine's host name are accepted too. DNS rebinding always uses the attacker's host name, so it is refused.
+Every request must address the server by a loopback host name. When it listens on another address, IP addresses, `*.local` names and the machine's host name are accepted too. DNS rebinding always uses the attacker's host name, so it is refused. Requests whose `Sec-Fetch-Site` is neither `same-origin` nor `none` are refused as well, so pages of other sites cannot probe for trip videos with `<video>` elements. The absolute library path is only sent to the web app when the server listens on loopback.
 
 - Plain ES modules in `web/js/`, served as they are (no build step). Leaflet (vendored) with OpenStreetMap tiles.
 - Sidebar: date range, one search box matching trip names, street names, and start/end localities (comma-separated terms must all match), trip list with stats (date, start/end time, distance, duration, average/max speed, GPS coverage badge), aggregate stats for the selection. Selected trips that the filters leave out stay selected but are not drawn; "Select all" selects exactly the listed trips. Filter state lives in the URL hash.

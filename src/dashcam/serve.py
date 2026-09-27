@@ -462,10 +462,24 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         host = split_host_header(self.headers.get("Host") or "")
         return is_trusted_host(host, self.app.allow_network_hosts)
 
+    def is_cross_site(self) -> bool:
+        """
+        Check whether a browser sent the request for a page of another site.
+
+        Such a page cannot read the response, but could learn from a `<video>` element whether a
+        trip video exists and how long it is. `Sec-Fetch-Site` is sent by current browsers, and
+        is `none` when the user opens a URL directly. Other clients (e.g. curl) do not send it.
+        """
+        fetch_site = self.headers.get("Sec-Fetch-Site")
+        return fetch_site is not None and fetch_site not in ("same-origin", "none")
+
     def handle_post(self) -> None:
         """Dispatch a POST request."""
         if not self.is_host_trusted():
             self.send_json_error(403, "Unexpected Host header")
+            return
+        if self.is_cross_site():
+            self.send_json_error(403, "Cross-site requests are not allowed")
             return
         url_path = urllib.parse.urlsplit(self.path).path
         if url_path != "/api/rename":
@@ -521,6 +535,9 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
         """Dispatch a GET or HEAD request."""
         if not self.is_host_trusted():
             self.send_json_error(403, "Unexpected Host header", send_body)
+            return
+        if self.is_cross_site():
+            self.send_json_error(403, "Cross-site requests are not allowed", send_body)
             return
         url_path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         if url_path == "/api/trips":
