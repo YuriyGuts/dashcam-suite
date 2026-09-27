@@ -85,14 +85,16 @@ class PreviewJobDefinition:
     config: Config
 
 
+def matches_patterns(filename: str, include: list[str], exclude: list[str]) -> bool:
+    """Check whether a filename matches the include patterns (if any) and no exclude pattern."""
+    is_included = not include or any(fnmatch.fnmatch(filename, pattern) for pattern in include)
+    is_excluded = any(fnmatch.fnmatch(filename, pattern) for pattern in exclude)
+    return is_included and not is_excluded
+
+
 def filter_videos(video_paths: list[Path], include: list[str], exclude: list[str]) -> list[Path]:
     """Keep the videos whose names match the include and exclude patterns."""
-    return [
-        path
-        for path in video_paths
-        if (not include or any(fnmatch.fnmatch(path.name, pattern) for pattern in include))
-        and not any(fnmatch.fnmatch(path.name, pattern) for pattern in exclude)
-    ]
+    return [path for path in video_paths if matches_patterns(path.name, include, exclude)]
 
 
 def skip_too_long_names(video_paths: list[Path]) -> list[Path]:
@@ -579,9 +581,12 @@ def plan_missing_previews(
     return job_defs
 
 
-def reclean_tracks(metadata_dir: Path, config: Config) -> int:
+def reclean_tracks(
+    metadata_dir: Path, config: Config, include: list[str], exclude: list[str]
+) -> int:
     """
-    Re-run cleaning on the stored raw readings of all tracks, then rebuild the index.
+    Re-run cleaning on the stored raw readings of the tracks whose video names match the include
+    and exclude patterns, then rebuild the index.
 
     Returns
     -------
@@ -601,6 +606,8 @@ def reclean_tracks(metadata_dir: Path, config: Config) -> int:
             LOGGER.warning(track_file.get_skip_message())
             continue
         if track.extraction_status != metadata.EXTRACTION_OK:
+            continue
+        if not matches_patterns(track.video_filename, include, exclude):
             continue
         track.clean_samples = clean_raw_samples(
             track.raw_samples, track.video_filename, track.overrides, config

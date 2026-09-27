@@ -859,7 +859,7 @@ def test_reclean_tracks_applies_overrides(config, store, make_track):
     store.save_track(track)
 
     # WHEN recleaning
-    failed_count = extract.reclean_tracks(store.root, config)
+    failed_count = extract.reclean_tracks(store.root, config, include=[], exclude=[])
 
     # THEN the overridden samples are no longer good fixes
     recleaned_track = store.load_track(track.stem)
@@ -882,7 +882,7 @@ def test_reclean_tracks_keeps_street_data(config, store, make_track):
     store.save_track(track)
 
     # WHEN recleaning
-    extract.reclean_tracks(store.root, config)
+    extract.reclean_tracks(store.root, config, include=[], exclude=[])
 
     # THEN the street data is kept for `enrich` to check
     recleaned_track = store.load_track(track.stem)
@@ -900,7 +900,7 @@ def test_reclean_tracks_leaves_misnamed_track_files_alone(config, store, make_tr
     store.write_track_file(backup_track, store.track_path("2026-09-25 B backup"))
 
     # WHEN recleaning
-    failed_count = extract.reclean_tracks(store.root, config)
+    failed_count = extract.reclean_tracks(store.root, config, include=[], exclude=[])
 
     # THEN the backup does not replace the track, which is recleaned
     recleaned_track = store.load_track("2026-09-25 B")
@@ -916,10 +916,60 @@ def test_reclean_tracks_reports_unreadable_tracks(config, store):
     store.track_path("broken").write_text("{", encoding="utf-8")
 
     # WHEN recleaning
-    failed_count = extract.reclean_tracks(store.root, config)
+    failed_count = extract.reclean_tracks(store.root, config, include=[], exclude=[])
 
     # THEN the failure is counted
     assert failed_count == 1
+
+
+@pytest.fixture
+def outdated_tracks(store, make_track):
+    """Save tracks from an older cleaning version."""
+    tracks = []
+    for video_filename in ("2026-09-25 Trip.mp4", "2026-09-26 Old Trip.mp4"):
+        track = make_track(video_filename=video_filename)
+        track.cleaning_version = 0
+        store.save_track(track)
+        tracks.append(track)
+    return tracks
+
+
+def test_reclean_tracks_without_patterns(store, config, outdated_tracks):
+    # GIVEN outdated tracks
+
+    # WHEN recleaning without patterns
+    failed_count = extract.reclean_tracks(store.root, config, include=[], exclude=[])
+
+    # THEN every track is recleaned
+    assert failed_count == 0
+    for track in outdated_tracks:
+        assert store.load_track(track.stem).cleaning_version == metadata.CLEANING_VERSION
+
+
+def test_reclean_tracks_with_include_and_exclude(store, config, outdated_tracks):
+    # GIVEN outdated tracks
+
+    # WHEN recleaning the tracks of September 2026, except old ones
+    extract.reclean_tracks(store.root, config, include=["2026-09-*"], exclude=["*Old*"])
+
+    # THEN only the matching track is recleaned
+    assert store.load_track("2026-09-25 Trip").cleaning_version == metadata.CLEANING_VERSION
+    assert store.load_track("2026-09-26 Old Trip").cleaning_version == 0
+
+
+def test_reclean_tracks_skips_track_without_overlay(store, config, outdated_tracks):
+    # GIVEN an outdated track of a video without an overlay
+    track = outdated_tracks[0]
+    track.extraction_status = metadata.EXTRACTION_NO_OVERLAY
+    track.raw_samples = []
+    track.clean_samples = []
+    store.save_track(track)
+
+    # WHEN recleaning
+    extract.reclean_tracks(store.root, config, include=[], exclude=[])
+
+    # THEN the track is left as it is
+    assert store.load_track(track.stem) == track
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")

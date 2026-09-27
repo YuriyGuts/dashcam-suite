@@ -53,7 +53,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 ### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews] [--job-count JC]`
 
-- Glob patterns match filenames and may be repeated.
+- Glob patterns match video filenames and may be repeated. With `--reclean`, they select the tracks to reclean.
 - Probe: 10 frames spread over each new video are checked for a readable date/time field; at least 3 must have it. Videos without it, or narrower than 1280 px, are recorded as `no_overlay` and skipped until `--force`. If no date/time field is found and ffmpeg returns no frame at some probe points, the video fails without a track, so the next run probes it again.
 - OCR:
   - Frames are sampled at 2 fps from the bottom 64 px strip, decoded with `ffmpeg` (hardware acceleration from the config), and collapsed to one sample per camera clock tick. For other widths, a strip of proportional height is cut and scaled (Lanczos) to 2560 px wide.

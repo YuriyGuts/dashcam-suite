@@ -430,6 +430,22 @@ def test_main_runs_reclean(monkeypatch, config, recorded_calls):
     assert recorded_calls[0][2]["metadata_dir"] == Path("meta")
 
 
+def test_main_runs_reclean_with_patterns(monkeypatch, config, recorded_calls):
+    # GIVEN `extract --reclean` with include and exclude patterns
+
+    # WHEN running the tool
+    run_main(
+        monkeypatch,
+        config,
+        ["extract", "--reclean", "--include", "2019-*", "--exclude", "*old*"],
+    )
+
+    # THEN the patterns are passed to recleaning
+    _, _, kwargs = recorded_calls[0]
+    assert kwargs["include"] == ["2019-*"]
+    assert kwargs["exclude"] == ["*old*"]
+
+
 def test_main_runs_status(monkeypatch, config, recorded_calls):
     # GIVEN `status` with a directory
 

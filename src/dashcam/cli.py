@@ -261,7 +261,7 @@ def add_extract_arguments(extract_parser: argparse.ArgumentParser, config: Confi
     extract_parser.add_argument(
         "--reclean",
         action="store_true",
-        help="Re-run GPS cleaning on the stored readings of all tracks without decoding videos.",
+        help="Re-run GPS cleaning on the stored readings of the tracks without decoding videos.",
     )
     extract_parser.add_argument(
         "--previews",
@@ -560,6 +560,8 @@ def run_extract_command(parsed_args: argparse.Namespace, config: Config) -> int:
         return extract.reclean_tracks(
             metadata_dir=parsed_args.metadata_dir,
             config=config,
+            include=parsed_args.include,
+            exclude=parsed_args.exclude,
         )
 
     return extract.extract_videos(
