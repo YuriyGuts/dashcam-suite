@@ -126,7 +126,8 @@ const state = {
   // First and last trip dates, as ISO dates and as day numbers. Null without dated trips.
   dateBounds: null,
   // Empty `from` or `to` means the filter is open on that side.
-  filters: {from: "", to: "", name: "", street: ""},
+  // `query` matches trip names, street names, and start and end localities.
+  filters: {from: "", to: "", query: ""},
   selectedIds: [],
   focusedId: null,
   colorMode: "trip",
@@ -379,8 +380,7 @@ function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   state.filters.from = params.get("from") || "";
   state.filters.to = params.get("to") || "";
-  state.filters.name = params.get("q") || "";
-  state.filters.street = params.get("street") || "";
+  state.filters.query = params.get("q") || "";
   state.selectedIds = [...new Set(params.getAll("sel"))].filter((id) => state.tripsById.has(id));
   const focusedId = params.get("trip");
   state.focusedId = state.tripsById.has(focusedId) ? focusedId : null;
@@ -391,11 +391,10 @@ function readHash() {
 
 function writeHash({pushHistory = false} = {}) {
   const params = new URLSearchParams();
-  const {from, to, name, street} = state.filters;
+  const {from, to, query} = state.filters;
   if (from) params.set("from", from);
   if (to) params.set("to", to);
-  if (name) params.set("q", name);
-  if (street) params.set("street", street);
+  if (query) params.set("q", query);
   for (const id of state.selectedIds) params.append("sel", id);
   if (state.focusedId) params.set("trip", state.focusedId);
   if (state.colorMode !== "trip") params.set("color", state.colorMode);
@@ -444,20 +443,36 @@ function computeDateBounds(trips) {
   return {first, last, firstDay: isoDateToDay(first), lastDay: isoDateToDay(last)};
 }
 
+// A query holds one or more comma-separated terms, e.g. "Stryiska, Zelena". A trip matches if each
+// term is part of its name, one of its street names, or its start or end locality.
+function queryTerms(query) {
+  return query
+    .split(",")
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function matchesQueryTerm(trip, term) {
+  const texts = [trip.name, ...trip.streets, trip.start_locality, trip.end_locality];
+  return texts.some((text) => text && text.toLowerCase().includes(term));
+}
+
 function filteredTrips() {
   const {from, to} = state.filters;
-  const name = state.filters.name.trim().toLowerCase();
-  const street = state.filters.street.trim().toLowerCase();
+  const terms = queryTerms(state.filters.query);
   return state.trips.filter((trip) => {
     if ((from || to) && !trip.date) return false;
     if (from && trip.date < from) return false;
     if (to && trip.date > to) return false;
-    if (name && !trip.id.toLowerCase().includes(name)) return false;
-    if (street && !trip.streets.some((streetName) => streetName.toLowerCase().includes(street))) {
-      return false;
-    }
-    return true;
+    return terms.every((term) => matchesQueryTerm(trip, term));
   });
+}
+
+// Selected trips that the filters let through, which are the ones drawn on the route map. The
+// focused trip is drawn even if the filters hide it.
+function drawnSelection(visibleTrips = filteredTrips()) {
+  const visibleIds = new Set(visibleTrips.map((trip) => trip.id));
+  return state.selectedIds.filter((id) => visibleIds.has(id) || id === state.focusedId);
 }
 
 function aggregateStats(trips) {
@@ -939,7 +954,7 @@ async function showDrawStatus(tripCount) {
 }
 
 async function drawRoutes(generation) {
-  const tripIds = state.selectedIds.filter((id) => hasGps(state.tripsById.get(id)));
+  const tripIds = drawnSelection().filter((id) => hasGps(state.tripsById.get(id)));
   if (!tripIds.length) {
     hideMapStatus();
   } else {
@@ -1214,9 +1229,7 @@ const dom = {
   librarySummary: document.getElementById("library-summary"),
   filterFrom: document.getElementById("filter-from"),
   filterTo: document.getElementById("filter-to"),
-  filterName: document.getElementById("filter-name"),
-  filterStreet: document.getElementById("filter-street"),
-  streetFilter: document.getElementById("street-filter"),
+  filterQuery: document.getElementById("filter-query"),
   streetNames: document.getElementById("street-names"),
   dateFilter: document.getElementById("date-filter"),
   dateSlider: document.getElementById("date-slider"),
@@ -1331,8 +1344,7 @@ function renderDateFilter() {
 }
 
 function renderControls() {
-  if (dom.filterName.value !== state.filters.name) dom.filterName.value = state.filters.name;
-  if (dom.filterStreet.value !== state.filters.street) dom.filterStreet.value = state.filters.street;
+  if (dom.filterQuery.value !== state.filters.query) dom.filterQuery.value = state.filters.query;
   renderDateFilter();
 
   for (const button of document.querySelectorAll("[data-mode]")) {
@@ -1348,26 +1360,35 @@ function renderControls() {
 
 function renderSummary(visibleTrips) {
   const visibleWithGps = visibleTrips.filter(hasGps);
-  const selectedTrips = state.selectedIds.map((id) => state.tripsById.get(id));
-  const useSelection = state.mapMode === "routes" && selectedTrips.length > 0;
-  const hiddenIds = state.mapMode === "coverage" ? visibleWithGps.filter((trip) => state.hiddenIds.has(trip.id)).map((trip) => trip.id) : [];
-  const trips = useSelection ? selectedTrips : visibleWithGps.filter((trip) => !hiddenIds.includes(trip.id));
+  const drawnIds = drawnSelection(visibleTrips);
+  const useSelection = state.mapMode === "routes" && drawnIds.length > 0;
+  const hiddenIds =
+    state.mapMode === "coverage"
+      ? visibleWithGps.filter((trip) => state.hiddenIds.has(trip.id)).map((trip) => trip.id)
+      : [];
+  const trips = useSelection
+    ? drawnIds.map((id) => state.tripsById.get(id))
+    : visibleWithGps.filter((trip) => !hiddenIds.includes(trip.id));
   const stats = aggregateStats(trips);
+  const filteredOutCount = state.mapMode === "routes" ? state.selectedIds.length - drawnIds.length : 0;
   const titleText = useSelection
     ? `${stats.count} of ${visibleWithGps.length} trips selected`
     : `${stats.count} ${stats.count === 1 ? "trip" : "trips"} shown`;
-  const title = el(
-    "div",
-    {className: "summary-title"},
-    el("span", {}, titleText),
-    hiddenIds.length
-      ? el(
-          "button",
-          {type: "button", className: "chip chip-small", title: "Show the hidden trips again", onclick: () => showHiddenTrips(hiddenIds)},
-          `${hiddenIds.length} hidden${DOT}Show all`,
-        )
-      : null,
-  );
+  let titleNote = null;
+  if (hiddenIds.length) {
+    titleNote = el(
+      "button",
+      {type: "button", className: "chip chip-small", title: "Show the hidden trips again", onclick: () => showHiddenTrips(hiddenIds)},
+      `${hiddenIds.length} hidden${DOT}Show all`,
+    );
+  } else if (filteredOutCount > 0) {
+    titleNote = el(
+      "span",
+      {className: "summary-note", title: "Selected trips that the filters leave out are not drawn"},
+      `${filteredOutCount} more hidden by filters`,
+    );
+  }
+  const title = el("div", {className: "summary-title"}, el("span", {}, titleText), titleNote);
 
   const statTiles = [
     ["Distance", formatDistance(stats.distanceKm)],
@@ -1392,7 +1413,7 @@ function renderSummary(visibleTrips) {
     );
   } else if (!visibleTrips.length) {
     children.push(el("p", {className: "hint"}, "No trips match the filters."));
-  } else if (state.mapMode === "routes" && !selectedTrips.length) {
+  } else if (state.mapMode === "routes" && !drawnIds.length) {
     children.push(el("p", {className: "hint"}, "Select trips to draw them, or switch the map to Coverage."));
   }
   dom.summary.replaceChildren(...children);
@@ -1457,7 +1478,6 @@ function renderTripList(visibleTrips) {
   );
 
   const allStreetNames = [...new Set(state.trips.flatMap((trip) => trip.streets))].sort();
-  dom.streetFilter.hidden = allStreetNames.length === 0;
   dom.streetNames.replaceChildren(...allStreetNames.map((name) => el("option", {value: name})));
 }
 
@@ -1902,15 +1922,12 @@ function scheduleFilterRender() {
   requestAnimationFrame(() => {
     isFilterRenderScheduled = false;
     renderSidebar();
-    if (state.mapMode === "coverage") {
-      renderMap();
-    }
+    renderMap();
   });
 }
 
-function updateTextFilters() {
-  state.filters.name = dom.filterName.value;
-  state.filters.street = dom.filterStreet.value;
+function updateQueryFilter() {
+  state.filters.query = dom.filterQuery.value;
   scheduleFilterRender();
 }
 
@@ -2233,8 +2250,7 @@ function bindVideoPanelDragging() {
 /* Wiring. */
 
 function bindControls() {
-  dom.filterName.addEventListener("input", updateTextFilters);
-  dom.filterStreet.addEventListener("input", updateTextFilters);
+  dom.filterQuery.addEventListener("input", updateQueryFilter);
   for (const input of [dom.filterFrom, dom.filterTo]) {
     input.addEventListener("input", onDateFieldInput);
     input.addEventListener("change", onDateFieldChange);
@@ -2268,9 +2284,9 @@ function bindControls() {
     writeHash();
     renderMap();
   });
+  // Selects exactly the trips in the list, so that the map draws what the list shows.
   document.getElementById("select-all").addEventListener("click", () => {
-    const visibleIds = filteredTrips().filter(hasGps).map((trip) => trip.id);
-    state.selectedIds = [...new Set([...state.selectedIds, ...visibleIds])];
+    state.selectedIds = filteredTrips().filter(hasGps).map((trip) => trip.id);
     state.mapMode = "routes";
     syncColorSlots();
     writeHash();
@@ -2284,8 +2300,8 @@ function bindControls() {
     renderAll();
   });
   document.getElementById("zoom-selection").addEventListener("click", () => {
-    const selectedTrips = state.selectedIds.map((id) => state.tripsById.get(id));
-    fitToTrips(selectedTrips.length ? selectedTrips : filteredTrips());
+    const drawnTrips = drawnSelection().map((id) => state.tripsById.get(id));
+    fitToTrips(state.mapMode === "routes" && drawnTrips.length ? drawnTrips : coverageTrips());
   });
   for (const button of dom.videoSource.querySelectorAll("[data-source]")) {
     button.addEventListener("click", () => {
@@ -2343,8 +2359,8 @@ async function start() {
   let initialTrips = filteredTrips();
   if (state.focusedId) {
     initialTrips = [state.tripsById.get(state.focusedId)];
-  } else if (state.selectedIds.length && state.mapMode === "routes") {
-    initialTrips = state.selectedIds.map((id) => state.tripsById.get(id));
+  } else if (drawnSelection().length && state.mapMode === "routes") {
+    initialTrips = drawnSelection().map((id) => state.tripsById.get(id));
   }
   if (!fitToTrips(initialTrips, {animate: false})) {
     map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);

@@ -34,7 +34,8 @@
       <section id="filters" class="section">
         <label class="search-field">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
-          <input type="search" id="filter-name" placeholder="Search trips" autocomplete="off" aria-label="Search trips">
+          <input type="search" id="filter-query" list="street-names" placeholder="Search names, streets, places" autocomplete="off" aria-label="Search trip names, streets, and places" title="Separate several terms with commas to find trips that match all of them">
+          <datalist id="street-names"></datalist>
         </label>
         <div id="date-filter">
           <div id="date-slider" class="range-slider" hidden>
@@ -57,11 +58,6 @@
             <button type="button" class="chip" data-preset="all">All</button>
           </div>
         </div>
-        <label class="search-field" id="street-filter" hidden>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
-          <input type="search" id="filter-street" list="street-names" placeholder="Any street" autocomplete="off" aria-label="Street">
-          <datalist id="street-names"></datalist>
-        </label>
       </section>
 
       <section id="summary" class="section" aria-live="polite">

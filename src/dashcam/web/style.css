@@ -715,6 +715,11 @@ h1 {
   text-overflow: ellipsis;
 }
 
+.summary-note {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
 .hint {
   color: var(--text-muted);
   font-size: 12px;
