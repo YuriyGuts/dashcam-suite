@@ -1,7 +1,10 @@
+import io
 import logging
 import sqlite3
+import urllib.request
 
 import pytest
+import truststore
 
 from dashcam import osm
 
@@ -154,6 +157,34 @@ def test_update_osm_data_with_local_file_keeps_it(tmp_path, osm_pbf_path, caplog
     # THEN the database is built and the local file is kept
     assert osm.open_database(metadata_dir) is not None
     assert osm_pbf_path.exists()
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, content):
+        super().__init__(content)
+        self.headers = {"Content-Length": str(len(content))}
+
+
+def test_download_file_verifies_certificate_with_os_trust_store(tmp_path, monkeypatch):
+    # GIVEN a server that returns some content
+    content = bytes(range(256)) * 10
+    requests = []
+
+    def fake_urlopen(request, context):
+        requests.append((request, context))
+        return FakeResponse(content)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    target_path = tmp_path / "extract.osm.pbf"
+
+    # WHEN downloading a file
+    osm.download_file("https://example.com/extract.osm.pbf", target_path)
+
+    # THEN the content is saved, and the certificate is verified with the OS trust store
+    assert target_path.read_bytes() == content
+    [(request, ssl_context)] = requests
+    assert request.full_url == "https://example.com/extract.osm.pbf"
+    assert isinstance(ssl_context, truststore.SSLContext)
 
 
 @pytest.fixture

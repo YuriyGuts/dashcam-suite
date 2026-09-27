@@ -23,6 +23,7 @@ import datetime
 import logging
 import os
 import sqlite3
+import ssl
 import sys
 import time
 import typing as t
@@ -33,6 +34,7 @@ import osmium
 import osmium.filter
 import osmium.io
 import osmium.osm
+import truststore
 
 from dashcam import metadata
 from dashcam import terminal
@@ -356,8 +358,14 @@ def download_file(url: str, target_path: Path) -> None:
     """Download a file, logging the progress."""
     LOGGER.info(f"Downloading {url}")
     request = urllib.request.Request(url, headers={"User-Agent": "dashcam-route-visualizer"})
+    # Verify the certificate with the OS trust store. OpenSSL's own store may lack the root
+    # certificate, e.g. on Windows, which only fetches root certificates on demand.
+    ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
-    with urllib.request.urlopen(request) as response, target_path.open("wb") as fp:
+    with (
+        urllib.request.urlopen(request, context=ssl_context) as response,
+        target_path.open("wb") as fp,
+    ):
         total_size = int(response.headers.get("Content-Length") or 0)
         downloaded_size = 0
         while block := response.read(1024 * 1024):
