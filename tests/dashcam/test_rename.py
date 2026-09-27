@@ -261,7 +261,7 @@ def add_named_trip(library, make_named_track):
 
 
 def test_plan_renames_targets_placeholders_only(library, add_named_trip):
-    # GIVEN trips with current and legacy placeholder names, and one with a real name
+    # GIVEN a trip with a placeholder name, and trips with real names
     library_dir, store = library
     add_named_trip("2026-09-24 Trip 3.mp4", [FRANKA])
     add_named_trip("2026-09-25 Trip 11-17.mp4", [STUSA])
@@ -270,9 +270,8 @@ def test_plan_renames_targets_placeholders_only(library, add_named_trip):
     # WHEN planning renames
     plans = rename.plan_renames(library_dir, store, "Car", include_all=False)
 
-    # THEN only the placeholders are renamed
+    # THEN only the placeholder is renamed
     assert [(plan.video_path.name, plan.new_filename) for plan in plans] == [
-        ("2026-09-24 Trip 3.mp4", "2026-09-24 Ivana Franka (Car).mp4"),
         ("2026-09-25 Trip 11-17.mp4", "2026-09-25 Vasylia Stusa (Car).mp4"),
     ]
 

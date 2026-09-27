@@ -43,8 +43,8 @@ MIN_NAMED_STRETCH_M = 300.0
 # Highway classes named by their ref, even when they have a name.
 REF_HIGHWAY_CLASSES = frozenset(["motorway", "motorway_link", "trunk", "trunk_link"])
 
-# Placeholder names given by `encode`, e.g. `Trip 11-17`, or by older versions, e.g. `Trip 3`.
-PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip (\d{2}-\d{2}|\d+)$")
+# Placeholder names given by `encode`, e.g. `Trip 11-17`.
+PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip \d{2}-\d{2}$")
 
 # Street-type words dropped from names, in lowercase. Ukrainian words are dropped before
 # transliteration, English words from `name:en`.
