@@ -230,7 +230,15 @@ async function saveRename() {
     return;
   }
   renameEdit = null;
-  await reloadTrips({oldId: trip.id, newId});
+  try {
+    await reloadTrips({oldId: trip.id, newId});
+  } catch (error) {
+    // The trip is renamed on disk, but the page still knows it by its old name.
+    dom.summary.replaceChildren(
+      el("p", {}, `The trip was renamed, but the trips cannot be reloaded: ${error.message}. Reload the page.`),
+    );
+    return;
+  }
   if (playback) openVideo(newId, playback);
 }
 
