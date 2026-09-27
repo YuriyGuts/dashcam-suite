@@ -138,6 +138,8 @@ dashcam serve
 
 Open http://127.0.0.1:8765/ in your browser.
 
+Your videos and tracks stay on your machine. The map background is loaded from openstreetmap.org, so OpenStreetMap sees which areas you view.
+
 ### Processing an existing library
 
 If you already have merged trip videos but no metadata, point `library_dir` at the folder (or pass `-d`) and run:
