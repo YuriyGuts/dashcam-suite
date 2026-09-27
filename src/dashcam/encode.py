@@ -409,14 +409,14 @@ def run_encode_job(job_def: EncodeJobDefinition) -> bool:
             f"Encoding failed for '{output_path.name}' (ffmpeg exit code {exc.returncode})"
             f"{error_tail}"
         )
-        partial_output_path.unlink(missing_ok=True)
         return False
     except OSError as exc:
         LOGGER.error(f"Cannot save '{output_path.name}': {exc}")
-        partial_output_path.unlink(missing_ok=True)
         return False
     finally:
         concat_list_path.unlink(missing_ok=True)
+        # Left behind by a failure or an interruption. A saved output no longer has this name.
+        partial_output_path.unlink(missing_ok=True)
 
     LOGGER.info(f"Encoding completed: {output_path.name}", extra=terminal.SUCCESS)
     return True

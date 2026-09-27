@@ -272,9 +272,9 @@ def test_main_exits_quietly_on_ctrl_c(monkeypatch, config, caplog):
     with pytest.raises(SystemExit) as exc_info:
         cli.main()
 
-    # THEN it reports the interruption and exits with the conventional code
+    # THEN it reports the interruption with a cleanup hint, and exits with the conventional code
     assert exc_info.value.code == cli.INTERRUPTED_EXIT_CODE
-    assert "Interrupted" in caplog.text
+    assert "Interrupted (`dashcam doctor --fix` removes any partial files" in caplog.text
 
 
 def test_run_encode_command_range(config, tmp_path, encode_calls):

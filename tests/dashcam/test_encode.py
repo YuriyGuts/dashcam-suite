@@ -854,3 +854,27 @@ def test_collect_raw_video_segments_with_real_ffmpeg(raw_video_dir):
     # THEN the readable segments form a single trip
     assert [segment.index for segment in segments] == [271, 272, 273]
     assert [trip.get_placeholder_name() for trip in trips] == ["2026-09-25 Trip 11-17"]
+
+
+def test_run_encode_job_removes_partial_output_when_interrupted(config, tmp_path, monkeypatch):
+    # GIVEN an encoding job that is interrupted while ffmpeg writes the partial output
+    output_path = tmp_path / "2026-09-25 Trip 11-17.mp4"
+    job_def = encode.EncodeJobDefinition(
+        raw_segments=[make_segment(1, datetime.datetime(2026, 9, 25, 11, 17, 7))],
+        output_path=output_path,
+        config=config,
+    )
+
+    def interrupted_ffmpeg(cmd, output_name, total_duration_s):
+        Path(cmd[-1]).write_bytes(b"partial video")
+        raise SystemExit(130)
+
+    monkeypatch.setattr(encode, "get_total_duration", lambda segments, ffprobe: None)
+    monkeypatch.setattr(encode, "run_ffmpeg_with_progress", interrupted_ffmpeg)
+
+    # WHEN running it
+    with pytest.raises(SystemExit):
+        encode.run_encode_job(job_def)
+
+    # THEN no partial output is left behind
+    assert list(tmp_path.iterdir()) == []

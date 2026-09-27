@@ -881,3 +881,22 @@ def test_run_extract_job_reports_unreadable_track_of_preview_job(config, library
     # THEN the error is returned instead of raised
     assert error is not None
     assert "Invalid JSON" in error
+
+
+def test_make_preview_removes_partial_output_when_interrupted(config, tmp_path, monkeypatch):
+    # GIVEN a preview whose encoding is interrupted while ffmpeg writes the partial output
+    preview_path = tmp_path / "previews" / "2026-09-25 Trip.mp4"
+
+    def interrupted_ffmpeg(cmd):
+        Path(cmd[-1]).write_bytes(b"partial video")
+        raise SystemExit(130)
+        yield
+
+    monkeypatch.setattr(extract.video, "iter_ffmpeg_progress", interrupted_ffmpeg)
+
+    # WHEN making the preview
+    with pytest.raises(SystemExit):
+        extract.make_preview(tmp_path / "trip.mp4", preview_path, config, duration_s=60.0)
+
+    # THEN no partial output is left behind
+    assert list(preview_path.parent.iterdir()) == []

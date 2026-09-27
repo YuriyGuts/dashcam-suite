@@ -238,14 +238,16 @@ def make_preview(
     try:
         for progress in video.iter_ffmpeg_progress(cmd):
             progress_logger.update(progress.output_time_s, progress.speed)
+        # Replaces an older preview, which a plain rename refuses to do on Windows.
+        os.replace(partial_path, preview_path)
     except subprocess.CalledProcessError as exc:
-        partial_path.unlink(missing_ok=True)
         raise RuntimeError(
             f"ffmpeg failed to make the preview (exit code {exc.returncode})\n"
             f"{video.get_error_tail(exc.stderr or '')}"
         ) from exc
-    # Replaces an older preview, which a plain rename refuses to do on Windows.
-    os.replace(partial_path, preview_path)
+    finally:
+        # Left behind by a failure or an interruption. A saved preview no longer has this name.
+        partial_path.unlink(missing_ok=True)
 
 
 def clean_raw_samples(

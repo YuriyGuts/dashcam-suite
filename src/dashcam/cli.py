@@ -65,6 +65,9 @@ LOGGER = logging.getLogger(__name__)
 # Commands that work without a library directory when the metadata directory is known.
 METADATA_ONLY_COMMANDS = {"enrich", "forget"}
 
+# Commands whose parallel jobs may leave partial files behind when interrupted.
+PARTIAL_FILE_COMMANDS = {"encode", "extract", "import"}
+
 # Exit code of a process stopped by Ctrl+C, as shells report it.
 INTERRUPTED_EXIT_CODE = 130
 
@@ -692,7 +695,12 @@ def main() -> None:
         LOGGER.error(exc)
         sys.exit(1)
     except KeyboardInterrupt:
-        LOGGER.warning("Interrupted")
+        if parsed_args.command in PARTIAL_FILE_COMMANDS:
+            LOGGER.warning(
+                "Interrupted (`dashcam doctor --fix` removes any partial files left behind)"
+            )
+        else:
+            LOGGER.warning("Interrupted")
         sys.exit(INTERRUPTED_EXIT_CODE)
 
     sys.exit(1 if failed_count else 0)
