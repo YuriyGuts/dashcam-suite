@@ -170,8 +170,8 @@ def test_download_file_verifies_certificate_with_os_trust_store(tmp_path, monkey
     content = bytes(range(256)) * 10
     requests = []
 
-    def fake_urlopen(request, context):
-        requests.append((request, context))
+    def fake_urlopen(request, context, timeout):
+        requests.append((request, context, timeout))
         return FakeResponse(content)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -180,11 +180,50 @@ def test_download_file_verifies_certificate_with_os_trust_store(tmp_path, monkey
     # WHEN downloading a file
     osm.download_file("https://example.com/extract.osm.pbf", target_path)
 
-    # THEN the content is saved, and the certificate is verified with the OS trust store
+    # THEN the content is saved, the certificate is verified with the OS trust store, and a
+    # stalled connection times out
     assert target_path.read_bytes() == content
-    [(request, ssl_context)] = requests
+    [(request, ssl_context, timeout)] = requests
     assert request.full_url == "https://example.com/extract.osm.pbf"
     assert isinstance(ssl_context, truststore.SSLContext)
+    assert timeout == osm.DOWNLOAD_TIMEOUT_S
+
+
+def test_download_file_with_truncated_response(tmp_path, monkeypatch):
+    # GIVEN a server that announces more content than it sends
+    response = FakeResponse(b"x" * 1000)
+    response.headers = {"Content-Length": "5000000"}
+    monkeypatch.setattr(urllib.request, "urlopen", lambda request, context, timeout: response)
+
+    # WHEN downloading a file
+    # THEN the download fails
+    with pytest.raises(RuntimeError, match="stopped after 0 of 5 MB"):
+        osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
+
+
+def test_open_database_in_directory_with_uri_characters(tmp_path, osm_pbf_path):
+    # GIVEN OSM data in a metadata directory whose path contains URI special characters
+    metadata_dir = tmp_path / "trips #1 ?%"
+    osm.update_osm_data(metadata_dir, "unused", pbf_path=osm_pbf_path)
+
+    # WHEN opening the database
+    database = osm.open_database(metadata_dir)
+
+    # THEN it opens
+    assert database is not None
+    database.close()
+
+
+def test_open_database_with_corrupt_file(tmp_path):
+    # GIVEN a road database file that is not a database
+    database_path = osm.get_database_path(tmp_path)
+    database_path.parent.mkdir(parents=True)
+    database_path.write_bytes(b"not a database" * 100)
+
+    # WHEN opening it
+    # THEN the error names the file and how to rebuild it
+    with pytest.raises(RuntimeError, match="roads.sqlite.*--update-osm"):
+        osm.open_database(tmp_path)
 
 
 @pytest.fixture

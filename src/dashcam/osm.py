@@ -79,6 +79,9 @@ COORDINATE_SCALE = 10_000_000
 # How often (in seconds) to log progress while filtering the extract.
 PROGRESS_INTERVAL_S = 30
 
+# Seconds without any data after which a download fails.
+DOWNLOAD_TIMEOUT_S = 60
+
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
 
@@ -355,15 +358,26 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
 
 
 def download_file(url: str, target_path: Path) -> None:
-    """Download a file, logging the progress."""
+    """
+    Download a file, logging the progress.
+
+    Raises
+    ------
+    RuntimeError
+        If the server sends less data than it announced.
+    OSError
+        If the download fails or stalls.
+    """
     LOGGER.info(f"Downloading {url}")
-    request = urllib.request.Request(url, headers={"User-Agent": "dashcam-route-visualizer"})
+    request = urllib.request.Request(url, headers={"User-Agent": "dashcam-suite"})
     # Verify the certificate with the OS trust store. OpenSSL's own store may lack the root
     # certificate, e.g. on Windows, which only fetches root certificates on demand.
     ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
     with (
-        urllib.request.urlopen(request, context=ssl_context) as response,
+        urllib.request.urlopen(
+            request, context=ssl_context, timeout=DOWNLOAD_TIMEOUT_S
+        ) as response,
         target_path.open("wb") as fp,
     ):
         total_size = int(response.headers.get("Content-Length") or 0)
@@ -378,6 +392,11 @@ def download_file(url: str, target_path: Path) -> None:
                     extra=terminal.PROGRESS,
                 )
                 next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
+    if total_size and downloaded_size != total_size:
+        raise RuntimeError(
+            f"The download of {url} stopped after {downloaded_size / 1e6:.0f} "
+            f"of {total_size / 1e6:.0f} MB"
+        )
 
 
 def update_osm_data(metadata_dir: Path, extract_url: str, pbf_path: Path | None = None) -> None:
@@ -408,10 +427,26 @@ class RoadDatabase:
     """Read access to a road database."""
 
     def __init__(self, database_path: Path):
+        """
+        Open a road database read-only.
+
+        Raises
+        ------
+        RuntimeError
+            If the file is not a readable road database.
+        """
         self.path = database_path
-        self.connection = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+        database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
+        self.connection = sqlite3.connect(database_uri, uri=True)
         self.roads_by_id: dict[int, Road] = {}
-        meta = dict(self.connection.execute("SELECT key, value FROM meta"))
+        try:
+            meta = dict(self.connection.execute("SELECT key, value FROM meta"))
+        except sqlite3.DatabaseError as exc:
+            self.connection.close()
+            raise RuntimeError(
+                f"Cannot read the OSM data in '{database_path}': {exc} "
+                f"(run `dashcam enrich --update-osm`)"
+            ) from exc
         self.format_version = int(meta.get("format_version", 0))
         self.osm_timestamp = meta.get("osm_timestamp", "")
 
