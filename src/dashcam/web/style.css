@@ -577,6 +577,12 @@ input[type="checkbox"]:not(.switch):checked {
   color: var(--primary);
 }
 
+.chip-small {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 /* Badges. */
 
 .badge {
@@ -664,7 +670,9 @@ h1 {
 
 .summary-title {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 8px;
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
@@ -790,6 +798,16 @@ h1 {
 
 .trip-body:hover .trip-name {
   color: var(--primary);
+}
+
+.trip.is-hidden .trip-body {
+  opacity: 0.45;
+}
+
+.trip-show {
+  width: 24px;
+  height: 24px;
+  margin: -2px -4px 0 -4px;
 }
 
 .trip-meta {
@@ -1181,7 +1199,7 @@ h1 {
 
 .leaflet-tooltip.map-tooltip {
   width: max-content;
-  max-width: 300px;
+  max-width: 280px;
   white-space: normal;
   overflow-wrap: anywhere;
   padding: 6px 10px;
@@ -1202,6 +1220,7 @@ h1 {
 
 .map-tooltip strong {
   display: block;
+  margin-bottom: 3px;
   font-weight: 600;
 }
 
@@ -1211,6 +1230,7 @@ h1 {
 }
 
 .map-tooltip .tooltip-hint {
+  margin-top: 4px;
   color: #94969c;
 }
 

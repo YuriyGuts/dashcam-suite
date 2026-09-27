@@ -7,12 +7,11 @@
  */
 "use strict";
 
-// Categorical trip colors, assigned in this order to selected trips. Trips selected beyond
-// these slots share the neutral color.
+// Categorical trip colors, assigned in this order to selected trips. More trips reuse them.
 const TRIP_COLORS = [
-  "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948",
+  "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300",
+  "#4a3aa7", "#e34948", "#0e9aa7", "#a0522d", "#9b4dca", "#7a8b1f",
 ];
-const OTHER_TRIP_COLOR = "#898781";
 
 // Sequential speed scale (one hue, light to dark). Samples without a speed are gray.
 const SPEED_BUCKETS = [
@@ -40,8 +39,22 @@ const COVERAGE_OPACITY = 0.8;
 // visible when the map shows a whole city or region.
 const COVERAGE_DOTS_MAX_ZOOM = 12;
 
-// Heatmap: one hue (orange, to stand apart from the blue coverage lines), light to dark.
-const HEAT_GRADIENT = {0.2: "#f7c8b0", 0.5: "#eb6834", 0.8: "#b8461c", 1.0: "#7a2c0f"};
+// Heatmap: one hue (orange, to stand apart from the blue coverage lines), light to dark. It
+// shows how many trips passed through each cell of a ground grid, on a log scale.
+const HEAT_GRADIENT = {0.15: "#f7c8b0", 0.45: "#eb6834", 0.75: "#b8461c", 1.0: "#6b240a"};
+const HEAT_CELL_M = 10;
+const HEAT_RADIUS_PX = 5;
+const HEAT_BLUR_PX = 4;
+const HEAT_MIN_OPACITY = 0.02;
+// The heat of the least and the most visited cells, between 0 and 1.
+const HEAT_MIN_LEVEL = 0.25;
+// About how many point circles overlap on a line. The plugin adds up their opacities, so each
+// point gets a lower opacity to reach the intended level.
+const HEAT_OVERLAP = 4;
+const METERS_PER_DEGREE_LAT = 111320;
+// Width of the world at the equator in pixels at zoom 0, as Leaflet draws it.
+const WORLD_WIDTH_PX = 256;
+const EARTH_CIRCUMFERENCE_M = 40075016.686;
 
 // Sample statuses with coordinates.
 const LOCATED_STATUSES = new Set(["ok", "interpolated"]);
@@ -101,6 +114,7 @@ const ICON_PATHS = {
   alert: "M12 4L2.5 20h19L12 4zM12 10v4M12 17h.01",
   xCircle: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15 9l-6 6M9 9l6 6",
   pencil: "M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 8.5l3 3",
+  eyeOff: "M3 3l18 18M10.6 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7a13 13 0 0 1-2.6 3.7M6.6 6.6C4.4 8 2.8 10.2 2 12c1 2.5 5 7 10 7 1.8 0 3.5-.6 4.9-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2",
 };
 
 const state = {
@@ -118,6 +132,8 @@ const state = {
   colorMode: "trip",
   mapMode: "routes",
   showHeat: false,
+  // Trips hidden from the coverage map with the H shortcut, until the page is reloaded.
+  hiddenIds: new Set(),
 };
 
 // Color slot of each selected trip. A trip keeps its color while it stays selected.
@@ -280,8 +296,8 @@ function isLocated(sample) {
 }
 
 function tripColor(tripId) {
-  const slot = colorSlots.get(tripId);
-  return slot === undefined || slot >= TRIP_COLORS.length ? OTHER_TRIP_COLOR : TRIP_COLORS[slot];
+  const slot = colorSlots.get(tripId) ?? 0;
+  return TRIP_COLORS[slot % TRIP_COLORS.length];
 }
 
 function speedColor(kmh) {
@@ -489,7 +505,7 @@ function prepareTrack(trip, data) {
   for (let runIndex = 1; runIndex < runs.length; runIndex++) {
     gaps.push([runs[runIndex - 1].at(-1), runs[runIndex][0]]);
   }
-  return {trip, samples, runs, gaps, streets: data.streets || []};
+  return {trip, samples, runs, gaps, locatedIndexes: runs.flat(), streets: data.streets || []};
 }
 
 function loadTrack(tripId) {
@@ -649,22 +665,31 @@ function fitToTrips(trips, {animate = true} = {}) {
   return bounds !== null;
 }
 
-// The route point under the mouse, which the copy shortcut acts on.
-let hoveredPoint = null;
+// What is under the mouse: a trip, and on a full track also the nearest point, which the copy
+// shortcut acts on. `latlng` is the mouse position, used while the point is not known.
+let hovered = null;
 
 // How long (milliseconds) the tooltip confirms a copied point.
 const COPIED_NOTICE_MS = 1500;
 
+function sampleTimeText(sample) {
+  if (!sample.time) {
+    return "Time unknown";
+  }
+  return `${formatClockTime(sample.time, true)}${sample.time_estimated ? " (estimated)" : ""}`;
+}
+
+function sampleDate(track, sample) {
+  return sample.time ? sample.time.slice(0, 10) : track.trip.date;
+}
+
 // Plain text, one labeled field per line, for pasting into notes or messages.
 function pointDetailsText(track, sample) {
-  const dateText = sample.time ? formatDate(sample.time.slice(0, 10)) : formatDate(track.trip.date);
-  const timeText = sample.time
-    ? `${formatClockTime(sample.time, true)}${sample.time_estimated ? " (estimated)" : ""}`
-    : "unknown";
+  const timeText = sample.time ? sampleTimeText(sample) : "unknown";
   const speedText = sample.kmh === null || sample.kmh === undefined ? "unknown" : formatSpeed(sample.kmh);
   return [
     `Trip name: ${track.trip.name}`,
-    `Date: ${dateText}`,
+    `Date: ${formatDate(sampleDate(track, sample))}`,
     `Time: ${timeText}`,
     `Video position: ${formatDuration(sample.t)}`,
     `Speed: ${speedText}`,
@@ -672,41 +697,73 @@ function pointDetailsText(track, sample) {
   ].join("\n");
 }
 
-function renderHoverTooltip() {
-  const {track, sample, copiedAt} = hoveredPoint;
-  const timeText = sample.time
-    ? `${formatClockTime(sample.time, true)}${sample.time_estimated ? " (estimated)" : ""}`
-    : "Time unknown";
-  const isCopiedNoticeShown = copiedAt !== null && performance.now() - copiedAt < COPIED_NOTICE_MS;
-  const actions = canPlayVideo(track.trip) ? "Click to play from here, C to copy" : "C to copy";
-  hoverTooltip.setContent(
-    el(
-      "div",
-      {},
-      el("strong", {}, track.trip.name),
-      el("span", {}, [timeText, `video ${formatDuration(sample.t)}`, formatSpeed(sample.kmh)].join(DOT)),
-      el("span", {}, formatCoordinates(sample.lat, sample.lon)),
-      el("span", {className: "tooltip-hint"}, isCopiedNoticeShown ? "Copied to clipboard" : actions),
-    ),
-  );
+function hoverActionsText() {
+  const {trip, sample} = hovered;
+  if (state.mapMode === "coverage" && trip.id !== state.focusedId) {
+    return ["Click to open", "H to hide"].join(DOT);
+  }
+  return withoutEmpty([
+    canPlayVideo(trip) ? "Click to play from here" : null,
+    sample ? "C to copy" : null,
+    "H to hide",
+  ]).join(DOT);
 }
 
-function showHover(track, sampleIndexes, latlng) {
-  const index = nearestSampleIndex(track, sampleIndexes, latlng);
-  const sample = track.samples[index];
-  const isSamePoint = hoveredPoint && hoveredPoint.track === track && hoveredPoint.sample === sample;
-  hoveredPoint = {track, sample, copiedAt: isSamePoint ? hoveredPoint.copiedAt : null};
-  const position = sampleLatLng(sample);
-  hoverMarker.setLatLng(position).addTo(map);
-  hoverTooltip.setLatLng(position);
+function renderHoverTooltip() {
+  const {trip, track, sample, copiedAt} = hovered;
+  const lines = [el("strong", {}, trip.name)];
+  if (sample) {
+    const speedText = sample.kmh === null || sample.kmh === undefined ? "Speed unknown" : formatSpeed(sample.kmh);
+    lines.push(
+      el("span", {}, [formatDate(sampleDate(track, sample)), sampleTimeText(sample)].join(DOT)),
+      el("span", {}, [`Video ${formatDuration(sample.t)}`, speedText].join(DOT)),
+      el("span", {}, formatCoordinates(sample.lat, sample.lon)),
+    );
+  } else {
+    const startTime = trip.start_time ? formatClockTime(trip.start_time) : null;
+    lines.push(el("span", {}, withoutEmpty([formatDate(trip.date), startTime]).join(DOT)));
+  }
+  const isCopiedNoticeShown = copiedAt !== null && performance.now() - copiedAt < COPIED_NOTICE_MS;
+  lines.push(el("span", {className: "tooltip-hint"}, isCopiedNoticeShown ? "Copied to clipboard" : hoverActionsText()));
+  hoverTooltip.setContent(el("div", {}, lines));
+}
+
+// Shows the tooltip of a trip under the mouse. On a full track, it snaps to the nearest point.
+function showHover(trip, latlng, track = null, sampleIndexes = null) {
+  const sample = track ? track.samples[nearestSampleIndex(track, sampleIndexes, latlng)] : null;
+  const isSamePoint = hovered && hovered.trip === trip && hovered.sample === sample;
+  hovered = {trip, track, sample, latlng, copiedAt: isSamePoint ? hovered.copiedAt : null};
+  if (sample) {
+    hoverMarker.setLatLng(sampleLatLng(sample)).addTo(map);
+  } else {
+    hoverMarker.remove();
+  }
+  hoverTooltip.setLatLng(sample ? sampleLatLng(sample) : latlng);
   renderHoverTooltip();
   if (!map.hasLayer(hoverTooltip)) {
     hoverTooltip.addTo(map);
   }
 }
 
+// Simplified routes have no times or speeds, so the full track is loaded on the first hover.
+function showSimplifiedHover(trip, latlng) {
+  const track = loadedTracks.get(trip.id);
+  if (track) {
+    showHover(trip, latlng, track, track.locatedIndexes);
+    return;
+  }
+  showHover(trip, latlng);
+  loadTrack(trip.id)
+    .then((loadedTrack) => {
+      if (hovered?.trip === trip && !hovered.track) {
+        showHover(trip, hovered.latlng, loadedTrack, loadedTrack.locatedIndexes);
+      }
+    })
+    .catch((error) => console.error(error));
+}
+
 function hideHover() {
-  hoveredPoint = null;
+  hovered = null;
   hoverMarker.remove();
   hoverTooltip.remove();
 }
@@ -731,30 +788,59 @@ function isTypingTarget(target) {
   return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 }
 
-// C copies the hovered point. Cmd+C and Ctrl+C do too, unless text on the page is selected.
-async function onCopyShortcut(event) {
-  if (!hoveredPoint || event.key.toLowerCase() !== "c" || event.altKey || event.shiftKey) {
-    return;
-  }
-  if (isTypingTarget(event.target)) {
-    return;
-  }
-  const hasModifier = event.metaKey || event.ctrlKey;
-  if (hasModifier && !window.getSelection().isCollapsed) {
-    return;
-  }
-  event.preventDefault();
-  const point = hoveredPoint;
+async function copyHoveredPoint() {
+  const point = hovered;
   if (!(await copyToClipboard(pointDetailsText(point.track, point.sample)))) {
     return;
   }
   point.copiedAt = performance.now();
-  if (hoveredPoint === point) {
+  if (hovered === point) {
     renderHoverTooltip();
     setTimeout(() => {
-      if (hoveredPoint === point) renderHoverTooltip();
+      if (hovered === point) renderHoverTooltip();
     }, COPIED_NOTICE_MS);
   }
+}
+
+// Shortcuts for the trip under the mouse. H hides it. C copies the point; Cmd+C and Ctrl+C do
+// too, unless text on the page is selected.
+function onHoverShortcut(event) {
+  if (!hovered || event.altKey || event.shiftKey || isTypingTarget(event.target)) {
+    return;
+  }
+  const key = event.key.toLowerCase();
+  const hasModifier = event.metaKey || event.ctrlKey;
+  if (key === "h" && !hasModifier) {
+    event.preventDefault();
+    hideTrip(hovered.trip.id);
+  } else if (key === "c" && hovered.sample) {
+    if (hasModifier && !window.getSelection().isCollapsed) {
+      return;
+    }
+    event.preventDefault();
+    copyHoveredPoint();
+  }
+}
+
+// On the route map, hiding a trip clears its checkbox. On the coverage map, the trip stays
+// hidden until it is shown again from the list, or the page is reloaded.
+function hideTrip(tripId) {
+  hideHover();
+  if (state.mapMode === "coverage") {
+    state.hiddenIds.add(tripId);
+    renderSidebar();
+    renderMap();
+  } else {
+    setTripSelected(tripId, false);
+  }
+}
+
+function showHiddenTrips(tripIds) {
+  for (const tripId of tripIds) {
+    state.hiddenIds.delete(tripId);
+  }
+  renderSidebar();
+  renderMap();
 }
 
 function onRouteClick(track, sampleIndexes, latlng) {
@@ -771,8 +857,17 @@ function onRouteClick(track, sampleIndexes, latlng) {
   }
 }
 
+async function onSimplifiedRouteClick(trip, latlng) {
+  try {
+    const track = await loadTrack(trip.id);
+    onRouteClick(track, track.locatedIndexes, latlng);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 function bindRouteEvents(line, track, sampleIndexes) {
-  line.on("mousemove", (event) => showHover(track, sampleIndexes, event.latlng));
+  line.on("mousemove", (event) => showHover(track.trip, event.latlng, track, sampleIndexes));
   line.on("mouseout", hideHover);
   line.on("click", (event) => onRouteClick(track, sampleIndexes, event.latlng));
 }
@@ -784,14 +879,17 @@ function addRouteLine(layer, track, sampleIndexes, color) {
   line.addTo(layer);
 }
 
-function drawTrack(layer, track) {
-  const color = tripColor(track.trip.id);
+function addHalo(layer, latlngs, weight, opacity) {
+  L.polyline(latlngs, {renderer: routeRenderer, color: HALO_COLOR, weight, opacity, interactive: false}).addTo(layer);
+}
+
+function drawTrack(layer, track, {color, isColoredBySpeed}) {
   const latlngsOf = (indexes) => indexes.map((index) => sampleLatLng(track.samples[index]));
 
   for (const [fromIndex, toIndex] of track.gaps) {
     L.polyline(latlngsOf([fromIndex, toIndex]), {
       renderer: routeRenderer,
-      color: state.colorMode === "speed" ? UNKNOWN_SPEED_COLOR : color,
+      color: isColoredBySpeed ? UNKNOWN_SPEED_COLOR : color,
       weight: GAP_WEIGHT,
       opacity: 0.6,
       dashArray: "2 8",
@@ -803,15 +901,9 @@ function drawTrack(layer, track) {
     if (run.length < 2) {
       continue;
     }
-    L.polyline(latlngsOf(run), {
-      renderer: routeRenderer,
-      color: HALO_COLOR,
-      weight: ROUTE_HALO_WEIGHT,
-      opacity: 0.8,
-      interactive: false,
-    }).addTo(layer);
+    addHalo(layer, latlngsOf(run), ROUTE_HALO_WEIGHT, 0.8);
 
-    if (state.colorMode === "trip") {
+    if (!isColoredBySpeed) {
       addRouteLine(layer, track, run, color);
       continue;
     }
@@ -848,23 +940,51 @@ async function showDrawStatus(tripCount) {
 
 async function drawRoutes(generation) {
   const tripIds = state.selectedIds.filter((id) => hasGps(state.tripsById.get(id)));
-  // The focused trip is drawn last, on top of the others.
-  tripIds.sort((a, b) => (a === state.focusedId) - (b === state.focusedId));
   if (!tripIds.length) {
     hideMapStatus();
   } else {
     await showDrawStatus(tripIds.length);
   }
-  const results = await Promise.allSettled(tripIds.map(loadTrack));
+  // Many trips are drawn from the simplified routes, except the focused and the playing trip.
+  // Speed colors need the full tracks.
+  const isColoredBySpeed = state.colorMode === "speed";
+  const isSimplified = !isColoredBySpeed && tripIds.length >= LARGE_DRAW_TRIP_COUNT;
+  const needsFullTrack = (id) => !isSimplified || id === state.focusedId || id === video.tripId;
+  const fullTrackIds = tripIds.filter(needsFullTrack);
+  const simplifiedIds = tripIds.filter((id) => !needsFullTrack(id));
+  // The focused trip is drawn last, on top of the others.
+  fullTrackIds.sort((a, b) => (a === state.focusedId) - (b === state.focusedId));
+  const [geometry, results] = await Promise.all([
+    simplifiedIds.length ? loadGeometry() : {},
+    Promise.allSettled(fullTrackIds.map(loadTrack)),
+  ]);
   if (generation !== drawGeneration) {
     return;
   }
+
   const layer = L.layerGroup();
+  const simplifiedTrips = simplifiedIds.filter((id) => geometry[id]).map((id) => state.tripsById.get(id));
+  // All halos go first, so that no halo covers another trip's line.
+  for (const trip of simplifiedTrips) {
+    addHalo(layer, geometry[trip.id], ROUTE_HALO_WEIGHT, 0.8);
+  }
+  for (const trip of simplifiedTrips) {
+    const line = L.polyline(geometry[trip.id], {
+      renderer: routeRenderer,
+      color: tripColor(trip.id),
+      weight: ROUTE_WEIGHT,
+      opacity: 1,
+    });
+    line.on("mousemove", (event) => showSimplifiedHover(trip, event.latlng));
+    line.on("mouseout", hideHover);
+    line.on("click", (event) => onSimplifiedRouteClick(trip, event.latlng));
+    line.addTo(layer);
+  }
   results.forEach((result, index) => {
     if (result.status === "fulfilled") {
-      drawTrack(layer, result.value);
+      drawTrack(layer, result.value, {color: tripColor(fullTrackIds[index]), isColoredBySpeed});
     } else {
-      console.error(`Cannot load the track of '${tripIds[index]}':`, result.reason);
+      console.error(`Cannot load the track of '${fullTrackIds[index]}':`, result.reason);
     }
   });
   routesLayer.remove();
@@ -873,46 +993,134 @@ async function drawRoutes(generation) {
   hideMapStatus();
 }
 
+function coverageTrips() {
+  return filteredTrips().filter((trip) => hasGps(trip) && !state.hiddenIds.has(trip.id));
+}
+
+/* Heatmap. */
+
+// Ground cells are keyed by row and column, offset to be positive, in one number.
+const HEAT_COLUMN_SPAN = 2 ** 23;
+const HEAT_ROW_OFFSET = 2 ** 21;
+const HEAT_COLUMN_OFFSET = 2 ** 22;
+
+// Below this many trips on the busiest cell, the colors are scaled as if it had this many, so
+// that a single trip is not drawn in the darkest color.
+const HEAT_MIN_SCALE_COUNT = 10;
+
+// The heatmap of the drawn coverage, kept to recompute its points on zoom.
+let heatCells = null;
+
+function heatCellKey(row, column) {
+  return (row + HEAT_ROW_OFFSET) * HEAT_COLUMN_SPAN + (column + HEAT_COLUMN_OFFSET);
+}
+
+// Counts the trips through each cell of a ground grid. Each trip counts once per cell, however
+// long it stayed there or however many points its route has there.
+function countTripsPerCell(routes) {
+  const cells = new Map();
+  const firstPoint = routes[0]?.[0]?.[0];
+  const referenceLat = firstPoint ? firstPoint[0] : 0;
+  const cellLat = HEAT_CELL_M / METERS_PER_DEGREE_LAT;
+  const cellLon = cellLat / Math.cos((referenceLat * Math.PI) / 180);
+  for (const runs of routes) {
+    const tripCells = new Set();
+    for (const run of runs) {
+      for (let index = 1; index < run.length; index++) {
+        const [lat1, lon1] = run[index - 1];
+        const [lat2, lon2] = run[index];
+        // Steps of half a cell, so that no cell along the segment is skipped.
+        const cellsAlong = Math.max(Math.abs(lat2 - lat1) / cellLat, Math.abs(lon2 - lon1) / cellLon);
+        const stepCount = Math.max(1, Math.ceil(cellsAlong * 2));
+        for (let step = 0; step <= stepCount; step++) {
+          const fraction = step / stepCount;
+          const row = Math.floor((lat1 + (lat2 - lat1) * fraction) / cellLat);
+          const column = Math.floor((lon1 + (lon2 - lon1) * fraction) / cellLon);
+          tripCells.add(heatCellKey(row, column));
+        }
+      }
+    }
+    for (const key of tripCells) {
+      cells.set(key, (cells.get(key) ?? 0) + 1);
+    }
+  }
+  const maxCount = Math.max(HEAT_MIN_SCALE_COUNT, ...cells.values());
+  return {cells, cellLat, cellLon, referenceLat, maxCount};
+}
+
+// Heatmap points for a zoom level. The heatmap plugin adds up the points that fall within half
+// a radius on screen, so cells that small are merged first, keeping the highest count. This
+// keeps the colors the same at every zoom.
+function heatPoints(heat, zoom) {
+  const {cells, cellLat, cellLon, referenceLat, maxCount} = heat;
+  const metersPerPixel =
+    (EARTH_CIRCUMFERENCE_M * Math.cos((referenceLat * Math.PI) / 180)) / (WORLD_WIDTH_PX * 2 ** zoom);
+  const mergeFactor = Math.max(1, Math.floor(((HEAT_RADIUS_PX / 2) * metersPerPixel) / HEAT_CELL_M));
+  const merged = new Map();
+  for (const [key, count] of cells) {
+    const row = Math.floor(key / HEAT_COLUMN_SPAN) - HEAT_ROW_OFFSET;
+    const column = (key % HEAT_COLUMN_SPAN) - HEAT_COLUMN_OFFSET;
+    const mergedRow = Math.floor(row / mergeFactor);
+    const mergedColumn = Math.floor(column / mergeFactor);
+    const mergedKey = heatCellKey(mergedRow, mergedColumn);
+    if ((merged.get(mergedKey)?.count ?? 0) < count) {
+      merged.set(mergedKey, {row: mergedRow, column: mergedColumn, count});
+    }
+  }
+  const scale = Math.log(maxCount);
+  return [...merged.values()].map(({row, column, count}) => {
+    const level = HEAT_MIN_LEVEL + (1 - HEAT_MIN_LEVEL) * (Math.log(count) / scale);
+    return [
+      (row + 0.5) * mergeFactor * cellLat,
+      (column + 0.5) * mergeFactor * cellLon,
+      1 - (1 - level) ** (1 / HEAT_OVERLAP),
+    ];
+  });
+}
+
+function updateHeatPoints() {
+  if (heatLayer && heatCells) {
+    heatLayer.setLatLngs(heatPoints(heatCells, map.getZoom()));
+  }
+}
+
+map.on("zoomend", updateHeatPoints);
+
+/* Coverage. */
+
+// The focused trip on the coverage map, drawn in full on top of the coverage lines.
+const FOCUSED_COVERAGE_COLOR = "#101828";
+
 async function drawCoverage(generation) {
-  await showDrawStatus(filteredTrips().filter(hasGps).length);
+  const trips = coverageTrips();
+  await showDrawStatus(trips.length);
   if (generation !== drawGeneration) {
     return;
   }
+  const focusedTrip = state.focusedId ? state.tripsById.get(state.focusedId) : null;
+  const focusedTrackPromise = focusedTrip && hasGps(focusedTrip) ? loadTrack(focusedTrip.id) : null;
   const geometry = await loadGeometry();
+  const focusedTrack = focusedTrackPromise ? await focusedTrackPromise.catch(() => null) : null;
   if (generation !== drawGeneration) {
     return;
   }
   const layer = L.layerGroup();
-  const heatPoints = [];
-  const tripsWithRoutes = filteredTrips().filter((trip) => geometry[trip.id]);
+  const tripsWithRoutes = trips.filter((trip) => geometry[trip.id]);
   // All halos go first, so that no halo covers another trip's line.
   for (const trip of tripsWithRoutes) {
-    L.polyline(geometry[trip.id], {
-      renderer: routeRenderer,
-      color: HALO_COLOR,
-      weight: COVERAGE_HALO_WEIGHT,
-      opacity: 0.9,
-      interactive: false,
-    }).addTo(layer);
+    addHalo(layer, geometry[trip.id], COVERAGE_HALO_WEIGHT, 0.9);
   }
   const dotsLayer = L.layerGroup();
   for (const trip of tripsWithRoutes) {
     const runs = geometry[trip.id];
-    const tooltipContent = () =>
-      el(
-        "div",
-        {},
-        el("strong", {}, trip.name),
-        el("span", {}, formatDate(trip.date)),
-        el("span", {className: "tooltip-hint"}, "Click to open"),
-      );
     const line = L.polyline(runs, {
       renderer: routeRenderer,
       color: COVERAGE_COLOR,
       weight: COVERAGE_WEIGHT,
       opacity: COVERAGE_OPACITY,
     });
-    line.bindTooltip(tooltipContent(), {sticky: true, className: "map-tooltip"});
+    line.on("mousemove", (event) => showHover(trip, event.latlng));
+    line.on("mouseout", hideHover);
     line.on("click", () => focusTrip(trip.id));
     line.addTo(layer);
 
@@ -925,14 +1133,13 @@ async function drawCoverage(generation) {
       fillColor: COVERAGE_COLOR,
       fillOpacity: 1,
     });
-    dot.bindTooltip(tooltipContent(), {direction: "top", offset: [0, -6], className: "map-tooltip"});
+    dot.on("mouseover", () => showHover(trip, dot.getLatLng()));
+    dot.on("mouseout", hideHover);
     dot.on("click", () => focusTrip(trip.id));
     dot.addTo(dotsLayer);
-    if (state.showHeat) {
-      for (const run of runs) {
-        heatPoints.push(...run);
-      }
-    }
+  }
+  if (focusedTrack) {
+    drawTrack(layer, focusedTrack, {color: FOCUSED_COVERAGE_COLOR, isColoredBySpeed: false});
   }
   coverageLayer.remove();
   coverageLayer = layer.addTo(map);
@@ -943,15 +1150,20 @@ async function drawCoverage(generation) {
     heatLayer.remove();
     heatLayer = null;
   }
-  if (state.showHeat && heatPoints.length) {
-    heatLayer = L.heatLayer(heatPoints, {
-      radius: 14,
-      blur: 16,
-      max: 0.6,
-      minOpacity: 0.45,
+  heatCells = null;
+  if (state.showHeat && tripsWithRoutes.length) {
+    heatCells = countTripsPerCell(tripsWithRoutes.map((trip) => geometry[trip.id]));
+    heatLayer = L.heatLayer(heatPoints(heatCells, map.getZoom()), {
+      radius: HEAT_RADIUS_PX,
+      blur: HEAT_BLUR_PX,
+      max: 1,
+      // Intensities do not grow with the zoom: the points are merged per zoom instead.
+      maxZoom: 0,
+      minOpacity: HEAT_MIN_OPACITY,
       gradient: HEAT_GRADIENT,
     }).addTo(map);
   }
+  updatePlaybackMarker();
   hideMapStatus();
 }
 
@@ -971,7 +1183,6 @@ function renderMap() {
   hideHover();
   if (state.mapMode === "coverage") {
     routesLayer.remove();
-    playbackMarker.remove();
     speedLegend.remove();
     drawCoverage(generation).catch((error) => {
       console.error("Cannot load the coverage:", error);
@@ -985,12 +1196,16 @@ function renderMap() {
     heatLayer.remove();
     heatLayer = null;
   }
+  heatCells = null;
   if (state.colorMode === "speed") {
     speedLegend.addTo(map);
   } else {
     speedLegend.remove();
   }
-  drawRoutes(generation);
+  drawRoutes(generation).catch((error) => {
+    console.error("Cannot draw the routes:", error);
+    hideMapStatus();
+  });
 }
 
 /* Sidebar. */
@@ -1135,11 +1350,24 @@ function renderSummary(visibleTrips) {
   const visibleWithGps = visibleTrips.filter(hasGps);
   const selectedTrips = state.selectedIds.map((id) => state.tripsById.get(id));
   const useSelection = state.mapMode === "routes" && selectedTrips.length > 0;
-  const trips = useSelection ? selectedTrips : visibleWithGps;
+  const hiddenIds = state.mapMode === "coverage" ? visibleWithGps.filter((trip) => state.hiddenIds.has(trip.id)).map((trip) => trip.id) : [];
+  const trips = useSelection ? selectedTrips : visibleWithGps.filter((trip) => !hiddenIds.includes(trip.id));
   const stats = aggregateStats(trips);
-  const title = useSelection
+  const titleText = useSelection
     ? `${stats.count} of ${visibleWithGps.length} trips selected`
     : `${stats.count} ${stats.count === 1 ? "trip" : "trips"} shown`;
+  const title = el(
+    "div",
+    {className: "summary-title"},
+    el("span", {}, titleText),
+    hiddenIds.length
+      ? el(
+          "button",
+          {type: "button", className: "chip chip-small", title: "Show the hidden trips again", onclick: () => showHiddenTrips(hiddenIds)},
+          `${hiddenIds.length} hidden${DOT}Show all`,
+        )
+      : null,
+  );
 
   const statTiles = [
     ["Distance", formatDistance(stats.distanceKm)],
@@ -1155,7 +1383,7 @@ function renderSummary(visibleTrips) {
     ),
   );
   const children = [
-    el("div", {className: "summary-title"}, title),
+    title,
     el("div", {className: "stat-grid"}, statTiles),
   ];
   if (!state.trips.length) {
@@ -1188,6 +1416,7 @@ function renderTripRow(trip) {
     formatDistance(trip.distance_km),
     formatDuration(trip.duration_s),
   ].filter(Boolean);
+  const isHidden = state.mapMode === "coverage" && state.hiddenIds.has(trip.id);
   const body = el(
     "button",
     {type: "button", className: "trip-body", onclick: () => focusTrip(trip.id)},
@@ -1199,11 +1428,20 @@ function renderTripRow(trip) {
     ),
     el("span", {className: "trip-meta"}, meta.join(DOT)),
   );
+  const showButton = isHidden
+    ? el(
+        "button",
+        {type: "button", className: "icon-button trip-show", "aria-label": `Show ${trip.name} on the map`, title: "Hidden from the map. Click to show", onclick: () => showHiddenTrips([trip.id])},
+        icon("eyeOff", "icon icon-small"),
+      )
+    : null;
+  const classNames = ["trip", trip.id === state.focusedId ? "focused" : null, isHidden ? "is-hidden" : null];
   return el(
     "li",
-    {className: `trip${trip.id === state.focusedId ? " focused" : ""}`, "data-id": trip.id},
+    {className: withoutEmpty(classNames).join(" "), "data-id": trip.id},
     checkbox,
     body,
+    showButton,
   );
 }
 
@@ -1630,12 +1868,11 @@ function focusTrip(tripId, {fit = true} = {}) {
     closeVideo();
   }
   state.focusedId = tripId;
-  if (tripId) {
-    state.mapMode = "routes";
-    if (!state.selectedIds.includes(tripId)) {
-      state.selectedIds.push(tripId);
-      syncColorSlots();
-    }
+  // On the route map, the focused trip is drawn as part of the selection. The coverage map
+  // draws it on its own, so the selection stays as it is.
+  if (tripId && state.mapMode === "routes" && !state.selectedIds.includes(tripId)) {
+    state.selectedIds.push(tripId);
+    syncColorSlots();
   }
   writeHash({pushHistory: true});
   renderAll();
@@ -1795,7 +2032,8 @@ function stopPlaybackSync() {
 // `seconds` overrides the video clock, e.g. right after a seek, before the video catches up.
 function updatePlaybackMarker(seconds = null) {
   const track = video.tripId ? loadedTracks.get(video.tripId) : null;
-  if (!track || !video.element || state.mapMode !== "routes") {
+  const isTrackDrawn = state.mapMode === "routes" || video.tripId === state.focusedId;
+  if (!track || !video.element || !isTrackDrawn) {
     playbackMarker.remove();
     return;
   }
@@ -1808,11 +2046,11 @@ function updatePlaybackMarker(seconds = null) {
   if (!map.hasLayer(playbackMarker)) {
     playbackMarker.addTo(map);
   }
-  const markerColor = state.colorMode === "trip" ? tripColor(video.tripId) : "#101828";
-  playbackMarker.getElement()?.style.setProperty("--marker-color", markerColor);
-  if (!video.element.paused && !map.getBounds().pad(-0.1).contains(position)) {
-    map.panTo(position);
+  let markerColor = "#101828";
+  if (state.mapMode === "routes" && state.colorMode === "trip") {
+    markerColor = tripColor(video.tripId);
   }
+  playbackMarker.getElement()?.style.setProperty("--marker-color", markerColor);
 }
 
 function seekVideo(seconds) {
@@ -1998,6 +2236,11 @@ function bindControls() {
   for (const button of document.querySelectorAll("[data-mode]")) {
     button.addEventListener("click", () => {
       state.mapMode = button.dataset.mode;
+      // A trip opened on the coverage map is drawn on the route map too.
+      if (state.mapMode === "routes" && state.focusedId && !state.selectedIds.includes(state.focusedId)) {
+        state.selectedIds.push(state.focusedId);
+        syncColorSlots();
+      }
       writeHash();
       renderAll();
     });
@@ -2040,7 +2283,7 @@ function bindControls() {
   }
   document.getElementById("video-close").addEventListener("click", closeVideo);
   bindVideoPanelDragging();
-  document.addEventListener("keydown", onCopyShortcut);
+  document.addEventListener("keydown", onHoverShortcut);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && video.tripId) closeVideo();
   });
