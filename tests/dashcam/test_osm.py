@@ -2,6 +2,7 @@ import _thread
 import io
 import logging
 import sqlite3
+import sys
 import threading
 import time
 import urllib.error
@@ -257,8 +258,10 @@ def test_download_file_with_truncated_response(tmp_path, monkeypatch):
 
 
 def test_open_database_in_directory_with_uri_characters(tmp_path, osm_pbf_path):
-    # GIVEN OSM data in a metadata directory whose path contains URI special characters
-    metadata_dir = tmp_path / "trips #1 ?%"
+    # GIVEN OSM data in a metadata directory whose path contains URI special characters.
+    # Windows does not allow `?` in file names.
+    directory_name = "trips #1 %" if sys.platform == "win32" else "trips #1 ?%"
+    metadata_dir = tmp_path / directory_name
     osm.update_osm_data(metadata_dir, "unused", pbf_path=osm_pbf_path)
 
     # WHEN opening the database
