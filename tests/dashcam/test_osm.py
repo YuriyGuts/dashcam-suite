@@ -129,7 +129,33 @@ def test_open_database_with_other_format_version(osm_metadata_dir):
     assert database is None
 
 
-def test_build_database_cleans_up_after_failure(tmp_path, monkeypatch):
+def test_build_database_builds_in_the_cache_and_leaves_nothing_there(
+    tmp_path, osm_pbf_path, local_cache_dir, monkeypatch
+):
+    # GIVEN a build that records where the database is filtered
+    build_paths = []
+    original_filter_into_database = osm.filter_into_database
+
+    def recording_filter_into_database(pbf_path, database_path, source):
+        build_paths.append(database_path)
+        original_filter_into_database(pbf_path, database_path, source)
+
+    monkeypatch.setattr(osm, "filter_into_database", recording_filter_into_database)
+    database_path = tmp_path / ".metadata" / "osm" / osm.DATABASE_FILENAME
+
+    # WHEN building the database
+    osm.build_database(osm_pbf_path, database_path, source="test")
+
+    # THEN it is filtered in the cache directory and only the finished database is kept
+    assert [path.parent for path in build_paths] == [local_cache_dir]
+    assert list(local_cache_dir.iterdir()) == []
+    assert sorted(path.name for path in database_path.parent.iterdir()) == [osm.DATABASE_FILENAME]
+    database = osm.open_database(tmp_path / ".metadata")
+    assert database is not None
+    database.close()
+
+
+def test_build_database_cleans_up_after_failure(tmp_path, local_cache_dir, monkeypatch):
     # GIVEN an existing database and a build that fails
     database_path = tmp_path / "osm" / osm.DATABASE_FILENAME
     database_path.parent.mkdir()
@@ -148,6 +174,31 @@ def test_build_database_cleans_up_after_failure(tmp_path, monkeypatch):
     # THEN the old database is kept and no partial file is left
     assert database_path.read_bytes() == b"old database"
     assert sorted(path.name for path in database_path.parent.iterdir()) == [osm.DATABASE_FILENAME]
+    assert list(local_cache_dir.iterdir()) == []
+
+
+def test_build_database_cleans_up_after_failed_copy(
+    tmp_path, osm_pbf_path, local_cache_dir, monkeypatch
+):
+    # GIVEN an existing database and a copy to the metadata directory that fails
+    database_path = tmp_path / "osm" / osm.DATABASE_FILENAME
+    database_path.parent.mkdir()
+    database_path.write_bytes(b"old database")
+
+    def failing_copyfileobj(source_fp, target_fp, length):
+        target_fp.write(b"partial")
+        raise OSError("network drive disconnected")
+
+    monkeypatch.setattr(osm.shutil, "copyfileobj", failing_copyfileobj)
+
+    # WHEN building the database
+    with pytest.raises(OSError, match="disconnected"):
+        osm.build_database(osm_pbf_path, database_path, source="test")
+
+    # THEN the old database is kept and no partial file is left in either directory
+    assert database_path.read_bytes() == b"old database"
+    assert sorted(path.name for path in database_path.parent.iterdir()) == [osm.DATABASE_FILENAME]
+    assert list(local_cache_dir.iterdir()) == []
 
 
 def test_update_osm_data_with_local_file_keeps_it(tmp_path, osm_pbf_path, caplog):
@@ -231,11 +282,9 @@ def test_open_database_with_corrupt_file(tmp_path):
 
 
 @pytest.fixture
-def download_path(tmp_path, monkeypatch):
-    """Download to a cache directory inside the test directory."""
-    download_path = tmp_path / "cache" / osm.DOWNLOAD_FILENAME
-    monkeypatch.setattr(osm, "get_download_path", lambda: download_path)
-    return download_path
+def download_path(local_cache_dir):
+    """Download to the cache directory inside the test directory."""
+    return local_cache_dir / osm.DOWNLOAD_FILENAME
 
 
 @pytest.fixture
@@ -385,14 +434,10 @@ def test_format_download_progress(downloaded_size, total_size, elapsed_s, expect
     assert osm.format_download_progress(downloaded_size, total_size, elapsed_s) == expected_text
 
 
-def test_get_download_path_is_in_the_user_cache_directory(monkeypatch, tmp_path):
+def test_get_download_path_is_in_the_user_cache_directory(local_cache_dir):
     # GIVEN a user cache directory
-    monkeypatch.setattr(
-        osm.platformdirs, "user_cache_path", lambda name, appauthor: tmp_path / name
-    )
-
     # WHEN getting the download path
     download_path = osm.get_download_path()
 
     # THEN the extract goes there, not to the metadata directory
-    assert download_path == tmp_path / "dashcam" / osm.DOWNLOAD_FILENAME
+    assert download_path == local_cache_dir / osm.DOWNLOAD_FILENAME

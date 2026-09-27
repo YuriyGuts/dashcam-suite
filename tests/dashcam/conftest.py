@@ -52,6 +52,15 @@ def local_to_lat_lon(east_m, north_m):
 
 
 @pytest.fixture(autouse=True)
+def local_cache_dir(tmp_path, monkeypatch):
+    """Keep the user cache directory inside the test directory."""
+    monkeypatch.setattr(
+        osm.platformdirs, "user_cache_path", lambda name, appauthor: tmp_path / "cache" / name
+    )
+    return tmp_path / "cache" / "dashcam"
+
+
+@pytest.fixture(autouse=True)
 def plain_terminal_output(monkeypatch):
     """Print without styles, even if the environment forces colors (e.g. `FORCE_COLOR`)."""
     for console_name, is_stderr in (("STDOUT", False), ("STDERR", True)):

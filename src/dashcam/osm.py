@@ -22,6 +22,7 @@ import dataclasses
 import datetime
 import logging
 import os
+import shutil
 import sqlite3
 import ssl
 import sys
@@ -93,8 +94,9 @@ DOWNLOAD_POLL_INTERVAL_S = 0.2
 # How long (in seconds) an interrupted download may take to close its file.
 DOWNLOAD_STOP_TIMEOUT_S = 2
 
-# Name of the extract while it is downloaded and filtered. It goes to the user cache directory
-# on the local disk, not to the metadata directory, which may be on a slow network drive.
+# Name of the extract while it is downloaded and filtered. The extract and the database being
+# built go to the user cache directory on the local disk, not to the metadata directory, which
+# may be on a slow network drive.
 DOWNLOAD_FILENAME = "osm-extract.partial.osm.pbf"
 
 # Size of the blocks in which a download is read and written, in bytes.
@@ -139,9 +141,14 @@ def get_database_path(metadata_dir: Path) -> Path:
     return metadata_dir / OSM_DIR_NAME / DATABASE_FILENAME
 
 
+def get_cache_dir() -> Path:
+    """Return the user cache directory on the local disk."""
+    return platformdirs.user_cache_path("dashcam", appauthor=False)
+
+
 def get_download_path() -> Path:
     """Return where the extract is downloaded before it is filtered."""
-    return platformdirs.user_cache_path("dashcam", appauthor=False) / DOWNLOAD_FILENAME
+    return get_cache_dir() / DOWNLOAD_FILENAME
 
 
 def pack_points(points: list[tuple[float, float]]) -> bytes:
@@ -344,14 +351,27 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
     """
     Filter an OSM PBF file into a road database.
 
-    The database is written under a temporary name and replaces the old one only when complete.
+    The database is built in the user cache directory, then copied next to `database_path`
+    under a temporary name, and replaces the old one only when complete.
     """
-    database_path.parent.mkdir(parents=True, exist_ok=True)
-    partial_path = metadata.get_partial_path(database_path)
-
-    started_at = time.monotonic()
-    connection = sqlite3.connect(partial_path)
+    cache_dir = get_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    build_path = metadata.get_partial_path(cache_dir / DATABASE_FILENAME)
     try:
+        filter_into_database(pbf_path, build_path, source)
+        copy_file_atomically(build_path, database_path)
+    finally:
+        build_path.unlink(missing_ok=True)
+
+
+def filter_into_database(pbf_path: Path, database_path: Path, source: str) -> None:
+    """Filter an OSM PBF file into a new database file."""
+    started_at = time.monotonic()
+    connection = sqlite3.connect(database_path)
+    try:
+        # The file is discarded if the build fails, so it needs no crash safety.
+        connection.execute("PRAGMA journal_mode = OFF")
+        connection.execute("PRAGMA synchronous = OFF")
         writer = RoadDatabaseWriter(connection)
         writer.set_meta("format_version", str(DATABASE_FORMAT_VERSION))
         writer.set_meta("osm_timestamp", read_osm_timestamp(pbf_path))
@@ -372,12 +392,23 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
             extra=terminal.SUCCESS,
         )
         connection.execute("VACUUM")
-    except BaseException:
+    finally:
         connection.close()
+
+
+def copy_file_atomically(source_path: Path, target_path: Path) -> None:
+    """Copy a file under a temporary name next to `target_path`, then rename it over it."""
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    partial_path = metadata.get_partial_path(target_path)
+    try:
+        with source_path.open("rb") as source_fp, partial_path.open("wb") as target_fp:
+            shutil.copyfileobj(source_fp, target_fp, DOWNLOAD_BLOCK_SIZE)
+            target_fp.flush()
+            os.fsync(target_fp.fileno())
+        os.replace(partial_path, target_path)
+    except BaseException:
         partial_path.unlink(missing_ok=True)
         raise
-    connection.close()
-    os.replace(partial_path, database_path)
 
 
 @dataclasses.dataclass
