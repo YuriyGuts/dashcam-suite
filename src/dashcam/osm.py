@@ -25,6 +25,7 @@ import os
 import sqlite3
 import ssl
 import sys
+import threading
 import time
 import typing as t
 import urllib.request
@@ -34,6 +35,7 @@ import osmium
 import osmium.filter
 import osmium.io
 import osmium.osm
+import platformdirs
 import truststore
 
 from dashcam import metadata
@@ -82,6 +84,22 @@ PROGRESS_INTERVAL_S = 30
 # Seconds without any data after which a download fails.
 DOWNLOAD_TIMEOUT_S = 60
 
+# How often (in seconds) to log the progress of a download.
+DOWNLOAD_PROGRESS_INTERVAL_S = 5
+
+# How often (in seconds) the main thread checks on a download running in the background.
+DOWNLOAD_POLL_INTERVAL_S = 0.2
+
+# How long (in seconds) an interrupted download may take to close its file.
+DOWNLOAD_STOP_TIMEOUT_S = 2
+
+# Name of the extract while it is downloaded and filtered. It goes to the user cache directory
+# on the local disk, not to the metadata directory, which may be on a slow network drive.
+DOWNLOAD_FILENAME = "osm-extract.partial.osm.pbf"
+
+# Size of the blocks in which a download is read and written, in bytes.
+DOWNLOAD_BLOCK_SIZE = 256 * 1024
+
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
 
@@ -119,6 +137,11 @@ class Locality:
 def get_database_path(metadata_dir: Path) -> Path:
     """Return the path of the filtered OSM database in a metadata directory."""
     return metadata_dir / OSM_DIR_NAME / DATABASE_FILENAME
+
+
+def get_download_path() -> Path:
+    """Return where the extract is downloaded before it is filtered."""
+    return platformdirs.user_cache_path("dashcam", appauthor=False) / DOWNLOAD_FILENAME
 
 
 def pack_points(points: list[tuple[float, float]]) -> bytes:
@@ -357,9 +380,68 @@ def build_database(pbf_path: Path, database_path: Path, source: str) -> None:
     os.replace(partial_path, database_path)
 
 
+@dataclasses.dataclass
+class Download:
+    """A download that runs in a background thread, with its progress and outcome."""
+
+    url: str
+    target_path: Path
+    total_size: int = 0
+    downloaded_size: int = 0
+    error: BaseException | None = None
+    stop_requested: threading.Event = dataclasses.field(default_factory=threading.Event)
+
+    # Set once the connection is made and the target file is open.
+    is_writing: bool = False
+
+    def run(self) -> None:
+        """Download the file, keeping any error for the thread that waits for it."""
+        try:
+            self.transfer()
+        except BaseException as exc:
+            self.error = exc
+
+    def transfer(self) -> None:
+        """Download the file until it is complete or a stop is requested."""
+        request = urllib.request.Request(self.url, headers={"User-Agent": "dashcam-suite"})
+        # Verify the certificate with the OS trust store. OpenSSL's own store may lack the root
+        # certificate, e.g. on Windows, which only fetches root certificates on demand.
+        ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        with (
+            urllib.request.urlopen(
+                request, context=ssl_context, timeout=DOWNLOAD_TIMEOUT_S
+            ) as response,
+            self.target_path.open("wb") as fp,
+        ):
+            self.is_writing = True
+            self.total_size = int(response.headers.get("Content-Length") or 0)
+            while not self.stop_requested.is_set():
+                block = response.read(DOWNLOAD_BLOCK_SIZE)
+                if not block:
+                    break
+                fp.write(block)
+                self.downloaded_size += len(block)
+
+
+def format_download_progress(downloaded_size: int, total_size: int, elapsed_s: float) -> str:
+    """Describe the progress of a download, e.g. `Downloaded 120 of 780 MB (15%, 24.0 MB/s)`."""
+    speed_text = f"{downloaded_size / 1e6 / elapsed_s:.1f} MB/s" if elapsed_s > 0 else ""
+    if not total_size:
+        return f"Downloaded {downloaded_size / 1e6:.0f} MB ({speed_text})"
+    percent = 100 * downloaded_size / total_size
+    return (
+        f"Downloaded {downloaded_size / 1e6:.0f} of {total_size / 1e6:.0f} MB "
+        f"({percent:.0f}%, {speed_text})"
+    )
+
+
 def download_file(url: str, target_path: Path) -> None:
     """
     Download a file, logging the progress.
+
+    The download runs in a background thread, while this thread only waits and reports the
+    progress. Ctrl+C then works at once, even while the download is blocked in native code,
+    such as the certificate check of the OS trust store, which can take seconds.
 
     Raises
     ------
@@ -369,33 +451,37 @@ def download_file(url: str, target_path: Path) -> None:
         If the download fails or stalls.
     """
     LOGGER.info(f"Downloading {url}")
-    request = urllib.request.Request(url, headers={"User-Agent": "dashcam-suite"})
-    # Verify the certificate with the OS trust store. OpenSSL's own store may lack the root
-    # certificate, e.g. on Windows, which only fetches root certificates on demand.
-    ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
-    with (
-        urllib.request.urlopen(
-            request, context=ssl_context, timeout=DOWNLOAD_TIMEOUT_S
-        ) as response,
-        target_path.open("wb") as fp,
-    ):
-        total_size = int(response.headers.get("Content-Length") or 0)
-        downloaded_size = 0
-        while block := response.read(1024 * 1024):
-            fp.write(block)
-            downloaded_size += len(block)
-            if time.monotonic() >= next_progress_at:
-                total_text = f" of {total_size / 1e6:.0f}" if total_size else ""
+    download = Download(url, target_path)
+    thread = threading.Thread(target=download.run, name="download", daemon=True)
+    started_at = time.monotonic()
+    next_progress_at = started_at + DOWNLOAD_PROGRESS_INTERVAL_S
+    thread.start()
+    try:
+        while thread.is_alive():
+            thread.join(DOWNLOAD_POLL_INTERVAL_S)
+            now = time.monotonic()
+            if now >= next_progress_at and download.downloaded_size and thread.is_alive():
                 LOGGER.info(
-                    f"Downloaded {downloaded_size / 1e6:.0f}{total_text} MB",
+                    format_download_progress(
+                        download.downloaded_size, download.total_size, now - started_at
+                    ),
                     extra=terminal.PROGRESS,
                 )
-                next_progress_at = time.monotonic() + PROGRESS_INTERVAL_S
-    if total_size and downloaded_size != total_size:
+                next_progress_at = now + DOWNLOAD_PROGRESS_INTERVAL_S
+    except BaseException:
+        # Let the download close its file, so that it can be deleted, also on Windows. A
+        # download still connecting has no file yet, and is not waited for.
+        download.stop_requested.set()
+        if download.is_writing:
+            thread.join(DOWNLOAD_STOP_TIMEOUT_S)
+        raise
+
+    if download.error is not None:
+        raise download.error
+    if download.total_size and download.downloaded_size != download.total_size:
         raise RuntimeError(
-            f"The download of {url} stopped after {downloaded_size / 1e6:.0f} "
-            f"of {total_size / 1e6:.0f} MB"
+            f"The download of {url} stopped after {download.downloaded_size / 1e6:.0f} "
+            f"of {download.total_size / 1e6:.0f} MB"
         )
 
 
@@ -411,7 +497,8 @@ def update_osm_data(metadata_dir: Path, extract_url: str, pbf_path: Path | None 
         build_database(pbf_path, database_path, source=pbf_path.name)
     else:
         database_path.parent.mkdir(parents=True, exist_ok=True)
-        download_path = database_path.with_name(".download.partial.osm.pbf")
+        download_path = get_download_path()
+        download_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             download_file(extract_url, download_path)
             LOGGER.info("Filtering the downloaded extract")

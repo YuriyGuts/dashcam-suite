@@ -80,7 +80,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 ### `dashcam enrich [-d DIR] [--metadata-dir PATH] [--update-osm] [--osm-file PBF] [--force]`
 
-- `--update-osm` downloads the OSM extract from `osm_extract_url` (e.g. from Geofabrik), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
+- `--update-osm` downloads the OSM extract from `osm_extract_url` (e.g. from Geofabrik), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. The download goes to the user cache directory on the local disk, since the metadata directory may be on a slow network drive. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
 - Storage: SQLite with R*Tree indexes. OSM ways are cut into chunks of up to 8 nodes so that index boxes stay small. Tags kept: `name`, `name:en`, `ref`, `highway`; localities also keep `place` and `population`.
 - Map matching: a hidden Markov model over the `ok` and `interpolated` samples. Candidates are streets (same `name` and `ref`) within 50 m. The cost grows with the distance to the road and the angle to the direction of travel; switching streets has a fixed cost, so GPS noise does not flicker between streets. Runs are split at gaps and position jumps.
 - Street list: stretches in travel order, with off-road and sub-50 m stretches dropped and consecutive repeats merged.

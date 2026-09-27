@@ -1,6 +1,10 @@
+import _thread
 import io
 import logging
 import sqlite3
+import threading
+import time
+import urllib.error
 import urllib.request
 
 import pytest
@@ -227,7 +231,15 @@ def test_open_database_with_corrupt_file(tmp_path):
 
 
 @pytest.fixture
-def fake_download(monkeypatch, osm_pbf_path):
+def download_path(tmp_path, monkeypatch):
+    """Download to a cache directory inside the test directory."""
+    download_path = tmp_path / "cache" / osm.DOWNLOAD_FILENAME
+    monkeypatch.setattr(osm, "get_download_path", lambda: download_path)
+    return download_path
+
+
+@pytest.fixture
+def fake_download(monkeypatch, osm_pbf_path, download_path):
     """Replace the download with a copy of the synthetic OSM file."""
     downloads = []
 
@@ -239,15 +251,18 @@ def fake_download(monkeypatch, osm_pbf_path):
     return downloads
 
 
-def test_update_osm_data_downloads_and_deletes_extract(tmp_path, fake_download, osm_timestamp):
+def test_update_osm_data_downloads_and_deletes_extract(
+    tmp_path, fake_download, download_path, osm_timestamp
+):
     # GIVEN a metadata directory without OSM data
     metadata_dir = tmp_path / ".metadata"
 
     # WHEN updating the OSM data
     osm.update_osm_data(metadata_dir, extract_url="https://example.org/ukraine.osm.pbf")
 
-    # THEN the extract is downloaded, filtered, and deleted
-    assert [url for url, _ in fake_download] == ["https://example.org/ukraine.osm.pbf"]
+    # THEN the extract is downloaded to the cache directory, filtered, and deleted
+    assert fake_download == [("https://example.org/ukraine.osm.pbf", download_path)]
+    assert list(download_path.parent.iterdir()) == []
     database = osm.open_database(metadata_dir)
     assert database is not None
     assert database.osm_timestamp == osm_timestamp
@@ -255,7 +270,9 @@ def test_update_osm_data_downloads_and_deletes_extract(tmp_path, fake_download, 
     assert sorted(path.name for path in (metadata_dir / "osm").iterdir()) == [osm.DATABASE_FILENAME]
 
 
-def test_update_osm_data_deletes_extract_after_failure(tmp_path, fake_download, monkeypatch):
+def test_update_osm_data_deletes_extract_after_failure(
+    tmp_path, fake_download, download_path, monkeypatch
+):
     # GIVEN a download that cannot be filtered
     metadata_dir = tmp_path / ".metadata"
 
@@ -269,4 +286,113 @@ def test_update_osm_data_deletes_extract_after_failure(tmp_path, fake_download, 
         osm.update_osm_data(metadata_dir, extract_url="https://example.org/ukraine.osm.pbf")
 
     # THEN the download is deleted
+    assert list(download_path.parent.iterdir()) == []
     assert list((metadata_dir / "osm").iterdir()) == []
+
+
+def test_download_file_stops_at_once_on_ctrl_c_while_connecting(tmp_path, monkeypatch):
+    # GIVEN a connection that blocks (as the certificate check of the OS trust store can)
+    connection_released = threading.Event()
+
+    def blocking_urlopen(request, context, timeout):
+        connection_released.wait()
+        raise urllib.error.URLError("released")
+
+    monkeypatch.setattr(urllib.request, "urlopen", blocking_urlopen)
+    threading.Timer(0.3, _thread.interrupt_main).start()
+
+    # WHEN Ctrl+C is pressed while connecting
+    started_at = time.monotonic()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
+        elapsed_s = time.monotonic() - started_at
+    finally:
+        connection_released.set()
+
+    # THEN the download stops without waiting for the connection, and leaves no file
+    assert elapsed_s < 1
+    assert not (tmp_path / "extract.osm.pbf").exists()
+
+
+def test_download_file_closes_its_file_on_ctrl_c_while_downloading(tmp_path, monkeypatch):
+    # GIVEN a server that sends the file slowly
+    class SlowResponse(FakeResponse):
+        def read(self, size=-1):
+            time.sleep(0.05)
+            return super().read(1000)
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda request, context, timeout: SlowResponse(b"x" * 1_000_000)
+    )
+    threading.Timer(0.3, _thread.interrupt_main).start()
+    target_path = tmp_path / "extract.osm.pbf"
+
+    # WHEN Ctrl+C is pressed while downloading
+    with pytest.raises(KeyboardInterrupt):
+        osm.download_file("https://example.com/extract.osm.pbf", target_path)
+
+    # THEN the partial file is closed, so that it can be deleted (which Windows requires)
+    size_after_stop = target_path.stat().st_size
+    time.sleep(0.2)
+    assert 0 < size_after_stop == target_path.stat().st_size
+    target_path.unlink()
+
+
+def test_download_file_reports_errors_of_the_download(tmp_path, monkeypatch):
+    # GIVEN a server that cannot be reached
+    def failing_urlopen(request, context, timeout):
+        raise urllib.error.URLError("no route to host")
+
+    monkeypatch.setattr(urllib.request, "urlopen", failing_urlopen)
+
+    # WHEN downloading a file
+    # THEN the error of the download is raised
+    with pytest.raises(OSError, match="no route to host"):
+        osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
+
+
+def test_download_file_logs_progress(tmp_path, monkeypatch, caplog):
+    # GIVEN a server that sends the file slowly, and frequent progress reports
+    class SlowResponse(FakeResponse):
+        def read(self, size=-1):
+            time.sleep(0.02)
+            return super().read(1000)
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda request, context, timeout: SlowResponse(b"x" * 20000)
+    )
+    monkeypatch.setattr(osm, "DOWNLOAD_PROGRESS_INTERVAL_S", 0.1)
+    monkeypatch.setattr(osm, "DOWNLOAD_POLL_INTERVAL_S", 0.01)
+    caplog.set_level(logging.INFO)
+
+    # WHEN downloading a file
+    osm.download_file("https://example.com/extract.osm.pbf", tmp_path / "extract.osm.pbf")
+
+    # THEN the progress is logged while it downloads
+    assert "Downloaded 0 of 0 MB (" in caplog.text
+    assert (tmp_path / "extract.osm.pbf").stat().st_size == 20000
+
+
+@pytest.mark.parametrize(
+    ("downloaded_size", "total_size", "elapsed_s", "expected_text"),
+    [
+        (120_000_000, 780_000_000, 5.0, "Downloaded 120 of 780 MB (15%, 24.0 MB/s)"),
+        (120_000_000, 0, 10.0, "Downloaded 120 MB (12.0 MB/s)"),
+    ],
+)
+def test_format_download_progress(downloaded_size, total_size, elapsed_s, expected_text):
+    assert osm.format_download_progress(downloaded_size, total_size, elapsed_s) == expected_text
+
+
+def test_get_download_path_is_in_the_user_cache_directory(monkeypatch, tmp_path):
+    # GIVEN a user cache directory
+    monkeypatch.setattr(
+        osm.platformdirs, "user_cache_path", lambda name, appauthor: tmp_path / name
+    )
+
+    # WHEN getting the download path
+    download_path = osm.get_download_path()
+
+    # THEN the extract goes there, not to the metadata directory
+    assert download_path == tmp_path / "dashcam" / osm.DOWNLOAD_FILENAME
