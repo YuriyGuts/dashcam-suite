@@ -48,6 +48,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count` (trips only), `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
 - Encoded raw videos are logged by filename and size in `.metadata/encoded_segments.json` (logged by the parent process after each successful job). `trips` leaves logged videos out before grouping, so clips left on the card are not encoded again after their trip is renamed, and new clips recorded within the trip gap of an imported trip form a trip of their own. `range` encodes the selected videos regardless and logs them too.
+- `trips` with no new raw videos encodes nothing and succeeds, so that `import` continues with the library. `range` fails when no raw video is in the index range.
 - Output names are placeholders: `YYYY-mm-dd Trip HH-MM.mp4` (trip start time). An output whose name a library video already has, with any extension or letter case, is skipped with a warning, so videos are never overwritten and never share a track. Incomplete outputs never appear under the final name.
 
 ### `dashcam extract [-d DIR] [--metadata-dir PATH] [--include GLOB] [--exclude GLOB] [--only VIDEO] [--force] [--reclean] [--previews] [--job-count JC]`

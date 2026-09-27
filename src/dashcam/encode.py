@@ -288,7 +288,13 @@ def collect_raw_video_segments(
     Returns
     -------
     list[RawVideoSegment]
-        The matching segments, sorted by start time. Empty if all of them are already encoded.
+        The matching segments, sorted by start time. Empty if there are no new segments and no
+        index range was requested.
+
+    Raises
+    ------
+    RuntimeError
+        If the directory does not exist, or no segment is in the requested index range.
     """
     LOGGER.info(f"Collecting files from '{raw_video_dir}'")
     if not raw_video_dir.is_dir():
@@ -333,8 +339,11 @@ def collect_raw_video_segments(
                 validated_segments.append(segment)
         segments = validated_segments
 
-    if not segments:
+    if not segments and start_index is not None:
         raise RuntimeError("Could not find any files matching the input criteria")
+    if not segments:
+        LOGGER.info("No new raw videos to encode")
+        return []
 
     LOGGER.info(f"Collected {len(segments)} files matching the input criteria")
     return segments

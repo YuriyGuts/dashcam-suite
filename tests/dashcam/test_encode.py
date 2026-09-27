@@ -232,13 +232,43 @@ def test_collect_raw_video_segments_skips_unreadable_files(
 
 
 def test_collect_raw_video_segments_without_matches(raw_video_dir):
-    # GIVEN an empty directory
+    # GIVEN an empty directory, e.g. an SD card cleared after importing
 
     # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN there is nothing to encode
+    assert segments == []
+
+
+def test_collect_raw_video_segments_with_only_parking_clips(make_raw_videos, raw_video_dir):
+    # GIVEN a directory with only a parking mode clip
+    make_raw_videos("20260925111707_000271P.MP4")
+
+    # WHEN collecting segments
+    segments = encode.collect_raw_video_segments(
+        raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+    )
+
+    # THEN there is nothing to encode
+    assert segments == []
+
+
+def test_collect_raw_video_segments_without_matches_in_range(make_raw_videos, raw_video_dir):
+    # GIVEN a directory with one clip
+    make_raw_videos("20260925111707_000271.MP4")
+
+    # WHEN collecting segments in an index range that does not include it
     # THEN it fails
     with pytest.raises(RuntimeError, match="Could not find any files"):
         encode.collect_raw_video_segments(
-            raw_video_dir, ffmpeg_executable="ffmpeg", check_readability=False
+            raw_video_dir,
+            ffmpeg_executable="ffmpeg",
+            start_index=1,
+            end_index=10,
+            check_readability=False,
         )
 
 
@@ -774,6 +804,21 @@ def test_encode_trips_does_not_log_failed_trips(
     # THEN the trip is encoded
     assert failed_count == 0
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Trip 11-17.mp4"]
+
+
+def test_encode_trips_with_nothing_new(
+    config, raw_video_dir, tmp_path, fake_ffmpeg, serial_pool, no_os_sleep_prevention, caplog
+):
+    # GIVEN an SD card without clips, e.g. cleared after an interrupted import
+    caplog.set_level(logging.INFO)
+
+    # WHEN encoding trips
+    failed_count = run_encode_trips(config, raw_video_dir, tmp_path / "out", tmp_path / "metadata")
+
+    # THEN nothing is encoded, and nothing fails, so that an import goes on with the library
+    assert failed_count == 0
+    assert "Nothing to encode" in caplog.text
+    assert fake_ffmpeg.calls == []
 
 
 @pytest.mark.parametrize(
