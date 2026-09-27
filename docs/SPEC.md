@@ -28,7 +28,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 - Python project managed by `uv` with a local `.venv`. External requirement: `ffmpeg` and `ffprobe` (paths configurable).
 - `src/` layout, pytest, ruff (isort with one import per line), type annotations, `ty` type checking.
 - Code style follows the original `dashcam-encode` script.
-- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone. `dashcam config` prints the config file path and the effective settings.
+- Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone, allowed GPS areas. `dashcam config` prints the config file path and the effective settings.
 - Directories:
   - `library_dir` and `raw_video_dir` in the config expand `~` and must be absolute. A relative `metadata_dir` in the config is relative to the library directory.
   - Paths given as options are ordinary shell paths, relative to the current directory.
@@ -68,7 +68,9 @@ Port of `dashcam-encode`.
   - Glyph templates are averaged from hand-labeled strips in `tests/fixtures/overlay/` by `scripts/build_glyph_templates.py`.
 - Cleaning (runs on stored raw values; `--reclean` re-runs it without OCR):
   - A sample is suspect if its date is more than 1 day from the filename date, the clock does not advance ~1 s per video second, the implied speed from neighboring good points exceeds a threshold (default 250 km/h), or the displayed speed disagrees with the implied speed.
+  - Fixes outside every box in `allowed_areas` (`[min_lat, min_lon, max_lat, max_lon]`) are spoofed. An empty list allows anywhere.
   - The track is split into internally consistent segments, and only segments that chain together plausibly are kept. This catches long spoofs where fake points agree with each other.
+  - Consecutive segments joined by jumps of at most 1000 km/h are one place. If most readable clocks in a place show an implausible date, all its segments are rejected. This catches spoofs that show the real date before switching the camera clock to their own.
   - A forward clock jump up to 12 h between good fixes with plausible positions is a merge gap, not a spoof.
   - Time: the overlay clock is trusted only on good fixes. Elsewhere, time is derived from the video offset anchored to the nearest good sample. Camera-clock jumps (up to 12 h) during no-fix stretches mark merge gaps. Times derived across an uncertain boundary are flagged `time_estimated`.
   - Gaps up to 60 s are interpolated linearly, including short spoofed or unreadable stretches. Longer gaps stay gaps.

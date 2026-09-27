@@ -74,6 +74,11 @@ car_model = "Car"
 # A gap of at least this many hours between clips starts a new trip.
 min_trip_gap_hours = 3
 
+# GPS positions outside all of these boxes are discarded as spoofed.
+# Each box is [min_lat, min_lon, max_lat, max_lon]. Empty allows anywhere.
+# For example, Ukraine: [[44.0, 22.0, 52.5, 40.5]].
+allowed_areas = []
+
 # Number of trips encoded and videos extracted in parallel. Tune to your machine.
 encode_job_count = 1
 extract_job_count = 10

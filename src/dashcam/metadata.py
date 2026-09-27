@@ -36,7 +36,7 @@ LOGGER = logging.getLogger(__name__)
 # Versions of the extraction (OCR) and cleaning algorithms. Tracks made by older versions can
 # be updated with `extract --force` (extraction) or `extract --reclean` (cleaning).
 EXTRACTOR_VERSION = 1
-CLEANING_VERSION = 1
+CLEANING_VERSION = 2
 
 # Extraction statuses of a track.
 EXTRACTION_OK = "ok"

@@ -14,6 +14,7 @@ Example config file:
     encode_job_count = 2
     extract_job_count = 6
     car_model = "Car"
+    allowed_areas = [[44.0, 22.0, 52.5, 40.5]]
 """
 
 import dataclasses
@@ -35,6 +36,10 @@ CONFIG_FILENAME = "config.toml"
 # Directory settings in which `~` is expanded, and those of them that must be absolute.
 PATH_SETTINGS = ("library_dir", "raw_video_dir", "metadata_dir")
 ABSOLUTE_PATH_SETTINGS = ("library_dir", "raw_video_dir")
+
+# Latitude and longitude limits of an allowed area.
+MAX_ABS_LAT = 90
+MAX_ABS_LON = 180
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,6 +87,10 @@ class Config:
     # OpenStreetMap extract downloaded by `enrich --update-osm`.
     osm_extract_url: str
 
+    # Boxes of `[min_lat, min_lon, max_lat, max_lon]`. GPS fixes outside all of them are treated
+    # as spoofed. Empty means anywhere.
+    allowed_areas: list[list[float]]
+
 
 def get_platform_defaults() -> Config:
     """Return the default settings for the current platform."""
@@ -101,6 +110,7 @@ def get_platform_defaults() -> Config:
         "library_dir": None,
         "timezone": "Europe/Kyiv",
         "osm_extract_url": "https://download.geofabrik.de/europe/ukraine-latest.osm.pbf",
+        "allowed_areas": [],
     }
 
     if sys.platform == "darwin":
@@ -132,6 +142,40 @@ def get_config_path() -> Path:
     return platformdirs.user_config_path("dashcam", appauthor=False) / CONFIG_FILENAME
 
 
+def validate_allowed_areas(allowed_areas: t.Any, config_path: Path) -> None:
+    """
+    Check that `allowed_areas` is a list of `[min_lat, min_lon, max_lat, max_lon]` boxes.
+
+    Raises
+    ------
+    ValueError
+        If any box is malformed or out of range.
+    """
+    if not isinstance(allowed_areas, list):
+        raise ValueError(f"'allowed_areas' in '{config_path}' must be a list of boxes")
+    for area in allowed_areas:
+        is_four_numbers = (
+            isinstance(area, list)
+            and len(area) == 4
+            and all(isinstance(value, int | float) for value in area)
+        )
+        if not is_four_numbers:
+            raise ValueError(
+                f"Allowed area {area} in '{config_path}' must be "
+                "[min_lat, min_lon, max_lat, max_lon]"
+            )
+        min_lat, min_lon, max_lat, max_lon = area
+        is_in_range = (
+            -MAX_ABS_LAT <= min_lat <= max_lat <= MAX_ABS_LAT
+            and -MAX_ABS_LON <= min_lon <= max_lon <= MAX_ABS_LON
+        )
+        if not is_in_range:
+            raise ValueError(
+                f"Allowed area {area} in '{config_path}' must have min <= max, "
+                f"latitudes within +-{MAX_ABS_LAT}, and longitudes within +-{MAX_ABS_LON}"
+            )
+
+
 def read_config_file(config_path: Path) -> dict[str, t.Any]:
     """
     Read the settings overridden in the config file, with `~` expanded in paths.
@@ -144,7 +188,8 @@ def read_config_file(config_path: Path) -> dict[str, t.Any]:
     Raises
     ------
     ValueError
-        If the config file contains unknown settings or relative directory paths.
+        If the config file contains unknown settings, relative directory paths, or malformed
+        allowed areas.
     """
     if not config_path.is_file():
         return {}
@@ -165,6 +210,9 @@ def read_config_file(config_path: Path) -> dict[str, t.Any]:
             raise ValueError(f"'{setting}' in '{config_path}' must be an absolute path")
         overrides[setting] = str(path)
 
+    if "allowed_areas" in overrides:
+        validate_allowed_areas(overrides["allowed_areas"], config_path)
+
     return overrides
 
 
@@ -175,7 +223,8 @@ def load_config(config_path: Path | None = None) -> Config:
     Raises
     ------
     ValueError
-        If the config file contains unknown settings or relative directory paths.
+        If the config file contains unknown settings, relative directory paths, or malformed
+        allowed areas.
     """
     if config_path is None:
         config_path = get_config_path()

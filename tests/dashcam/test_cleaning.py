@@ -6,6 +6,7 @@ import pytest
 
 from dashcam import cleaning
 from dashcam import metadata
+from dashcam.config import get_platform_defaults
 
 TRACK_FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "tracks"
 
@@ -14,6 +15,16 @@ TRIP_START = datetime.datetime(2026, 9, 25, 10, 0, 0)
 
 # Latitude change of roughly 30 m, i.e. ~108 km/h over one second.
 LAT_STEP_30M = 0.00027
+
+# Latitude change of roughly 55 m, i.e. ~200 km/h over one second.
+LAT_STEP_55M = 0.0005
+
+# Latitude change of roughly 110 m. Added to a step, it makes a jump above `MAX_SPEED_KMH` that
+# is not a teleport.
+LAT_JUMP_110M = 0.001
+
+UKRAINE_AREA = (44.0, 22.0, 52.5, 40.5)
+POLAND_AREA = (49.0, 14.0, 55.0, 24.0)
 
 
 @pytest.fixture
@@ -236,6 +247,94 @@ def test_clean_track_keeps_segment_with_matching_speed(settings):
 
     # THEN the segment is kept
     assert set(statuses_of(samples)) == {cleaning.STATUS_OK}
+
+
+def test_clean_track_rejects_spoof_that_starts_with_real_date(settings):
+    # GIVEN a spoofed loop that shows the real date for a few seconds before the fake one
+    fake_clock = datetime.datetime(2028, 3, 10, 7, 0, 0)
+    fake_start_lat = -12.03 + 10 * LAT_STEP_55M + LAT_JUMP_110M
+    raw_samples = make_drive(
+        0, TRIP_START, -12.03, count=10, lat_step=LAT_STEP_55M, kmh=200, lon=-77.04
+    ) + make_drive(
+        10, fake_clock, fake_start_lat, count=60, lat_step=LAT_STEP_55M, kmh=200, lon=-77.04
+    )
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, settings)
+
+    # THEN the part with the real date is rejected together with the rest of the spoof
+    assert statuses_of(samples) == [cleaning.STATUS_SPOOFED] * 70
+
+
+def test_clean_track_rejects_short_fake_date_segment_within_real_drive(settings):
+    # GIVEN a drive with a short nearby segment that shows a fake date
+    fake_clock = datetime.datetime(2028, 3, 10, 7, 0, 0)
+    raw_samples = (
+        make_drive(0, TRIP_START, 49.8, count=20)
+        + make_drive(20, fake_clock, 49.8 + 20 * LAT_STEP_30M + LAT_JUMP_110M, count=3)
+        + make_drive(
+            23, TRIP_START + datetime.timedelta(seconds=23), 49.8 + 23 * LAT_STEP_30M, count=20
+        )
+    )
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, settings)
+
+    # THEN only the fake date segment is rejected (and interpolated over)
+    assert statuses_of(samples[:20]) == [cleaning.STATUS_OK] * 20
+    assert statuses_of(samples[20:23]) == [cleaning.STATUS_INTERPOLATED] * 3
+    assert statuses_of(samples[23:]) == [cleaning.STATUS_OK] * 20
+
+
+def test_clean_track_rejects_fixes_outside_allowed_areas(settings):
+    # GIVEN a consistent drive with the real date outside the allowed area
+    area_settings = dataclasses.replace(settings, allowed_areas=(UKRAINE_AREA,))
+    raw_samples = make_drive(0, TRIP_START, -12.03, count=20, lon=-77.04)
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, area_settings)
+
+    # THEN every fix is rejected
+    assert statuses_of(samples) == [cleaning.STATUS_SPOOFED] * 20
+
+
+def test_clean_track_keeps_fixes_in_any_allowed_area(settings):
+    # GIVEN a drive in the second of two allowed areas
+    area_settings = dataclasses.replace(settings, allowed_areas=(UKRAINE_AREA, POLAND_AREA))
+    raw_samples = make_drive(0, TRIP_START, 52.2, count=20, lon=21.0)
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, area_settings)
+
+    # THEN every fix is kept
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 20
+
+
+def test_clean_track_with_good_range_override_outside_allowed_areas(settings):
+    # GIVEN a drive outside the allowed area that is marked as good by hand
+    area_settings = dataclasses.replace(settings, allowed_areas=(UKRAINE_AREA,))
+    raw_samples = make_drive(0, TRIP_START, 52.2, count=10, lon=21.0)
+    overrides = cleaning.Overrides(good_ranges_s=[(0, 9)])
+
+    # WHEN cleaning it
+    samples = cleaning.clean_track(raw_samples, area_settings, overrides)
+
+    # THEN the manual override wins
+    assert statuses_of(samples) == [cleaning.STATUS_OK] * 10
+
+
+def test_cleaning_settings_from_config_with_allowed_areas():
+    # GIVEN a config with allowed areas
+    config = dataclasses.replace(
+        get_platform_defaults(), allowed_areas=[list(UKRAINE_AREA), list(POLAND_AREA)]
+    )
+
+    # WHEN making the cleaning settings
+    settings = cleaning.CleaningSettings.from_config(config, TRIP_DATE)
+
+    # THEN the areas are carried over
+    assert settings.allowed_areas == (UKRAINE_AREA, POLAND_AREA)
+    assert settings.timezone == config.timezone
 
 
 def test_clean_track_accepts_merge_gap_between_fixes(settings):
@@ -558,3 +657,18 @@ def test_clean_track_golden_snow_trip_with_camera_glitches(settings):
     statuses = statuses_of(samples)
     assert statuses.count(cleaning.STATUS_INTERPOLATED) == 2
     assert cleaning.STATUS_SPOOFED not in statuses
+
+
+def test_clean_track_golden_trip_with_only_spoofed_gps(settings):
+    # GIVEN the raw readings of a trip whose only fixes are a Lima spoof, which shows the real
+    # date for its first ~30 seconds
+
+    # WHEN cleaning them
+    samples = reclean_fixture_track("2026-05-13 Trip with Only Spoofed GPS", settings)
+
+    # THEN no position is kept
+    statuses = statuses_of(samples)
+    assert statuses.count(cleaning.STATUS_SPOOFED) > 250
+    assert cleaning.STATUS_OK not in statuses
+    assert cleaning.STATUS_INTERPOLATED not in statuses
+    assert all(sample.lat is None for sample in samples)

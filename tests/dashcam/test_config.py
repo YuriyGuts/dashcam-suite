@@ -82,6 +82,52 @@ def test_load_config_with_unknown_setting(tmp_path):
         config_module.load_config(config_path)
 
 
+def test_load_config_with_allowed_areas(tmp_path):
+    # GIVEN a config file with two allowed areas
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("allowed_areas = [[44, 22, 52.5, 40.5], [49.0, 14.0, 55.0, 24.0]]\n")
+
+    # WHEN loading the config
+    loaded_config = config_module.load_config(config_path)
+
+    # THEN the areas are loaded as given
+    assert loaded_config.allowed_areas == [[44, 22, 52.5, 40.5], [49.0, 14.0, 55.0, 24.0]]
+
+
+def test_get_platform_defaults_allows_any_area():
+    # GIVEN no config file
+
+    # WHEN getting the defaults
+    defaults = config_module.get_platform_defaults()
+
+    # THEN GPS fixes are allowed anywhere
+    assert defaults.allowed_areas == []
+
+
+@pytest.mark.parametrize(
+    "allowed_areas_text",
+    [
+        "[44, 22, 52.5, 40.5]",
+        '[[44, 22, 52.5, "40.5"]]',
+        "[[44, 22, 52.5]]",
+        "[[52.5, 22, 44, 40.5]]",
+        "[[44, 40.5, 52.5, 22]]",
+        "[[44, 22, 95, 40.5]]",
+        "[[44, -190, 52.5, 40.5]]",
+        '"Ukraine"',
+    ],
+)
+def test_load_config_with_malformed_allowed_areas(tmp_path, allowed_areas_text):
+    # GIVEN a config file with a malformed allowed area
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"allowed_areas = {allowed_areas_text}\n")
+
+    # WHEN loading the config
+    # THEN it fails and names the setting or the area
+    with pytest.raises(ValueError, match="[Aa]llowed.area"):
+        config_module.load_config(config_path)
+
+
 def test_get_config_path_from_environment(monkeypatch, tmp_path):
     # GIVEN the config path environment variable
     monkeypatch.setenv(config_module.CONFIG_PATH_ENV_VAR, str(tmp_path / "custom.toml"))

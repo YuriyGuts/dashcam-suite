@@ -5,12 +5,17 @@ Cleaning runs on the raw readings stored in a track, so it can be repeated witho
 the video again. The steps are:
 
 1. Parse every reading. Blank GPS text means no fix. GPS text that cannot be trusted or parsed
-   is unreadable. The rest are candidate fixes. A camera clock date with the year last is read
-   as day/month or month/day, whichever the video's dates show (see `infer_day_first`).
+   is unreadable. Fixes outside the allowed areas from the config are spoofed. The rest are
+   candidate fixes. A camera clock date with the year last is read as day/month or month/day,
+   whichever the video's dates show (see `infer_day_first`).
 2. Split the candidate fixes into segments in which consecutive points are physically
    reachable from each other (implied speed at most `MAX_SPEED_KMH`).
 3. Reject segments whose camera clock shows a date too far from the date in the filename, and
    segments whose displayed speed does not match the speed implied by their coordinates.
+   Consecutive segments without a teleport between them are grouped into places, and the
+   clock check is also applied to each place as a whole. A spoof often starts with the real
+   date and only later sets the camera clock to its own, so the first part of it is caught
+   this way.
 4. Keep the heaviest time-ordered chain of the remaining segments in which every segment is
    reachable from the previous one. Everything else is spoofed. This catches long spoofs in
    which the fake points agree with each other.
@@ -65,6 +70,10 @@ MAX_MEDIAN_SPEED_MISMATCH_KMH = 30
 # The highest plausible speed.
 MAX_SPEED_KMH = 250
 
+# Jumps between consecutive segments at up to this implied speed are GPS noise within one place
+# (a spoofed loop can briefly exceed `MAX_SPEED_KMH`). Faster jumps are teleports.
+MAX_PLACE_JUMP_SPEED_KMH = 1000
+
 # How far the camera clock date may be from the date in the video filename.
 MAX_CLOCK_DATE_DIFF_DAYS = 1
 
@@ -115,9 +124,24 @@ class CleaningSettings:
     trip_date: datetime.date | None
     timezone: str
 
+    # Boxes of `(min_lat, min_lon, max_lat, max_lon)`. Empty means anywhere.
+    allowed_areas: tuple[tuple[float, float, float, float], ...] = ()
+
     @classmethod
     def from_config(cls, config: Config, trip_date: datetime.date | None) -> "CleaningSettings":
-        return cls(trip_date=trip_date, timezone=config.timezone)
+        allowed_areas = tuple(
+            (min_lat, min_lon, max_lat, max_lon)
+            for min_lat, min_lon, max_lat, max_lon in config.allowed_areas
+        )
+        return cls(trip_date=trip_date, timezone=config.timezone, allowed_areas=allowed_areas)
+
+    def is_allowed_position(self, lat: float, lon: float) -> bool:
+        if not self.allowed_areas:
+            return True
+        return any(
+            min_lat <= lat <= max_lat and min_lon <= lon <= max_lon
+            for min_lat, min_lon, max_lat, max_lon in self.allowed_areas
+        )
 
 
 @dataclasses.dataclass
@@ -238,7 +262,7 @@ def parse_samples(
             initial_status = STATUS_NO_FIX
         elif gps is None:
             initial_status = STATUS_UNREADABLE
-        elif overrides.is_bad(raw_sample.t):
+        elif overrides.is_bad(raw_sample.t) or not settings.is_allowed_position(gps.lat, gps.lon):
             initial_status = STATUS_SPOOFED
         else:
             initial_status = STATUS_OK
@@ -299,10 +323,38 @@ def split_into_segments(parsed_samples: list[ParsedSample]) -> list[list[int]]:
     return segments
 
 
-def has_implausible_clock(segment: list[int], parsed_samples: list[ParsedSample]) -> bool:
-    """Check whether most readable clocks in the segment show an implausible date."""
+def group_into_places(
+    segments: list[list[int]], parsed_samples: list[ParsedSample]
+) -> list[list[list[int]]]:
+    """
+    Group consecutive segments without a teleport between them.
+
+    Returns
+    -------
+    list[list[list[int]]]
+        The segments of each place, in time order.
+    """
+    places: list[list[list[int]]] = []
+    for segment in segments:
+        if places:
+            last_sample = parsed_samples[places[-1][-1][-1]]
+            first_sample = parsed_samples[segment[0]]
+            assert last_sample.gps is not None and first_sample.gps is not None
+            distance_m = geo.haversine_m(
+                last_sample.gps.lat, last_sample.gps.lon, first_sample.gps.lat, first_sample.gps.lon
+            )
+            duration_s = max(1.0, first_sample.t - last_sample.t)
+            if geo.implied_speed_kmh(distance_m, duration_s) <= MAX_PLACE_JUMP_SPEED_KMH:
+                places[-1].append(segment)
+                continue
+        places.append([segment])
+    return places
+
+
+def has_implausible_clock(indexes: list[int], parsed_samples: list[ParsedSample]) -> bool:
+    """Check whether most readable clocks among the samples show an implausible date."""
     readable_clock_samples = [
-        parsed_samples[index] for index in segment if parsed_samples[index].clock is not None
+        parsed_samples[index] for index in indexes if parsed_samples[index].clock is not None
     ]
     if not readable_clock_samples:
         return False
@@ -421,12 +473,17 @@ def detect_good_fixes(parsed_samples: list[ParsedSample], overrides: Overrides) 
         if status == STATUS_OK:
             statuses[index] = STATUS_SPOOFED
 
-    segments = [
-        segment
-        for segment in split_into_segments(parsed_samples)
-        if not has_implausible_clock(segment, parsed_samples)
-        and not has_speed_mismatch(segment, parsed_samples)
-    ]
+    segments = []
+    for place in group_into_places(split_into_segments(parsed_samples), parsed_samples):
+        place_indexes = [index for segment in place for index in segment]
+        if has_implausible_clock(place_indexes, parsed_samples):
+            continue
+        segments.extend(
+            segment
+            for segment in place
+            if not has_implausible_clock(segment, parsed_samples)
+            and not has_speed_mismatch(segment, parsed_samples)
+        )
     for segment in select_segment_chain(segments, parsed_samples):
         for index in segment:
             statuses[index] = STATUS_OK
