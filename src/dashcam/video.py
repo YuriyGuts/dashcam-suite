@@ -52,7 +52,8 @@ def probe_video(path: Path, ffprobe_executable: str) -> VideoInfo:
         *["-select_streams", "v:0"],
         *["-show_entries", "stream=width,height:format=duration"],
         *["-of", "json"],
-        str(path),
+        # After `-i`, so that a relative path starting with `-` is not read as an option.
+        *["-i", str(path)],
     ]
     result = subprocess.run(cmd, capture_output=True, check=False, **OUTPUT_DECODING)
     if result.returncode != 0:
@@ -86,7 +87,7 @@ def probe_duration(path: Path, ffprobe_executable: str) -> float:
         *["-v", "error"],
         *["-show_entries", "format=duration"],
         *["-of", "default=noprint_wrappers=1:nokey=1"],
-        str(path),
+        *["-i", str(path)],
     ]
     result = subprocess.run(cmd, capture_output=True, check=False, **OUTPUT_DECODING)
     try:

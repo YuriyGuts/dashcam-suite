@@ -421,6 +421,23 @@ def test_iter_overlay_strips_stops_ffmpeg_when_the_worker_stops(synthetic_video,
     assert process.returncode not in (None, 0)
 
 
+@requires_ffmpeg
+def test_probe_video_with_relative_path_starting_with_a_dash(
+    synthetic_video, tmp_path, monkeypatch
+):
+    # GIVEN a video whose relative path starts with `-`
+    shutil.copy(synthetic_video, tmp_path / "-trip.mp4")
+    monkeypatch.chdir(tmp_path)
+
+    # WHEN probing it
+    video_info = video.probe_video(Path("-trip.mp4"), "ffprobe")
+    duration_s = video.probe_duration(Path("-trip.mp4"), "ffprobe")
+
+    # THEN the path is read as a file, not as an option
+    assert video_info.width == 2560
+    assert duration_s == pytest.approx(3.0, abs=0.1)
+
+
 @pytest.mark.parametrize(
     ("os_name", "options", "expected"),
     [
