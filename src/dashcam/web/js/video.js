@@ -30,6 +30,20 @@ function describeMediaError(element) {
   return error.message ? `${codeText}: ${error.message}` : codeText;
 }
 
+// Escapes the characters that `--include` would read as a glob pattern.
+function globEscape(text) {
+  return text.replace(/[[*?]/g, "[$&]");
+}
+
+// Quotes a command-line argument. Double quotes work in every common shell, unless the text has
+// characters that POSIX shells expand inside them. Such text gets POSIX single quotes.
+function shellQuote(text) {
+  if (!/["$`\\!]/.test(text)) {
+    return `"${text}"`;
+  }
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
 function reportPlaybackError() {
   const trip = state.tripsById.get(video.tripId);
   const sources = videoSources(trip);
@@ -44,7 +58,7 @@ function reportPlaybackError() {
         "p",
         {},
         `${reason} Make an H.264 preview that every browser can play, then reload the page: `,
-        el("code", {}, `dashcam extract --previews --include "${trip.video_filename}"`),
+        el("code", {}, `dashcam extract --previews --include ${shellQuote(globEscape(trip.video_filename))}`),
       ),
     );
   } else {
