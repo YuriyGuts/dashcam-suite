@@ -24,10 +24,9 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 ## Platform and Project
 
-- Supported: macOS and Linux. Windows is not tested, but code stays portable (`pathlib`, commands as argument lists, no `shell=True`).
+- Supported: Linux, macOS, and Windows. Code stays portable (`pathlib`, commands as argument lists, no `shell=True`).
 - Python project managed by `uv` with a local `.venv`. External requirement: `ffmpeg` and `ffprobe` (paths configurable).
 - `src/` layout, pytest, ruff (isort with one import per line), type annotations, `ty` type checking.
-- Code style follows the original `dashcam-encode` script.
 - Per-machine TOML config overrides defaults: raw video, library, and metadata directories, `ffmpeg` and `ffprobe` executables, hwaccel (`videotoolbox` on macOS, `vulkan` on Linux), codec settings, job counts (separate for `encode` and `extract`), trip gap, car model, camera time zone, allowed GPS areas. `dashcam config` prints the config file path and the effective settings.
 - Directories:
   - `library_dir` and `raw_video_dir` in the config expand `~` and must be absolute. A relative `metadata_dir` in the config is relative to the library directory.
@@ -42,8 +41,6 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 ## Commands
 
 ### `dashcam encode trips|range`
-
-Port of `dashcam-encode`.
 
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
 - `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
@@ -76,14 +73,14 @@ Port of `dashcam-encode`.
   - Gaps up to 60 s are interpolated linearly, including short spoofed or unreadable stretches. Longer gaps stay gaps.
   - Manual overrides from the track are applied last (see Track Format).
   - Sample statuses: `ok`, `interpolated`, `no_fix`, `spoofed`, `unreadable`.
-  - Times are stored as ISO-8601 with offset in `Europe/Kyiv`.
+  - Times are stored as ISO-8601 with the offset of the configured `timezone`.
 - Incremental and resumable: only videos without a track, or whose content changed, are processed. Each track is written when its video is done.
 - `--only` re-extracts the named videos and keeps their manual overrides.
 - `--previews`: generate 480p H.264 previews in `.metadata/previews/` for browsers that cannot play HEVC.
 
 ### `dashcam enrich [-d DIR] [--metadata-dir PATH] [--update-osm] [--osm-file PBF] [--force]`
 
-- `--update-osm` downloads the Geofabrik Ukraine extract (config: `osm_extract_url`), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
+- `--update-osm` downloads the OSM extract from `osm_extract_url` (e.g. from Geofabrik), keeps only named drivable roads and localities (city, town, village, hamlet) in `.metadata/osm/roads.sqlite`, and deletes the raw download. `--osm-file` builds the same data from a local `.osm.pbf` file and keeps the file.
 - Storage: SQLite with R*Tree indexes. OSM ways are cut into chunks of up to 8 nodes so that index boxes stay small. Tags kept: `name`, `name:en`, `ref`, `highway`; localities also keep `place` and `population`.
 - Map matching: a hidden Markov model over the `ok` and `interpolated` samples. Candidates are streets (same `name` and `ref`) within 50 m. The cost grows with the distance to the road and the angle to the direction of travel; switching streets has a fixed cost, so GPS noise does not flicker between streets. Runs are split at gaps and position jumps.
 - Street list: stretches in travel order, with off-road and sub-50 m stretches dropped and consecutive repeats merged.
@@ -143,7 +140,7 @@ Local HTTP server for the static web app, the metadata directory, and the videos
 
 Every request must address the server by a loopback host name. When it listens on another address, IP addresses, `*.local` names and the machine's host name are accepted too. DNS rebinding always uses the attacker's host name, so it is refused.
 
-- Leaflet (vendored) with OpenStreetMap tiles. Main browser: Firefox; secondary: Brave.
+- Leaflet (vendored) with OpenStreetMap tiles.
 - Sidebar: date range, one search box matching trip names, street names, and start/end localities (comma-separated terms must all match), trip list with stats (date, start/end time, distance, duration, average/max speed, GPS coverage badge), aggregate stats for the selection. Selected trips that the filters leave out stay selected but are not drawn; "Select all" selects exactly the listed trips. Filter state lives in the URL hash.
 - Map:
   - Selected trips drawn together, one color per trip (12 colors, reused beyond that), or colored by speed. Large selections are drawn from the simplified routes; a trip's full track loads on hover or click.
@@ -187,12 +184,12 @@ One JSON file. Header pretty-printed, one sample per line.
   "extractor_version": 1,
   "overrides": {"bad_ranges_s": [], "good_ranges_s": []},
   "streets": [
-    {"name": "вулиця Івана Франка", "name_en": "Ivana Franka Street", "highway": "secondary", "distance_m": 401, "start_t": 117.0, "end_t": 173.0}
+    {"name": "вулиця Хрещатик", "name_en": "Khreshchatyk Street", "highway": "secondary", "distance_m": 401, "start_t": 117.0, "end_t": 173.0}
   ],
-  "localities": {"start": {"name": "Львів", "name_en": "Lviv", "place": "city"}, "end": null},
+  "localities": {"start": {"name": "Київ", "name_en": "Kyiv", "place": "city"}, "end": null},
   "enrichment": {"enricher_version": 1, "osm_timestamp": "2026-09-25T20:24:36Z", "samples_digest": "3f0c...", "enriched_at": "2026-09-26T20:40:11+03:00"},
   "samples": [
-    {"t": 0.0, "time": "2026-09-25T10:22:28+03:00", "lat": 49.828035, "lon": 24.00494, "kmh": 28, "status": "ok", "raw": "28 KM/H N49.828035 E24.004940 | 2026/09/25 10:22:28", "scores": [0.97, 0.99]}
+    {"t": 0.0, "time": "2026-09-25T10:22:28+03:00", "lat": 50.447312, "lon": 30.52259, "kmh": 28, "status": "ok", "raw": "28 KM/H N50.447312 E30.522590 | 2026/09/25 10:22:28", "scores": [0.97, 0.99]}
   ]
 }
 ```
@@ -209,13 +206,4 @@ One JSON file. Header pretty-printed, one sample per line.
 - Cleaning: synthetic-track tests for every rule; golden tests on the stored raw readings of the bad-GPS, night (merge gap), and snow (camera glitches) trips.
 - Encode: grouping, parsing, and naming tests, plus a readability check of ffmpeg-generated segments.
 - Enrich: tests against a synthetic OSM map (intersections, GPS noise, ref-only highways, footways, localities); street lists of the sample trips checked against the map by eye.
-- Visualizer: browser smoke test.
-
-## Build Order
-
-1. Project skeleton and `encode` port.
-2. `extract` (with `status`, `forget`, `doctor`).
-3. `serve`.
-4. `enrich`.
-5. `rename`.
-6. `import`.
+- Visualizer: tests for every server route; the web app is checked by hand in the browser.
