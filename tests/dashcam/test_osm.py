@@ -8,6 +8,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import PurePosixPath
+from pathlib import PureWindowsPath
 
 import pytest
 import truststore
@@ -289,6 +291,32 @@ def test_open_database_in_directory_with_uri_characters(tmp_path, osm_pbf_path):
     # THEN it opens
     assert database is not None
     database.close()
+
+
+@pytest.mark.parametrize(
+    ("database_path", "expected_uri"),
+    [
+        (
+            PurePosixPath("/home/me/Dashcam/.metadata/osm/roads.sqlite"),
+            "file:///home/me/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+        ),
+        (
+            PureWindowsPath(r"M:\Dashcam\.metadata\osm\roads.sqlite"),
+            "file:///M:/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+        ),
+        # A mapped network drive can resolve to its UNC path.
+        (
+            PureWindowsPath(r"\\192.168.1.5\share\Dashcam\.metadata\osm\roads.sqlite"),
+            "file:////192.168.1.5/share/Dashcam/.metadata/osm/roads.sqlite?mode=ro",
+        ),
+        (
+            PurePosixPath("/home/me/trips #1 ?%/roads.sqlite"),
+            "file:///home/me/trips%20%231%20%3F%25/roads.sqlite?mode=ro",
+        ),
+    ],
+)
+def test_get_read_only_database_uri(database_path, expected_uri):
+    assert osm.get_read_only_database_uri(database_path) == expected_uri
 
 
 def test_open_database_with_corrupt_file(tmp_path):

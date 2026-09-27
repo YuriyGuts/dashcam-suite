@@ -30,8 +30,10 @@ import sys
 import threading
 import time
 import typing as t
+import urllib.parse
 import urllib.request
 from pathlib import Path
+from pathlib import PurePath
 
 import osmium
 import osmium.filter
@@ -561,6 +563,18 @@ class OsmDataVersion:
     source: str
 
 
+def get_read_only_database_uri(database_path: PurePath) -> str:
+    """
+    Return the SQLite URI that opens a database file (an absolute path) read-only.
+
+    SQLite refuses a URI with a host name, so a UNC path (`\\\\server\\share\\...`) keeps its
+    slashes in the path of the URI: `file:////server/share/...`.
+    """
+    posix_path = database_path.as_posix()
+    root_slash = "" if posix_path.startswith("/") else "/"
+    return f"file://{root_slash}{urllib.parse.quote(posix_path, safe='/:')}?mode=ro"
+
+
 class RoadDatabase:
     """Read access to a road database."""
 
@@ -574,7 +588,7 @@ class RoadDatabase:
             If the file is not a readable road database.
         """
         self.path = database_path
-        database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
+        database_uri = get_read_only_database_uri(database_path.absolute())
         self.connection = sqlite3.connect(database_uri, uri=True)
         self.roads_by_id: dict[int, Road] = {}
         try:
