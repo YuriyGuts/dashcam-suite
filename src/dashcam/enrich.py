@@ -484,11 +484,8 @@ def enrich_tracks(
                 LOGGER.error(f"Cannot enrich '{track_file.path.name}': {track_file.error}")
                 failed_count += 1
                 continue
-            if track_file.path.stem != track.stem:
-                LOGGER.warning(
-                    f"Skipped '{track_file.path.name}': it belongs to '{track.video_filename}' "
-                    f"(run `dashcam doctor --fix`)"
-                )
+            if track_file.is_misnamed:
+                LOGGER.warning(track_file.get_skip_message())
                 continue
             if track.extraction_status != metadata.EXTRACTION_OK:
                 continue

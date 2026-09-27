@@ -174,6 +174,7 @@ Every request must address the server by a loopback host name. When it listens o
 - If the matched track's video still exists under its old name, the new file is a duplicate copy: it is skipped with a warning, and `doctor` reports it.
 - Same stem but different fingerprint means the content changed: the old track goes to trash and the video is re-extracted.
 - Tracks outlive their videos. A track whose video is missing is `unreachable`.
+- A track file that cannot be read, or is named after another video than its `video_filename`, is left alone: commands skip it with a warning, the index leaves it out, and `doctor` reports it.
 
 ### Track Format
 

@@ -487,7 +487,7 @@ def test_enrich_tracks_skips_misnamed_track_files(enrich_store, config, make_dri
     run_enrich_tracks(enrich_store, config)
 
     # THEN the misnamed file is skipped with a hint, and does not overwrite the other track
-    assert "Skipped '2026-09-24 Old Name.json'" in caplog.text
+    assert "Skipping '2026-09-24 Old Name.json'" in caplog.text
     assert "dashcam doctor --fix" in caplog.text
     assert enrich_store.load_track(other_track.stem).raw_samples == other_track.raw_samples
     assert enrich_store.load_track("2026-09-24 Old Name").enrichment is None

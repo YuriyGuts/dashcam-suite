@@ -624,6 +624,53 @@ def test_metadata_store_rebuild_index_with_localities(make_track, store):
     assert index["trips"][0]["end_locality"] is None
 
 
+def test_metadata_store_rebuild_index_skips_unreadable_and_misnamed_tracks(
+    make_track, store, caplog
+):
+    # GIVEN a track, a copy of it under another name, and an unreadable track file
+    track = make_track("2026-09-25 B.mp4")
+    store.save_track(track)
+    store.write_track_file(track, store.track_path("2026-09-25 B backup"))
+    store.track_path("2026-09-26 Broken").write_text("{", encoding="utf-8")
+
+    # WHEN rebuilding the index
+    index = store.rebuild_index()
+
+    # THEN only the track under its own name is indexed, and the other files are reported
+    assert [trip["id"] for trip in index["trips"]] == ["2026-09-25 B"]
+    assert index["skipped_track_stems"] == ["2026-09-25 B backup", "2026-09-26 Broken"]
+    assert "Skipping '2026-09-25 B backup.json': it belongs to '2026-09-25 B.mp4'" in caplog.text
+    assert "Skipping unreadable track '2026-09-26 Broken.json'" in caplog.text
+
+
+def test_metadata_store_update_index_after_rename_keeps_skipped_tracks(make_track, store):
+    # GIVEN an index with a skipped track file
+    store.save_track(make_track("2026-09-25 B.mp4"))
+    store.track_path("2026-09-26 Broken").write_text("{", encoding="utf-8")
+    store.rebuild_index()
+
+    # WHEN renaming a trip and updating the index for it
+    store.rename_trip("2026-09-25 B", "2026-09-25 C.mp4")
+    index = store.update_index_after_rename("2026-09-25 B", "2026-09-25 C")
+
+    # THEN the skipped track file is still listed
+    assert index["skipped_track_stems"] == ["2026-09-26 Broken"]
+
+
+def test_metadata_store_load_tracks_by_stem_skips_misnamed_tracks(make_track, store, caplog):
+    # GIVEN a track and a copy of it under another name
+    track = make_track("2026-09-25 B.mp4")
+    store.save_track(track)
+    store.write_track_file(track, store.track_path("2026-09-25 B backup"))
+
+    # WHEN loading the tracks
+    tracks_by_stem = store.load_tracks_by_stem()
+
+    # THEN only the track under its own name is loaded
+    assert list(tracks_by_stem) == ["2026-09-25 B"]
+    assert "run `dashcam doctor --fix`" in caplog.text
+
+
 def test_get_street_names_lists_each_name_once(make_track):
     # GIVEN streets as dictionaries and strings, with a repeat and entries without a name
     track = make_track()

@@ -283,6 +283,30 @@ def test_is_index_stale_with_corrupt_index(store, add_track):
     assert serve.is_index_stale(store)
 
 
+def test_is_index_stale_with_unreadable_and_misnamed_tracks(store, add_track):
+    # GIVEN an index built with an unreadable track file and a misnamed copy of a track
+    track = add_track()
+    store.write_track_file(track, store.track_path("2026-09-25 Trip backup"))
+    store.track_path("2026-09-26 Broken").write_text("{", encoding="utf-8")
+    store.rebuild_index()
+
+    # WHEN checking the index
+    # THEN it is current, so it is not rebuilt on every request
+    assert not serve.is_index_stale(store)
+
+
+def test_is_index_stale_after_skipped_track_removal(store, add_track):
+    # GIVEN an index built with an unreadable track file, which is then deleted
+    add_track()
+    store.track_path("2026-09-26 Broken").write_text("{", encoding="utf-8")
+    store.rebuild_index()
+    store.track_path("2026-09-26 Broken").unlink()
+
+    # WHEN checking the index
+    # THEN it is stale
+    assert serve.is_index_stale(store)
+
+
 def test_load_index_rebuilds_stale_index(app, store, add_track, caplog):
     # GIVEN a track without an index
     caplog.set_level(logging.INFO)

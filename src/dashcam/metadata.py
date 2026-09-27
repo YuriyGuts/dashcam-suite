@@ -45,7 +45,7 @@ EXTRACTION_OK = "ok"
 EXTRACTION_NO_OVERLAY = "no_overlay"
 
 # Version of the index and geometry files. An index of another version is rebuilt.
-INDEX_FORMAT_VERSION = 2
+INDEX_FORMAT_VERSION = 3
 
 # Simplified routes: points closer than this to the previous kept point are dropped, points
 # that deviate less than the tolerance from the simplified line are dropped too, and the kept
@@ -625,12 +625,16 @@ def build_index_entry(track: Track, has_preview: bool) -> dict[str, t.Any]:
     return entry
 
 
-def make_index(trips: list[dict[str, t.Any]]) -> dict[str, t.Any]:
-    """Wrap index entries into the index file content."""
+def make_index(trips: list[dict[str, t.Any]], skipped_track_stems: list[str]) -> dict[str, t.Any]:
+    """
+    Wrap index entries into the index file content, with the stems of the track files that
+    were left out (unreadable or misnamed), so that a cheap check can tell the index is current.
+    """
     return {
         "format_version": INDEX_FORMAT_VERSION,
         "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
         "trips": trips,
+        "skipped_track_stems": skipped_track_stems,
     }
 
 
@@ -641,6 +645,22 @@ class TrackFile:
     path: Path
     track: Track | None
     error: str | None
+
+    @property
+    def is_misnamed(self) -> bool:
+        """Check whether the file is named after another video than the one its track declares."""
+        return self.track is not None and self.track.stem != self.path.stem
+
+    def get_skip_message(self) -> str:
+        """Describe why an unreadable or misnamed track file is skipped."""
+        if self.track is None:
+            return (
+                f"Skipping unreadable track '{self.path.name}': {self.error} (see `dashcam doctor`)"
+            )
+        return (
+            f"Skipping '{self.path.name}': it belongs to '{self.track.video_filename}' "
+            f"(run `dashcam doctor --fix`)"
+        )
 
 
 class MetadataStore:
@@ -693,14 +713,14 @@ class MetadataStore:
             progress_logger.update(loaded_count)
 
     def load_tracks_by_stem(self) -> dict[str, Track]:
-        """Load all readable tracks by file stem. Unreadable ones are reported and skipped."""
+        """
+        Load all readable tracks by file stem. Unreadable track files, and files named after
+        another video than their track declares, are reported and skipped.
+        """
         tracks = {}
         for track_file in self.iter_track_files():
-            if track_file.track is None:
-                LOGGER.warning(
-                    f"Skipping unreadable track '{track_file.path.name}': {track_file.error} "
-                    f"(see `dashcam doctor`)"
-                )
+            if track_file.track is None or track_file.is_misnamed:
+                LOGGER.warning(track_file.get_skip_message())
                 continue
             tracks[track_file.path.stem] = track_file.track
         return tracks
@@ -787,28 +807,39 @@ class MetadataStore:
             raise
 
     def build_index_entries(self, tracks_by_stem: dict[str, Track]) -> list[dict[str, t.Any]]:
-        """Summarize loaded tracks (keyed by file stem) in the order of a full rebuild."""
+        """
+        Summarize loaded tracks (keyed by file stem) like a full rebuild: in its order, and
+        without the misnamed track files.
+        """
         return [
             build_index_entry(track, has_preview=self.preview_path(track.stem).exists())
-            for _, track in sorted(
+            for stem, track in sorted(
                 tracks_by_stem.items(), key=lambda item: item[0] + TRACK_EXTENSION
             )
+            if track.stem == stem
         ]
 
     def build_index_and_geometry(self) -> tuple[dict[str, t.Any], dict[str, t.Any]]:
-        """Summarize all tracks and simplify their routes, reading each track once."""
+        """
+        Summarize all tracks and simplify their routes, reading each track once. Unreadable
+        and misnamed track files are reported and left out.
+        """
         trips = []
         routes = {}
+        skipped_track_stems = []
         for track_file in self.iter_track_files():
             track = track_file.track
-            if track is None:
+            if track is None or track_file.is_misnamed:
+                LOGGER.warning(track_file.get_skip_message())
+                skipped_track_stems.append(track_file.path.stem)
                 continue
             trip = build_index_entry(track, has_preview=self.preview_path(track.stem).exists())
             trips.append(trip)
             route = simplify_route(track.clean_samples) if trip.get("bbox") else []
             if route:
                 routes[track.stem] = route
-        return make_index(trips), {"format_version": INDEX_FORMAT_VERSION, "trips": routes}
+        index = make_index(trips, skipped_track_stems)
+        return index, {"format_version": INDEX_FORMAT_VERSION, "trips": routes}
 
     def rebuild_index(self) -> dict[str, t.Any]:
         """Rebuild `index.json` and `geometry.json` from the tracks."""
@@ -846,7 +877,7 @@ class MetadataStore:
         route = simplify_route(track.clean_samples) if entry.get("bbox") else []
         if route:
             routes[new_stem] = route
-        index = make_index(trips)
+        index = make_index(trips, index["skipped_track_stems"])
         self.write_index_files(index, geometry)
         return index
 

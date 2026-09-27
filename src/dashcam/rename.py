@@ -413,7 +413,7 @@ def plan_renames(
     """
     tracks_by_stem = store.load_tracks_by_stem()
     video_paths = metadata.find_videos(library_dir)
-    taken_stems = find_taken_stems(video_paths, tracks_by_stem)
+    taken_stems = find_taken_stems(video_paths, [path.stem for path in store.list_track_paths()])
 
     candidates = []
     for video_path in video_paths:

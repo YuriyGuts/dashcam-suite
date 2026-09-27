@@ -221,16 +221,17 @@ def list_filenames(directory: Path) -> set[str]:
 def is_index_stale(store: metadata.MetadataStore) -> bool:
     """
     Check cheaply whether the index needs a rebuild: it or the geometry file is missing, it has
-    another format version, is older than a track, or lists different trips than there are track
-    files.
+    another format version, is older than a track, or was built from other track files than
+    there are.
     """
     try:
         index_mtime_ns = store.index_path.stat().st_mtime_ns
         index = store.load_index()
+        if index.get("format_version") != metadata.INDEX_FORMAT_VERSION:
+            return True
         indexed_stems = {trip["id"] for trip in index["trips"]}
+        indexed_stems.update(index["skipped_track_stems"])
     except (OSError, ValueError, TypeError, KeyError):
-        return True
-    if index.get("format_version") != metadata.INDEX_FORMAT_VERSION:
         return True
     if not store.geometry_path.is_file():
         return True
@@ -669,7 +670,14 @@ def serve(
         allow_network_hosts=not is_loopback,
     )
     app.warn_about_library()
-    trip_count = len(app.load_index()["trips"])
+    index = app.load_index()
+    trip_count = len(index["trips"])
+    skipped_count = len(index["skipped_track_stems"])
+    if skipped_count:
+        LOGGER.warning(
+            f"{skipped_count} track files are unreadable or misnamed and not shown "
+            f"(run `dashcam doctor`)"
+        )
 
     server = VisualizerServer((host, port), app)
     bound_port = server.server_address[1]

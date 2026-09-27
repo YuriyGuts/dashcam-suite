@@ -466,6 +466,21 @@ def test_plan_extraction_skips_video_with_unreadable_track(store, make_video_fil
     assert "dashcam doctor" in caplog.text
 
 
+def test_plan_extraction_skips_video_with_misnamed_track(
+    store, make_video_file, make_track, caplog
+):
+    # GIVEN a video whose track file declares another video
+    video_path = make_video_file("2026-09-25 B backup.mp4")
+    store.write_track_file(make_track("2026-09-25 B.mp4"), store.track_path(video_path.stem))
+
+    # WHEN planning
+    planned = extract.plan_extraction([video_path], store, force=False)
+
+    # THEN the video is skipped, so the track file is not overwritten
+    assert planned == []
+    assert "unreadable or misnamed track file is not overwritten" in caplog.text
+
+
 def test_plan_extraction_with_force_skips_video_with_unreadable_track(store, make_video_file):
     # GIVEN a video whose track file is broken
     video_path = make_video_file("2026-09-25 Trip.mp4")
@@ -819,6 +834,26 @@ def test_reclean_tracks_keeps_street_data(config, store, make_track):
     assert recleaned_track.streets == track.streets
     assert recleaned_track.localities == track.localities
     assert recleaned_track.enrichment == track.enrichment
+
+
+def test_reclean_tracks_leaves_misnamed_track_files_alone(config, store, make_track, caplog):
+    # GIVEN a track, and a hand-made backup of an older version of it, which sorts first
+    track = make_track("2026-09-25 B.mp4")
+    track.overrides = cleaning.Overrides(bad_ranges_s=[(0.0, 2.0)])
+    store.save_track(track)
+    backup_track = make_track("2026-09-25 B.mp4", fingerprint="100:old")
+    store.write_track_file(backup_track, store.track_path("2026-09-25 B backup"))
+
+    # WHEN recleaning
+    failed_count = extract.reclean_tracks(store.root, config)
+
+    # THEN the backup does not replace the track, which is recleaned
+    recleaned_track = store.load_track("2026-09-25 B")
+    assert failed_count == 0
+    assert recleaned_track.fingerprint == track.fingerprint
+    assert {sample.status for sample in recleaned_track.clean_samples} == {cleaning.STATUS_SPOOFED}
+    assert store.load_track("2026-09-25 B backup") == backup_track
+    assert "Skipping '2026-09-25 B backup.json'" in caplog.text
 
 
 def test_reclean_tracks_reports_unreadable_tracks(config, store):

@@ -258,6 +258,21 @@ def test_run_doctor_reports_duplicate_fingerprints(library_dir, store, add_trip,
     assert "share the same video content" in caplog.text
 
 
+def test_run_doctor_accepts_rebuilt_index_with_misnamed_track(library_dir, store, add_trip, caplog):
+    # GIVEN a track and a copy of it under another name, and a rebuilt index
+    add_trip("2026-09-25 Trip.mp4")
+    track_path = store.track_path("2026-09-25 Trip")
+    store.track_path("copy").write_bytes(track_path.read_bytes())
+    store.rebuild_index()
+
+    # WHEN running the doctor
+    run_doctor(library_dir, store)
+
+    # THEN the copy is reported, but the index is current
+    assert "Track 'copy.json' belongs to '2026-09-25 Trip.mp4'" in caplog.text
+    assert "trip index is missing or out of date" not in caplog.text
+
+
 def test_run_doctor_warns_about_track_without_accepted_fix(library_dir, store, add_trip, caplog):
     # GIVEN a track with GPS text in which every fix was rejected
     _, track = add_trip("2024-02-11 Night.mp4")
