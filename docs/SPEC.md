@@ -44,7 +44,7 @@ One command-line tool that covers the whole dashcam workflow: merge raw SD card 
 
 - Collects videos from the raw video directory and all its subdirectories, skipping hidden files and directories. A filename found in several folders is taken from an `RO` folder (else the first in path order) with a warning. Parking mode clips are skipped with one summary line.
 - Parses the start time and full index from `YYYYMMDDhhmmss_NNNNNN` filenames, falling back to file mtime. Segments are sorted by start time.
-- `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index.
+- `trips` groups segments into trips by time gap (default 3 h). `range START END` selects segments by index; an `--output-name` without a leading `YYYY-mm-dd` gets the date of the first segment.
 - Options: `--raw-video-dir`, `--library-dir`, `--metadata-dir`, `--min-trip-gap-hours`, `--job-count` (trips only), `--dry-run`, `--skip-raw-video-validation`, `--output-name` (range only).
 - The SD card is never modified. The user controls the scope.
 - Encoded raw videos are logged by filename and size in `.metadata/encoded_segments.json` (logged by the parent process after each successful job). `trips` leaves logged videos out before grouping, so clips left on the card are not encoded again after their trip is renamed, and new clips recorded within the trip gap of an imported trip form a trip of their own. `range` encodes the selected videos regardless and logs them too.

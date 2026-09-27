@@ -17,7 +17,7 @@ where trips should be at least 8 hours apart, encode 3 trips in parallel:
     --min-trip-gap-hours 8 --job-count 3
 
 Encode raw video files labeled from #15 to #319 and save them as a single video file named
-"Road Trip.mp4" in the specified library directory:
+"YYYY-mm-dd Road Trip.mp4" (the date of #15) in the specified library directory:
 > dashcam encode range 15 319 --output-name "Road Trip" --library-dir ~/Videos/Dashcam
 
 Download the OpenStreetMap data, then match all tracks in the library to streets:
@@ -217,7 +217,8 @@ def add_encode_subparsers(encode_parser: argparse.ArgumentParser, config: Config
         "--output-name",
         metavar="NAME",
         help=(
-            "Name of the output video (without extension). "
+            "Name of the output video (without extension). The date of the first video is "
+            "added in front unless the name starts with YYYY-mm-dd. "
             "If omitted, a name is generated from the start time of the first video."
         ),
         type=str,

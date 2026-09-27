@@ -814,8 +814,8 @@ def test_encode_range_encodes_and_logs_encoded_segments(
 
     # THEN the range is encoded, and the raw video stays logged
     assert sorted(path.name for path in library_dir.iterdir()) == [
+        "2026-09-25 Road Trip.mp4",
         "2026-09-25 Trip 11-00.mp4",
-        "Road Trip.mp4",
     ]
     encoded_log = encode.EncodedSegmentLog.load(metadata_dir)
     assert encoded_log.sizes == {"20260925110000_000001.MP4": 0}
@@ -905,13 +905,48 @@ def test_encode_range_with_output_name(
         check_readability=False,
     )
 
-    # THEN the output uses that name
-    assert [path.name for path in library_dir.iterdir()] == ["Road Trip.mp4"]
+    # THEN the output uses that name, after the date of the first segment
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 Road Trip.mp4"]
 
 
-def test_encode_range_rejects_too_long_output_name(config, raw_video_dir, tmp_path, fake_ffmpeg):
-    # GIVEN an output name whose track name would not fit on an encrypted NAS folder
-    output_name = "x" * 139
+def test_encode_range_with_dated_output_name(
+    config,
+    raw_video_dir,
+    make_raw_videos,
+    tmp_path,
+    fake_ffmpeg,
+    serial_pool,
+    no_os_sleep_prevention,
+):
+    # GIVEN a raw segment
+    make_raw_videos("20260925110000_000001.MP4")
+    library_dir = tmp_path / "out"
+    library_dir.mkdir()
+
+    # WHEN encoding it with an output name that starts with a date
+    encode.encode_range(
+        raw_video_dir=raw_video_dir,
+        library_dir=library_dir,
+        metadata_dir=tmp_path / "metadata",
+        config=config,
+        start_index=1,
+        end_index=1,
+        output_name="2026-09-24 Road Trip",
+        dry_run=False,
+        check_readability=False,
+    )
+
+    # THEN the name is used as given
+    assert [path.name for path in library_dir.iterdir()] == ["2026-09-24 Road Trip.mp4"]
+
+
+def test_encode_range_rejects_too_long_output_name(
+    config, raw_video_dir, make_raw_videos, tmp_path, fake_ffmpeg
+):
+    # GIVEN a raw segment, and an output name whose track name would not fit on an encrypted
+    # NAS folder once the date is added
+    make_raw_videos("20260925110000_000001.MP4")
+    output_name = "x" * 128
 
     # WHEN encoding with it
     with pytest.raises(RuntimeError, match="is too long: use at most 142 characters"):

@@ -617,6 +617,8 @@ def encode_range(
     Encode the raw videos in the specified index range as a single output video.
 
     The videos are encoded even if they have been encoded before, and are recorded in the log.
+    An output name that does not start with a date gets the date of the first video, so that
+    the trip can be renamed and its clock checked like any other.
 
     Returns
     -------
@@ -629,10 +631,6 @@ def encode_range(
                 f"The output name '{output_name}' must not start with '.' or contain any of "
                 f"{metadata.FORBIDDEN_FILENAME_CHARS_TEXT}"
             )
-        output_filename = f"{output_name}.{OUTPUT_FORMAT}"
-        problem = metadata.get_filename_length_problem(output_filename)
-        if problem is not None:
-            raise RuntimeError(f"The output name '{output_filename}' is too long: {problem}")
 
     segments = collect_raw_video_segments(
         raw_video_dir=raw_video_dir,
@@ -641,8 +639,15 @@ def encode_range(
         end_index=end_index,
         check_readability=check_readability and not dry_run,
     )
+    first_start_time = segments[0].start_time
     if output_name is None:
-        output_name = get_placeholder_video_name(segments[0].start_time)
+        output_name = get_placeholder_video_name(first_start_time)
+    elif metadata.parse_trip_name(output_name).date is None:
+        output_name = f"{first_start_time:%Y-%m-%d} {output_name}"
+    output_filename = f"{output_name}.{OUTPUT_FORMAT}"
+    problem = metadata.get_filename_length_problem(output_filename)
+    if problem is not None:
+        raise RuntimeError(f"The output name '{output_filename}' is too long: {problem}")
     LOGGER.info(f"Output video: {output_name} ({len(segments)} files)")
 
     job_defs = plan_encode_jobs([(output_name, segments)], library_dir, config)

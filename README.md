@@ -197,7 +197,7 @@ Then run `dashcam extract`, `dashcam enrich` and, for the first form, `dashcam r
 
 ## Other things you can do
 
-**Encode a specific range of clips.** `dashcam encode range 15 319 --output-name "Road Trip"` merges clips 15 to 319 (the number after the underscore) into one video, even if they span several trips or have been imported before.
+**Encode a specific range of clips.** `dashcam encode range 15 319 --output-name "Road Trip"` merges clips 15 to 319 (the number after the underscore) into one video named `YYYY-mm-dd Road Trip.mp4`, even if they span several trips or have been imported before.
 
 **Browse from a phone or TV.** `dashcam serve --host 0.0.0.0` makes the app reachable from your local network. Renaming from the web app is turned off in this mode. Add `--allow-rename` to turn it on for anyone on your network. Open the app by the computer's IP address or its `.local` name.
 
