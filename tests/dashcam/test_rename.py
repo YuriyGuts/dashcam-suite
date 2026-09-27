@@ -17,29 +17,6 @@ def info_logs(caplog):
 
 
 @pytest.mark.parametrize(
-    ("ukrainian", "latin"),
-    [
-        ("Згорани", "Zghorany"),
-        ("Знам’янка", "Znamianka"),
-        ("Короп’є", "Koropie"),
-        ("Єнакієве", "Yenakiieve"),
-        ("Їжакевич", "Yizhakevych"),
-        ("Мар'їне", "Marine"),
-        ("Юрій", "Yurii"),
-        ("Щербухи", "Shcherbukhy"),
-        ("Ґорґани", "Gorgany"),
-        ("Івана-Теодозія Куровця", "Ivana-Teodoziia Kurovtsia"),
-    ],
-)
-def test_transliterate_kmu_2010(ukrainian, latin):
-    assert rename.transliterate_kmu_2010(ukrainian) == latin
-
-
-def test_transliterate_kmu_2010_keeps_capitals_of_all_caps_words():
-    assert rename.transliterate_kmu_2010("ЩЕ Ж") == "SHCHE Zh"
-
-
-@pytest.mark.parametrize(
     ("ref", "expected"),
     [
         ("М06", "M06"),

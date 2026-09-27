@@ -28,6 +28,7 @@ from dashcam import cleaning
 from dashcam import enrich
 from dashcam import metadata
 from dashcam import terminal
+from dashcam import ukrainian
 from dashcam.config import Config
 
 # The longest allowed filename, including the extension. Names are ASCII, so this stays below
@@ -46,41 +47,8 @@ REF_HIGHWAY_CLASSES = frozenset(["motorway", "motorway_link", "trunk", "trunk_li
 # Placeholder names given by `encode`, e.g. `Trip 11-17`.
 PLACEHOLDER_NAME_PATTERN = re.compile(r"^Trip \d{2}-\d{2}$")
 
-# Street-type words dropped from names, in lowercase. Ukrainian words are dropped before
-# transliteration, English words from `name:en`.
-UKRAINIAN_STREET_TYPE_WORDS = frozenset(
-    [
-        "вулиця",
-        "вул.",
-        "проспект",
-        "просп.",
-        "пр.",
-        "площа",
-        "пл.",
-        "провулок",
-        "пров.",
-        "бульвар",
-        "бул.",
-        "шосе",
-        "дорога",
-        "узвіз",
-        "набережна",
-        "проїзд",
-        "тупик",
-        "майдан",
-        "алея",
-        "шлях",
-        "тракт",
-        "траса",
-        "міст",
-        "спуск",
-        "в'їзд",
-        "в’їзд",
-        "з'їзд",
-        "з’їзд",
-        "улица",
-    ]
-)
+# English street-type words dropped from `name:en`, in lowercase. Some OSM English names keep a
+# transliterated Ukrainian type word, such as "vulytsia".
 ENGLISH_STREET_TYPE_WORDS = frozenset(
     [
         "street",
@@ -114,52 +82,6 @@ ENGLISH_STREET_TYPE_WORDS = frozenset(
     ]
 )
 
-# KMU 2010 transliteration of Ukrainian (Cabinet of Ministers resolution No. 55). Letters with
-# a separate form at the start of a word map to (initial form, other form).
-KMU_2010_LETTERS = {
-    "а": "a",
-    "б": "b",
-    "в": "v",
-    "г": "h",
-    "ґ": "g",
-    "д": "d",
-    "е": "e",
-    "є": ("ye", "ie"),
-    "ж": "zh",
-    "з": "z",
-    "и": "y",
-    "і": "i",
-    "ї": ("yi", "i"),
-    "й": ("y", "i"),
-    "к": "k",
-    "л": "l",
-    "м": "m",
-    "н": "n",
-    "о": "o",
-    "п": "p",
-    "р": "r",
-    "с": "s",
-    "т": "t",
-    "у": "u",
-    "ф": "f",
-    "х": "kh",
-    "ц": "ts",
-    "ч": "ch",
-    "ш": "sh",
-    "щ": "shch",
-    "ь": "",
-    "ю": ("yu", "iu"),
-    "я": ("ya", "ia"),
-    # Russian letters, which appear in some older OSM names.
-    "ё": ("yo", "io"),
-    "ъ": "",
-    "ы": "y",
-    "э": "e",
-}
-
-# Apostrophes are not transliterated.
-APOSTROPHES = frozenset("'’ʼ`")
-
 # pylint: disable=logging-fstring-interpolation
 LOGGER = logging.getLogger(__name__)
 
@@ -184,32 +106,6 @@ class RenamePlan:
     new_filename: str
 
 
-def transliterate_kmu_2010(text: str) -> str:
-    """Transliterate Ukrainian text to Latin letters using the KMU 2010 system."""
-    result = []
-    for index, char in enumerate(text):
-        if char in APOSTROPHES:
-            continue
-        lower_char = char.lower()
-        mapping = KMU_2010_LETTERS.get(lower_char)
-        if mapping is None:
-            result.append(char)
-            continue
-        previous_char = text[index - 1] if index > 0 else ""
-        is_word_start = not previous_char.isalpha() and previous_char not in APOSTROPHES
-        if isinstance(mapping, tuple):
-            mapping = mapping[0] if is_word_start else mapping[1]
-        # The combination "зг" is written as "zgh" to tell it apart from "ж".
-        if lower_char == "г" and previous_char.lower() == "з":
-            mapping = "gh"
-        if char.isupper() and mapping:
-            next_char = text[index + 1] if index + 1 < len(text) else ""
-            is_all_caps_word = next_char.isupper()
-            mapping = mapping.upper() if is_all_caps_word else mapping[0].upper() + mapping[1:]
-        result.append(mapping)
-    return "".join(result)
-
-
 def to_ascii(text: str) -> str:
     """Drop diacritics and any remaining non-ASCII characters."""
     decomposed = unicodedata.normalize("NFKD", text)
@@ -231,7 +127,7 @@ def drop_street_type_words(name: str, street_type_words: frozenset[str]) -> str:
 def normalize_ref(ref: str) -> str:
     """Turn an OSM ref like `М-06` or `М 06;Е40` into `M06`."""
     first_ref = ref.split(";")[0]
-    return re.sub(r"[\s\-]+", "", to_ascii(transliterate_kmu_2010(first_ref)))
+    return re.sub(r"[\s\-]+", "", to_ascii(ukrainian.transliterate(first_ref)))
 
 
 def get_street_label(street: dict[str, t.Any]) -> str | None:
@@ -252,7 +148,7 @@ def get_street_label(street: dict[str, t.Any]) -> str | None:
         label = to_ascii(drop_street_type_words(street["name_en"], ENGLISH_STREET_TYPE_WORDS))
     elif name:
         label = to_ascii(
-            transliterate_kmu_2010(drop_street_type_words(name, UKRAINIAN_STREET_TYPE_WORDS))
+            ukrainian.transliterate(drop_street_type_words(name, ukrainian.STREET_TYPE_WORDS))
         )
     else:
         return None
