@@ -65,9 +65,6 @@ class ExtractJobDefinition:
     config: Config
     make_preview: bool
 
-    # False for jobs that only make a missing preview for an existing track.
-    extract_track: bool = True
-
     # Manual overrides kept from the previous track of the same content.
     overrides: cleaning.Overrides = dataclasses.field(default_factory=cleaning.Overrides)
 
@@ -79,14 +76,12 @@ class ExtractJobDefinition:
 
 
 @dataclasses.dataclass(frozen=True)
-class ExtractJobResult:
-    """Outcome of one extraction job."""
+class PreviewJobDefinition:
+    """Parameters for making the missing preview of an extracted video in the parallel pool."""
 
-    video_filename: str
-    extraction_status: str
-    error: str | None = None
-    status_counts: dict[str, int] = dataclasses.field(default_factory=dict)
-    elapsed_s: float = 0.0
+    video_path: Path
+    metadata_dir: Path
+    config: Config
 
 
 def filter_videos(video_paths: list[Path], include: list[str], exclude: list[str]) -> list[Path]:
@@ -301,45 +296,53 @@ def extract_video(job_def: ExtractJobDefinition) -> metadata.Track:
     )
 
 
-def run_extract_job(job_def: ExtractJobDefinition) -> ExtractJobResult:
-    """Extract one video and save its track. Errors are reported, not raised."""
+def run_extract_job(job_def: ExtractJobDefinition | PreviewJobDefinition) -> str | None:
+    """
+    Extract one video and save its track, or make the missing preview of an extracted video.
+
+    Errors are reported, not raised.
+
+    Returns
+    -------
+    str | None
+        The error message, or None if the job succeeded.
+    """
     # Each job decodes with ffmpeg in parallel; keep OpenCV from adding more threads.
     cv2.setNumThreads(1)
     started_at = time.monotonic()
     video_filename = job_def.video_path.name
     store = metadata.MetadataStore(job_def.metadata_dir)
     try:
-        if job_def.extract_track:
+        if isinstance(job_def, ExtractJobDefinition):
             LOGGER.info(f"Extracting: {video_filename}")
             track = extract_video(job_def)
             store.save_track(track)
+            log_extracted_track(track, time.monotonic() - started_at)
+            needs_preview = job_def.make_preview
         else:
             track = store.load_track(job_def.video_path.stem)
-        if job_def.make_preview and track.extraction_status == metadata.EXTRACTION_OK:
+            needs_preview = True
+        if needs_preview and track.extraction_status == metadata.EXTRACTION_OK:
             LOGGER.info(f"Making preview: {video_filename}")
             make_preview(
                 job_def.video_path, store.preview_path(track.stem), job_def.config, track.duration_s
             )
+            LOGGER.info(f"Preview made: {video_filename}", extra=terminal.SUCCESS)
     except (OSError, RuntimeError, subprocess.CalledProcessError, metadata.TrackFormatError) as exc:
         LOGGER.error(f"Extraction failed for '{video_filename}': {exc}")
-        return ExtractJobResult(
-            video_filename=video_filename, extraction_status="error", error=str(exc)
-        )
+        return str(exc)
+    return None
 
+
+def log_extracted_track(track: metadata.Track, elapsed_s: float) -> None:
+    """Log the outcome of an extraction, with how many samples got each status."""
     status_counts: dict[str, int] = {}
     for sample in track.clean_samples:
         status_counts[sample.status] = status_counts.get(sample.status, 0) + 1
-    elapsed_s = time.monotonic() - started_at
     LOGGER.info(
-        f"Extracted: {video_filename} ({track.extraction_status}, {elapsed_s:.0f} s) "
+        f"Extracted: {track.video_filename} ({track.extraction_status}, {elapsed_s:.0f} s) "
         f"{status_counts}",
         extra=terminal.SUCCESS,
-    )
-    return ExtractJobResult(
-        video_filename=video_filename,
-        extraction_status=track.extraction_status,
-        status_counts=status_counts,
-        elapsed_s=elapsed_s,
     )
 
 
@@ -482,7 +485,7 @@ def extract_videos(
 
     library_stems = {path.stem for path in library_video_paths}
     to_extract = plan_extraction(video_paths, store, force, library_stems)
-    job_defs = [
+    job_defs: list[ExtractJobDefinition | PreviewJobDefinition] = [
         make_extract_job(planned, metadata_dir, config, make_previews) for planned in to_extract
     ]
     if make_previews:
@@ -496,11 +499,11 @@ def extract_videos(
         LOGGER.info(f"Processing {len(job_defs)} videos with {process_count} parallel jobs")
         with prevent_os_sleep():
             with worker_pool(process_count) as process_pool:
-                for done_count, result in enumerate(
+                for done_count, error in enumerate(
                     process_pool.imap_unordered(run_extract_job, job_defs), start=1
                 ):
                     LOGGER.info(f"Progress: {done_count}/{len(job_defs)} videos")
-                    failed_count += result.error is not None
+                    failed_count += error is not None
     else:
         LOGGER.info("All tracks are up to date", extra=terminal.SUCCESS)
 
@@ -513,7 +516,7 @@ def plan_missing_previews(
     video_paths: list[Path],
     store: metadata.MetadataStore,
     config: Config,
-) -> list[ExtractJobDefinition]:
+) -> list[PreviewJobDefinition]:
     """
     Plan preview-only jobs for extracted videos that do not have a preview yet.
 
@@ -532,14 +535,7 @@ def plan_missing_previews(
         if track.extraction_status != metadata.EXTRACTION_OK:
             continue
         job_defs.append(
-            ExtractJobDefinition(
-                video_path=video_path,
-                fingerprint="",
-                metadata_dir=store.root,
-                config=config,
-                make_preview=True,
-                extract_track=False,
-            )
+            PreviewJobDefinition(video_path=video_path, metadata_dir=store.root, config=config)
         )
     return job_defs
 
