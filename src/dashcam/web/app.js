@@ -41,7 +41,7 @@ const COVERAGE_DOTS_MAX_ZOOM = 12;
 
 // Heatmap: one hue (orange, to stand apart from the blue coverage lines), light to dark. It
 // shows how many trips passed through each cell of a ground grid, on a log scale.
-const HEAT_GRADIENT = {0.15: "#f7c8b0", 0.45: "#eb6834", 0.75: "#b8461c", 1.0: "#6b240a"};
+const HEAT_GRADIENT = {0.15: "#fed7aa", 0.45: "#fb923c", 0.75: "#ea580c", 1.0: "#c2410c"};
 const HEAT_CELL_M = 10;
 const HEAT_RADIUS_PX = 5;
 const HEAT_BLUR_PX = 4;
