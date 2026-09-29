@@ -25,13 +25,13 @@ export function setTripSelected(tripId, isSelected) {
   }
 }
 
-export function focusTrip(tripId, {fit = true} = {}) {
+export function focusTrip(tripId, {fit = true, pushHistory = true} = {}) {
   if (video.tripId && video.tripId !== tripId) {
     closeVideo();
   }
   state.focusedId = tripId;
   syncColorSlots();
-  writeHash({pushHistory: true});
+  writeHash({pushHistory});
   renderAll();
   if (tripId && fit) {
     fitToTrips([state.tripsById.get(tripId)]);

@@ -201,9 +201,14 @@ code {
   cursor: pointer;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: var(--surface-sunken);
   color: var(--text);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .round-button {
@@ -893,6 +898,17 @@ h1 {
 .detail-title {
   flex: 1;
   min-width: 0;
+}
+
+.detail-steps {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  margin: -2px -6px 0 0;
+}
+
+.detail-steps .icon-button {
+  height: 24px;
 }
 
 #trip-detail h2 {

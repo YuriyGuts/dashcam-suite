@@ -101,6 +101,8 @@ export const ARROW = " \u2192 ";
 // Stroke icons on a 24 x 24 grid, drawn with the current text color.
 export const ICON_PATHS = {
   arrowLeft: "M19 12H5M12 19l-7-7 7-7",
+  chevronUp: "M6 15l6-6 6 6",
+  chevronDown: "M6 9l6 6 6-6",
   play: "M7 4.5v15l12-7.5-12-7.5z",
   frame: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
   route: "M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 17h8a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h8",

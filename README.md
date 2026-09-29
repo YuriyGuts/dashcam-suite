@@ -197,9 +197,9 @@ Then run `dashcam extract`, `dashcam enrich` and, for the first form, `dashcam r
 
 **Browse from a phone or TV.** `dashcam serve --host 0.0.0.0` makes the app reachable from your local network. Renaming from the web app is turned off in this mode. Add `--allow-rename` to turn it on for anyone on your network. Open the app by the computer's IP address or its `.local` name.
 
-**Work with routes on the map.** Click a route to play its video from that spot. While hovering a route, press C to copy the point's time, speed and coordinates, or H to hide the trip, e.g. when several trips share a street. Shift+A selects all listed trips, Shift+X clears the selection, and Shift+Z zooms to it.
+**Work with routes on the map.** Click a route to play its video from that spot. While hovering a route, press C to copy the point's time, speed and coordinates, or H to hide the trip, e.g. when several trips share a street. Shift+A selects all listed trips, Shift+X clears the selection, and Shift+Z zooms to it. With a trip open, the arrows in its header, [ and ], or Shift+↑ and Shift+↓ open the previous or next trip of the list.
 
-**Rename trips.** Click the trip name in the web app's trip details to edit it. The street-based suggestion is one click away. You can also rename files in Finder or your file manager. The next `dashcam extract` (or `dashcam doctor --fix`) recognizes a renamed video by its content and moves its track along, without reading the video again.
+**Rename trips.** Click the trip name in the web app's trip details, or press R, to edit it. The street-based suggestion is one click away. You can also rename files in Finder or your file manager. The next `dashcam extract` (or `dashcam doctor --fix`) recognizes a renamed video by its content and moves its track along, without reading the video again.
 
 **Delete a trip.** Delete the video. Its track stays in the metadata as "unreachable" and still shows on the map, without video. `dashcam forget "<file name>"` moves the track to `.metadata/trash/` too.
 

@@ -2,8 +2,8 @@
 
 import {DASH, DOT, MAX_FILENAME_LENGTH, STATUS_LABELS, SUGGESTION_LOADING_DELAY_MS} from "./constants.js";
 import {dom} from "./elements.js";
-import {canPlayVideo, coverageBadge, el, fetchJson, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, keepingFocus, postJson, withoutEmpty} from "./helpers.js";
-import {applyIndex, colorSlots, state, syncColorSlots, writeHash} from "./state.js";
+import {canPlayVideo, coverageBadge, el, fetchJson, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, isTypingTarget, keepingFocus, postJson, withoutEmpty} from "./helpers.js";
+import {applyIndex, colorSlots, filteredTrips, state, syncColorSlots, writeHash} from "./state.js";
 import {loadTrack, moveCachedTracks} from "./tracks.js";
 import {fitToTrips} from "./map.js";
 import {formatLocalities, renderAll, renderDateTicks, renderStreets} from "./sidebar.js";
@@ -43,7 +43,7 @@ function renderTripName(trip) {
     el("h2", {}, trip.name),
     el(
       "button",
-      {type: "button", className: "icon-button", "aria-label": "Rename trip", title: "Rename trip", "data-focus-key": "rename", onclick: () => startRename(trip.id)},
+      {type: "button", className: "icon-button", "aria-label": "Rename trip", title: "Rename trip (R)", "data-focus-key": "rename", onclick: () => startRename(trip.id)},
       icon("pencil", "icon icon-small"),
     ),
   );
@@ -249,6 +249,81 @@ async function saveRename() {
   if (playback) openVideo(newId, playback);
 }
 
+// The trip `offset` rows away from the open trip in the trip list. Null past either end of the
+// list, and when the open trip is not listed.
+function adjacentTripId(offset) {
+  const listedTrips = filteredTrips().filter(hasGps);
+  const index = listedTrips.findIndex((trip) => trip.id === state.focusedId);
+  return index < 0 ? null : (listedTrips[index + offset]?.id ?? null);
+}
+
+// Stepping to another trip discards a name being edited, but waits for one being saved.
+function canStepTo(tripId) {
+  return tripId !== null && !renameEdit?.isSaving;
+}
+
+// Opens the next (1) or previous (-1) trip of the list in place of the open one, so that Back
+// returns to the list rather than to each trip on the way.
+function stepTrip(offset) {
+  const tripId = adjacentTripId(offset);
+  if (!canStepTo(tripId)) {
+    return;
+  }
+  renameEdit = null;
+  focusTrip(tripId, {pushHistory: false});
+}
+
+function renameOpenTrip() {
+  const trip = state.tripsById.get(state.focusedId);
+  if (!canRenameTrip(trip) || renameEdit?.isSaving) {
+    return;
+  }
+  if (renameEdit?.tripId === trip.id) {
+    renameEdit.input.focus();
+  } else {
+    startRename(trip.id);
+  }
+}
+
+// While a trip is open, Shift+Up or [ and Shift+Down or ] step through the trip list, and R
+// renames the trip. Registered in the capture phase, so that the map does not pan on Shift+arrows.
+export function onTripShortcut(event) {
+  if (!state.focusedId || event.altKey || event.metaKey || event.ctrlKey || isTypingTarget(event.target)) {
+    return;
+  }
+  const isArrow = event.key === "ArrowUp" || event.key === "ArrowDown";
+  if (event.shiftKey && isArrow) {
+    stepTrip(event.key === "ArrowUp" ? -1 : 1);
+  } else if (event.key === "[" || event.key === "]") {
+    stepTrip(event.key === "[" ? -1 : 1);
+  } else if (!event.shiftKey && event.key.toLowerCase() === "r") {
+    renameOpenTrip();
+  } else {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function renderStepButton(offset) {
+  const isNext = offset > 0;
+  const label = isNext ? "Next trip" : "Previous trip";
+  return el(
+    "button",
+    {
+      type: "button",
+      className: "icon-button",
+      "aria-label": label,
+      title: `${label} (${isNext ? "] or Shift+Down" : "[ or Shift+Up"})`,
+      disabled: !canStepTo(adjacentTripId(offset)),
+      "data-focus-key": isNext ? "next" : "previous",
+      "data-focus-fallback": isNext ? "previous" : "next",
+      onclick: () => stepTrip(offset),
+    },
+    icon(isNext ? "chevronDown" : "chevronUp", "icon icon-small"),
+  );
+}
+
 // Loads the trip index again after a rename, moving everything keyed by the old trip ID.
 async function reloadTrips({oldId, newId}) {
   const index = await fetchJson("/api/trips");
@@ -350,6 +425,7 @@ function renderDetailPanel() {
         el("p", {className: "detail-subtitle"}, [formatDate(trip.date), timeRange].join(DOT)),
         localitiesText ? el("p", {className: "detail-subtitle"}, localitiesText) : null,
       ),
+      el("div", {className: "detail-steps"}, renderStepButton(-1), renderStepButton(1)),
     ),
     el("div", {className: "detail-actions"}, withoutEmpty([playButton, zoomButton, missingVideoNote])),
     el("div", {className: "detail-facts"}, facts),

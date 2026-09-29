@@ -14,6 +14,7 @@ import {applyIndex, drawnSelection, drawnTripIds, filteredTrips, readHash, state
 import {DEFAULT_VIEW, coverageTrips, fitToTrips, hideMapStatus, map, onHoverShortcut, renderMap} from "./map.js";
 import {renderAll, renderDateTicks} from "./sidebar.js";
 import {applyDatePreset, onDateFieldChange, onDateFieldInput, onDateSliderInput, updateQueryFilter} from "./actions.js";
+import {onTripShortcut} from "./detail.js";
 import {bindVideoPanelDragging, closeVideo, setVideoSource, video} from "./video.js";
 
 function bindControls() {
@@ -58,6 +59,7 @@ function bindControls() {
   bindVideoPanelDragging();
   document.addEventListener("keydown", onHoverShortcut);
   document.addEventListener("keydown", onSelectionShortcut);
+  document.addEventListener("keydown", onTripShortcut, {capture: true});
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && video.tripId) closeVideo();
   });
