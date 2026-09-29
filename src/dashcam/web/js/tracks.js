@@ -66,8 +66,8 @@ export function loadGeometry() {
   return geometryPromise;
 }
 
-// After a rename: moves the cached track to the new trip ID, points every cached track at its
-// reloaded trip, and drops the cached routes, which are keyed by trip ID.
+// After a rename: moves the cached track and route to the new trip ID, and points the track at
+// the renamed trip.
 export function moveCachedTracks(oldId, newId) {
   for (const tracks of [trackPromises, loadedTracks]) {
     if (tracks.has(oldId)) {
@@ -75,10 +75,18 @@ export function moveCachedTracks(oldId, newId) {
       tracks.delete(oldId);
     }
   }
-  for (const [id, track] of loadedTracks) {
-    track.trip = state.tripsById.get(id) ?? track.trip;
+  const track = loadedTracks.get(newId);
+  if (track) {
+    track.trip = state.tripsById.get(newId);
   }
-  geometryPromise = null;
+  geometryPromise
+    ?.then((routes) => {
+      if (oldId in routes) {
+        routes[newId] = routes[oldId];
+        delete routes[oldId];
+      }
+    })
+    .catch(() => {});
 }
 
 export function sampleLatLng(sample) {

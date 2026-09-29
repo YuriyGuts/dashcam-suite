@@ -162,11 +162,20 @@ export function aggregateStats(trips) {
 }
 
 export function applyIndex(index) {
-  state.trips = index.trips.slice().sort((a, b) =>
+  setTrips(index.trips);
+  state.libraryDir = index.library_dir ?? "";
+  state.canRename = Boolean(index.can_rename);
+}
+
+// Puts the index entry of a renamed trip in place of its entry under the old ID.
+export function replaceTrip(oldId, trip) {
+  setTrips([...state.trips.filter((other) => other.id !== oldId), trip]);
+}
+
+function setTrips(trips) {
+  state.trips = trips.slice().sort((a, b) =>
     (b.start_time ?? b.date ?? "").localeCompare(a.start_time ?? a.date ?? ""),
   );
   state.tripsById = new Map(state.trips.map((trip) => [trip.id, trip]));
-  state.libraryDir = index.library_dir ?? "";
-  state.canRename = Boolean(index.can_rename);
   state.dateBounds = computeDateBounds(state.trips);
 }

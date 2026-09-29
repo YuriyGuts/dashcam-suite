@@ -212,6 +212,30 @@ def test_is_index_stale_after_track_changes(store, add_track):
     assert serve.is_index_stale(store)
 
 
+def test_is_index_stale_after_one_of_many_tracks_changes(store, add_track):
+    # GIVEN many tracks, one of which is modified after the index was built
+    tracks = [add_track(f"2026-09-{day:02d} Trip.mp4") for day in range(1, 29)]
+    store.rebuild_index()
+    path = store.track_path(tracks[13].stem)
+    index_mtime_ns = store.index_path.stat().st_mtime_ns
+    os.utime(path, ns=(index_mtime_ns, index_mtime_ns + 1_000_000_000))
+
+    # WHEN checking the index
+    # THEN it is stale
+    assert serve.is_index_stale(store)
+
+
+def test_is_index_stale_with_many_current_tracks(store, add_track):
+    # GIVEN many tracks and an index built after the last change
+    for day in range(1, 29):
+        add_track(f"2026-09-{day:02d} Trip.mp4")
+    store.rebuild_index()
+
+    # WHEN checking the index
+    # THEN it is current
+    assert not serve.is_index_stale(store)
+
+
 def test_is_index_stale_after_track_removal(store, add_track):
     # GIVEN an index that lists a track that is gone
     track = add_track()
@@ -1089,11 +1113,13 @@ def test_server_renames_trip(rename_server, library_dir, store, add_trip_with_vi
         rename_server, {"id": "2026-09-25 Trip 11-17", "filename": "2026-09-25 To Work.mp4"}
     )
 
-    # THEN the files are renamed and the index lists the new trip ID
-    assert (status, body) == (200, {"id": "2026-09-25 To Work"})
+    # THEN the files are renamed, and the response has the trip as the trip list now lists it
+    assert status == 200
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
     _, _, trips_body = fetch(f"{rename_server}/api/trips")
-    assert [trip["id"] for trip in json.loads(trips_body)["trips"]] == ["2026-09-25 To Work"]
+    assert json.loads(trips_body)["trips"] == [body["trip"]]
+    assert body["trip"]["id"] == "2026-09-25 To Work"
+    assert body["trip"]["video_url"] == "/videos/2026-09-25%20To%20Work.mp4"
 
 
 def test_rename_trip_updates_current_index_without_reading_other_tracks(
@@ -1109,10 +1135,10 @@ def test_rename_trip_updates_current_index_without_reading_other_tracks(
     )
 
     # WHEN renaming one trip
-    new_id = app.rename_trip("2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4")
+    trip = app.rename_trip("2026-09-25 Trip 11-17", "2026-09-25 To Work.mp4")
 
     # THEN only its index entry changes
-    assert new_id == "2026-09-25 To Work"
+    assert trip["id"] == "2026-09-25 To Work"
     trip_ids = {trip["id"] for trip in store.load_index()["trips"]}
     assert trip_ids == {"2026-09-25 To Work", "2026-09-24 Other"}
     assert set(store.load_geometry()["trips"]) == trip_ids
@@ -1279,7 +1305,7 @@ def test_server_renames_trip_from_the_network(
     )
 
     # THEN the trip is renamed
-    assert (status, body) == (200, {"id": "2026-09-25 To Work"})
+    assert (status, body["trip"]["id"]) == (200, "2026-09-25 To Work")
     assert [path.name for path in library_dir.iterdir()] == ["2026-09-25 To Work.mp4"]
 
 

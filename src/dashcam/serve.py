@@ -16,6 +16,7 @@ import sys
 import threading
 import typing as t
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from pathlib import PurePath
 
@@ -60,6 +61,9 @@ MAX_REQUEST_BODY_SIZE = 16 * 1024
 
 # Seconds a connection may stay idle, or a client may take to receive data, before it is closed.
 CONNECTION_TIMEOUT_S = 60
+
+# Parallel file stats in the index staleness check. More threads were not faster on a NAS.
+STAT_THREAD_COUNT = 16
 
 # Host names that always refer to this machine.
 LOOPBACK_HOST_NAMES = frozenset(["localhost"])
@@ -217,14 +221,22 @@ def is_index_stale(store: metadata.MetadataStore) -> bool:
     if {path.stem for path in track_paths} != indexed_stems:
         return True
     preview_paths = list(store.previews_dir.glob("*.mp4")) if store.previews_dir.is_dir() else []
-    for path in [*track_paths, *preview_paths]:
+    return is_any_file_newer([*track_paths, *preview_paths], index_mtime_ns)
+
+
+def is_any_file_newer(paths: list[Path], mtime_ns: int) -> bool:
+    """Check whether any of the files was modified after `mtime_ns`, or no longer exists."""
+
+    def is_newer(path: Path) -> bool:
         try:
-            if path.stat().st_mtime_ns > index_mtime_ns:
-                return True
+            return path.stat().st_mtime_ns > mtime_ns
         except OSError:
             # Removed since it was listed, e.g. by `forget` or a rename in another tab.
             return True
-    return False
+
+    # Each stat is a round trip on a network drive, so they run in parallel.
+    with ThreadPoolExecutor(max_workers=STAT_THREAD_COUNT) as executor:
+        return any(executor.map(is_newer, paths))
 
 
 class VisualizerApp:
@@ -274,10 +286,15 @@ class VisualizerApp:
         if not self.allow_network_hosts:
             index["library_dir"] = str(self.library_dir.resolve())
         index["can_rename"] = self.allow_rename
+        self.add_file_urls(index["trips"])
+        return index
+
+    def add_file_urls(self, trips: list[dict[str, t.Any]]) -> None:
+        """Add the URLs of the video, preview, and track files to index entries."""
         # One listing per directory, instead of a lookup per trip, which is slow on network drives.
         video_filenames = list_filenames(self.library_dir)
         preview_filenames = list_filenames(self.store.previews_dir)
-        for trip in index["trips"]:
+        for trip in trips:
             is_video_available = (
                 self.video_path(trip["video_filename"]) is not None
                 and trip["video_filename"] in video_filenames
@@ -293,7 +310,6 @@ class VisualizerApp:
                 f"/previews/{urllib.parse.quote(trip['id'])}.mp4" if is_preview_available else None
             )
             trip["track_url"] = f"/tracks/{urllib.parse.quote(trip['id'])}.json"
-        return index
 
     def get_geometry(self) -> dict[str, t.Any]:
         """Return the simplified routes of all trips with GPS, keyed by trip ID."""
@@ -315,14 +331,14 @@ class VisualizerApp:
                 self.library_dir, self.store, trip_id, self.car_model
             )
 
-    def rename_trip(self, trip_id: str, new_filename: str) -> str:
+    def rename_trip(self, trip_id: str, new_filename: str) -> dict[str, t.Any]:
         """
         Rename a trip and update the index.
 
         Returns
         -------
-        str
-            The new ID of the trip.
+        dict[str, t.Any]
+            The index entry of the renamed trip, with the URLs that `get_trips` adds.
 
         Raises
         ------
@@ -334,10 +350,14 @@ class VisualizerApp:
             was_index_stale = is_index_stale(self.store)
             new_id = rename.rename_trip(self.library_dir, self.store, trip_id, new_filename)
             if was_index_stale:
-                self.store.rebuild_index()
+                index = self.store.rebuild_index()
             elif new_id != trip_id:
-                self.store.update_index_after_rename(trip_id, new_id)
-        return new_id
+                index = self.store.update_index_after_rename(trip_id, new_id)
+            else:
+                index = self.store.load_index()
+        trip = next(trip for trip in index["trips"] if trip["id"] == new_id)
+        self.add_file_urls([trip])
+        return trip
 
     def warn_about_library(self) -> None:
         """Run the cheap consistency checks and log what the user may want to fix."""
@@ -494,11 +514,11 @@ class VisualizerRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_error(400, f"Invalid request: {exc}")
             return
         try:
-            new_id = self.app.rename_trip(trip_id, new_filename.strip())
+            trip = self.app.rename_trip(trip_id, new_filename.strip())
         except rename.RenameError as exc:
             self.send_json_error(409, str(exc))
             return
-        self.send_json({"id": new_id}, send_body=True)
+        self.send_json({"trip": trip}, send_body=True)
 
     def check_rename_request(self) -> tuple[int, str] | None:
         """

@@ -2,6 +2,8 @@ import datetime
 import json
 import logging
 import math
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -836,6 +838,46 @@ def test_find_videos_lists_trip_videos_by_name(tmp_path):
     assert [path.name for path in video_paths] == ["A.MOV", "b.mp4", "c.avi"]
 
 
+def test_find_videos_returns_paths_in_the_library(tmp_path):
+    # GIVEN a trip video
+    (tmp_path / "a.mp4").write_bytes(b"video")
+
+    # WHEN finding videos
+    video_paths = metadata.find_videos(tmp_path)
+
+    # THEN its path is inside the library directory
+    assert video_paths == [tmp_path / "a.mp4"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symbolic links need privileges on Windows")
+def test_find_videos_follows_symbolic_links(tmp_path):
+    # GIVEN a link to a video, a link to a directory, and a broken link
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "real.mp4").write_bytes(b"video")
+    (tmp_path / "linked.mp4").symlink_to(tmp_path / "elsewhere" / "real.mp4")
+    (tmp_path / "folder.mp4").symlink_to(tmp_path / "elsewhere")
+    (tmp_path / "broken.mp4").symlink_to(tmp_path / "missing.mp4")
+
+    # WHEN finding videos
+    video_paths = metadata.find_videos(tmp_path)
+
+    # THEN only the link to a video is found
+    assert [path.name for path in video_paths] == ["linked.mp4"]
+
+
+def test_find_videos_does_not_stat_each_file(tmp_path, monkeypatch):
+    # GIVEN trip videos, and a stat per file that would be slow on a network drive
+    for name in ("a.mp4", "b.mp4"):
+        (tmp_path / name).write_bytes(b"video")
+    monkeypatch.setattr(Path, "stat", lambda *args, **kwargs: pytest.fail("A file was statted"))
+
+    # WHEN finding videos
+    video_paths = metadata.find_videos(tmp_path)
+
+    # THEN the file types come from the directory listing
+    assert [path.name for path in video_paths] == ["a.mp4", "b.mp4"]
+
+
 def test_find_videos_sharing_a_track():
     # GIVEN videos whose names differ only in the extension or letter case, and another video
     video_paths = [
@@ -856,13 +898,13 @@ def test_find_videos_announces_the_scan(tmp_path, monkeypatch, caplog):
     # GIVEN a library directory that is slow to list
     caplog.set_level(logging.INFO)
     messages_before_listing = []
-    original_iterdir = Path.iterdir
+    original_scandir = os.scandir
 
-    def recording_iterdir(path):
+    def recording_scandir(path):
         messages_before_listing.extend(record.getMessage() for record in caplog.records)
-        return original_iterdir(path)
+        return original_scandir(path)
 
-    monkeypatch.setattr(Path, "iterdir", recording_iterdir)
+    monkeypatch.setattr(os, "scandir", recording_scandir)
 
     # WHEN finding videos
     metadata.find_videos(tmp_path)

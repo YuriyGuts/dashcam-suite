@@ -125,16 +125,17 @@ def get_max_video_filename_bytes(extension: str) -> int:
 def find_videos(library_dir: Path) -> list[Path]:
     """List the trip videos in the library directory, sorted by name."""
     LOGGER.info(f"Scanning '{library_dir}' for videos")
-    return sorted(
-        (
-            path
-            for path in library_dir.iterdir()
-            if path.is_file()
-            and not path.name.startswith(".")
-            and path.suffix.lower() in VIDEO_EXTENSIONS
-        ),
-        key=lambda path: path.name,
-    )
+    # `os.scandir` gets the file types with the listing, instead of a request per file, which is
+    # slow on network drives.
+    with os.scandir(library_dir) as entries:
+        video_names = [
+            entry.name
+            for entry in entries
+            if entry.is_file()
+            and not entry.name.startswith(".")
+            and Path(entry.name).suffix.lower() in VIDEO_EXTENSIONS
+        ]
+    return [library_dir / name for name in sorted(video_names)]
 
 
 def find_videos_sharing_a_track(video_paths: list[Path]) -> list[list[Path]]:

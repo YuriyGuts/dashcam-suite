@@ -3,7 +3,7 @@
 import {DASH, DOT, MAX_FILENAME_LENGTH, STATUS_LABELS, SUGGESTION_LOADING_DELAY_MS} from "./constants.js";
 import {dom} from "./elements.js";
 import {canPlayVideo, coverageBadge, el, fetchJson, formatClockTime, formatDate, formatDistance, formatDuration, formatSpeed, hasGps, icon, isTypingTarget, keepingFocus, postJson, withoutEmpty} from "./helpers.js";
-import {applyIndex, colorSlots, filteredTrips, state, syncColorSlots, writeHash} from "./state.js";
+import {colorSlots, filteredTrips, replaceTrip, state, syncColorSlots, writeHash} from "./state.js";
 import {loadTrack, moveCachedTracks} from "./tracks.js";
 import {fitToTrips} from "./map.js";
 import {formatLocalities, renderAll, renderDateTicks, renderStreets} from "./sidebar.js";
@@ -221,9 +221,9 @@ async function saveRename() {
   edit.isSaving = true;
   closeVideo();
   renderDetail();
-  let newId;
+  let renamedTrip;
   try {
-    newId = (await postJson("/api/rename", {id: trip.id, filename})).id;
+    renamedTrip = (await postJson("/api/rename", {id: trip.id, filename})).trip;
   } catch (error) {
     edit.isSaving = false;
     edit.error = error.message;
@@ -233,20 +233,12 @@ async function saveRename() {
     return;
   }
   renameEdit = null;
-  try {
-    await reloadTrips({oldId: trip.id, newId});
-  } catch (error) {
-    // The trip is renamed on disk, but the page still knows it by its old name.
-    dom.summary.replaceChildren(
-      el("p", {}, `The trip was renamed, but the trips cannot be reloaded: ${error.message}. Reload the page.`),
-    );
-    return;
-  }
+  applyRenamedTrip(trip.id, renamedTrip);
   // The disabled form lost the focus while saving.
   if (document.activeElement === document.body) {
     dom.tripDetail.querySelector("[data-focus-key=rename]")?.focus();
   }
-  if (playback) openVideo(newId, playback);
+  if (playback) openVideo(renamedTrip.id, playback);
 }
 
 // The trip `offset` rows away from the open trip in the trip list. Null past either end of the
@@ -324,10 +316,10 @@ function renderStepButton(offset) {
   );
 }
 
-// Loads the trip index again after a rename, moving everything keyed by the old trip ID.
-async function reloadTrips({oldId, newId}) {
-  const index = await fetchJson("/api/trips");
-  applyIndex(index);
+// Moves everything keyed by the old trip ID to the renamed trip.
+function applyRenamedTrip(oldId, renamedTrip) {
+  const newId = renamedTrip.id;
+  replaceTrip(oldId, renamedTrip);
   const toNewId = (id) => (id === oldId ? newId : id);
   state.selectedIds = state.selectedIds.map(toNewId).filter((id) => state.tripsById.has(id));
   const focusedId = state.focusedId && toNewId(state.focusedId);
