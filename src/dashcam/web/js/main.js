@@ -9,8 +9,8 @@
  */
 
 import {dom} from "./elements.js";
-import {el, fetchJson, hasGps} from "./helpers.js";
-import {applyIndex, drawnSelection, filteredTrips, readHash, state, syncColorSlots, writeHash} from "./state.js";
+import {el, fetchJson, hasGps, isTypingTarget} from "./helpers.js";
+import {applyIndex, drawnSelection, drawnTripIds, filteredTrips, readHash, state, syncColorSlots, writeHash} from "./state.js";
 import {DEFAULT_VIEW, coverageTrips, fitToTrips, hideMapStatus, map, onHoverShortcut, renderMap} from "./map.js";
 import {renderAll, renderDateTicks} from "./sidebar.js";
 import {applyDatePreset, onDateFieldChange, onDateFieldInput, onDateSliderInput, updateQueryFilter} from "./actions.js";
@@ -30,11 +30,6 @@ function bindControls() {
   for (const button of document.querySelectorAll("[data-mode]")) {
     button.addEventListener("click", () => {
       state.mapMode = button.dataset.mode;
-      // A trip opened on the coverage map is drawn on the route map too.
-      if (state.mapMode === "routes" && state.focusedId && !state.selectedIds.includes(state.focusedId)) {
-        state.selectedIds.push(state.focusedId);
-        syncColorSlots();
-      }
       writeHash();
       renderAll();
     });
@@ -51,25 +46,9 @@ function bindControls() {
     writeHash();
     renderMap();
   });
-  // Selects exactly the trips in the list, so that the map draws what the list shows.
-  document.getElementById("select-all").addEventListener("click", () => {
-    state.selectedIds = filteredTrips().filter(hasGps).map((trip) => trip.id);
-    state.mapMode = "routes";
-    syncColorSlots();
-    writeHash();
-    renderAll();
-    fitToTrips(state.selectedIds.map((id) => state.tripsById.get(id)));
-  });
-  document.getElementById("select-none").addEventListener("click", () => {
-    state.selectedIds = [];
-    syncColorSlots();
-    writeHash();
-    renderAll();
-  });
-  document.getElementById("zoom-selection").addEventListener("click", () => {
-    const drawnTrips = drawnSelection().map((id) => state.tripsById.get(id));
-    fitToTrips(state.mapMode === "routes" && drawnTrips.length ? drawnTrips : coverageTrips());
-  });
+  document.getElementById("select-all").addEventListener("click", selectAllTrips);
+  document.getElementById("select-none").addEventListener("click", clearSelection);
+  document.getElementById("zoom-selection").addEventListener("click", zoomToSelection);
   for (const button of dom.videoSource.querySelectorAll("[data-source]")) {
     button.addEventListener("click", () => {
       if (button.dataset.source !== video.source) setVideoSource(button.dataset.source);
@@ -78,6 +57,7 @@ function bindControls() {
   document.getElementById("video-close").addEventListener("click", closeVideo);
   bindVideoPanelDragging();
   document.addEventListener("keydown", onHoverShortcut);
+  document.addEventListener("keydown", onSelectionShortcut);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && video.tripId) closeVideo();
   });
@@ -91,6 +71,48 @@ function bindControls() {
       fitToTrips([state.tripsById.get(state.focusedId)]);
     }
   });
+}
+
+// Selects exactly the trips in the list, so that the map draws what the list shows. Browser Back
+// restores the previous selection.
+function selectAllTrips() {
+  state.selectedIds = filteredTrips().filter(hasGps).map((trip) => trip.id);
+  state.mapMode = "routes";
+  syncColorSlots();
+  writeHash({pushHistory: true});
+  renderAll();
+  fitToTrips(state.selectedIds.map((id) => state.tripsById.get(id)));
+}
+
+function clearSelection() {
+  state.selectedIds = [];
+  syncColorSlots();
+  writeHash({pushHistory: true});
+  renderAll();
+}
+
+function zoomToSelection() {
+  const drawnTrips = drawnTripIds().map((id) => state.tripsById.get(id));
+  fitToTrips(state.mapMode === "routes" && drawnTrips.length ? drawnTrips : coverageTrips());
+}
+
+// Shift+A selects all trips, Shift+X clears the selection, and Shift+Z zooms to it. Selecting all
+// works only while the trip list is shown, since it acts on the list.
+function onSelectionShortcut(event) {
+  if (!event.shiftKey || event.altKey || event.metaKey || event.ctrlKey || isTypingTarget(event.target)) {
+    return;
+  }
+  const key = event.key.toLowerCase();
+  if (key === "a" && !state.focusedId) {
+    selectAllTrips();
+  } else if (key === "x") {
+    clearSelection();
+  } else if (key === "z") {
+    zoomToSelection();
+  } else {
+    return;
+  }
+  event.preventDefault();
 }
 
 async function start() {

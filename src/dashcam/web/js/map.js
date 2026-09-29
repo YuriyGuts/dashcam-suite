@@ -2,8 +2,8 @@
 
 import {COVERAGE_COLOR, COVERAGE_DOTS_MAX_ZOOM, COVERAGE_HALO_WEIGHT, COVERAGE_OPACITY, COVERAGE_WEIGHT, DOT, EARTH_CIRCUMFERENCE_M, GAP_WEIGHT, HALO_COLOR, HEAT_BLUR_PX, HEAT_CELL_M, HEAT_GRADIENT, HEAT_MIN_LEVEL, HEAT_MIN_OPACITY, HEAT_OVERLAP, HEAT_RADIUS_PX, LARGE_DRAW_TRIP_COUNT, MAP_STATUS_DELAY_MS, METERS_PER_DEGREE_LAT, ROUTE_HALO_WEIGHT, ROUTE_WEIGHT, SPEED_BUCKETS, UNKNOWN_SPEED_COLOR, WORLD_WIDTH_PX} from "./constants.js";
 import {dom} from "./elements.js";
-import {canPlayVideo, el, formatClockTime, formatCoordinates, formatDate, formatDuration, formatSpeed, hasGps, icon, nextPaint, speedColor, tripColor, withoutEmpty} from "./helpers.js";
-import {drawnSelection, filteredTrips, state} from "./state.js";
+import {canPlayVideo, el, formatClockTime, formatCoordinates, formatDate, formatDuration, formatSpeed, hasGps, icon, isTypingTarget, nextPaint, speedColor, tripColor, withoutEmpty} from "./helpers.js";
+import {drawnTripIds, filteredTrips, state} from "./state.js";
 import {loadGeometry, loadTrack, loadedTracks, nearestSampleIndex, sampleLatLng} from "./tracks.js";
 import {renderSidebar} from "./sidebar.js";
 import {focusTrip, setTripSelected} from "./actions.js";
@@ -126,7 +126,7 @@ function hoverActionsText() {
   return withoutEmpty([
     canPlayVideo(trip) ? "Click to play from here" : null,
     sample ? "C to copy" : null,
-    "H to hide",
+    canHideTrip(trip.id) ? "H to hide" : null,
   ]).join(DOT);
 }
 
@@ -205,10 +205,6 @@ async function copyToClipboard(text) {
   }
 }
 
-function isTypingTarget(target) {
-  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
-}
-
 async function copyHoveredPoint() {
   const point = hovered;
   if (!(await copyToClipboard(pointDetailsText(point.track, point.sample)))) {
@@ -243,9 +239,17 @@ export function onHoverShortcut(event) {
   }
 }
 
+// The route map draws the focused trip whether or not it is selected, so it cannot be hidden there.
+function canHideTrip(tripId) {
+  return state.mapMode === "coverage" || tripId !== state.focusedId;
+}
+
 // On the route map, hiding a trip clears its checkbox. On the coverage map, the trip stays
 // hidden until it is shown again from the list, or the page is reloaded.
 function hideTrip(tripId) {
+  if (!canHideTrip(tripId)) {
+    return;
+  }
   hideHover();
   if (state.mapMode === "coverage") {
     state.hiddenIds.add(tripId);
@@ -360,7 +364,7 @@ async function showDrawStatus(tripCount) {
 }
 
 async function drawRoutes(generation) {
-  const tripIds = drawnSelection().filter((id) => hasGps(state.tripsById.get(id)));
+  const tripIds = drawnTripIds().filter((id) => hasGps(state.tripsById.get(id)));
   if (!tripIds.length) {
     hideMapStatus();
   } else {

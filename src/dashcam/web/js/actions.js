@@ -30,12 +30,7 @@ export function focusTrip(tripId, {fit = true} = {}) {
     closeVideo();
   }
   state.focusedId = tripId;
-  // On the route map, the focused trip is drawn as part of the selection. The coverage map
-  // draws it on its own, so the selection stays as it is.
-  if (tripId && state.mapMode === "routes" && !state.selectedIds.includes(tripId)) {
-    state.selectedIds.push(tripId);
-    syncColorSlots();
-  }
+  syncColorSlots();
   writeHash({pushHistory: true});
   renderAll();
   if (tripId && fit) {

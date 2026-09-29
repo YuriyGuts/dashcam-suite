@@ -697,10 +697,14 @@ h1 {
 }
 
 .list-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px 2px var(--gutter);
+  background: var(--surface);
 }
 
 .list-title {

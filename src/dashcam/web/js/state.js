@@ -22,7 +22,8 @@ export const state = {
   hiddenIds: new Set(),
 };
 
-// Color slot of each selected trip. A trip keeps its color while it stays selected.
+// Color slot of each selected trip and of the focused trip. A trip keeps its color while it
+// stays selected or focused.
 export const colorSlots = new Map();
 
 export function readHash() {
@@ -60,15 +61,16 @@ export function writeHash({pushHistory = false} = {}) {
 }
 
 export function syncColorSlots() {
-  const selected = new Set(state.selectedIds);
+  const coloredIds = withFocused(state.selectedIds);
+  const colored = new Set(coloredIds);
   for (const id of [...colorSlots.keys()]) {
-    if (!selected.has(id)) {
+    if (!colored.has(id)) {
       colorSlots.delete(id);
     }
   }
   const usedSlots = new Set(colorSlots.values());
   let nextSlot = 0;
-  for (const id of state.selectedIds) {
+  for (const id of coloredIds) {
     if (colorSlots.has(id)) {
       continue;
     }
@@ -122,6 +124,17 @@ export function filteredTrips() {
 export function drawnSelection(visibleTrips = filteredTrips()) {
   const visibleIds = new Set(visibleTrips.map((trip) => trip.id));
   return state.selectedIds.filter((id) => visibleIds.has(id) || id === state.focusedId);
+}
+
+// Trips drawn on the route map: the drawn selection and the focused trip, which is drawn without
+// being selected.
+export function drawnTripIds() {
+  return withFocused(drawnSelection());
+}
+
+function withFocused(tripIds) {
+  const {focusedId} = state;
+  return focusedId && !tripIds.includes(focusedId) ? [...tripIds, focusedId] : tripIds;
 }
 
 export function aggregateStats(trips) {

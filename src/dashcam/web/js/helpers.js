@@ -150,6 +150,10 @@ export function hasGps(trip) {
   return trip.extraction_status === "ok";
 }
 
+export function isTypingTarget(target) {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
 export function isLocated(sample) {
   return LOCATED_STATUSES.has(sample.status) && sample.lat !== null && sample.lon !== null;
 }
