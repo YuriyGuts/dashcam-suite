@@ -1,6 +1,6 @@
 [project]
 name = "dashcam-suite"
-version = "0.1.1"
+version = "0.1.2"
 description = "Dashcam video toolkit: merge SD card clips, extract GPS coordinates, and visualize routes."
 readme = "README.md"
 license = "MIT"
